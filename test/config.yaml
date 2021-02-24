@@ -1,0 +1,63 @@
+name: bytepower_room
+room_server:
+    url: "localhost:8090"
+    
+redis_cluster:
+    addrs: 
+      - "127.0.0.1:30001"
+      - "127.0.0.1:30002"
+      - "127.0.0.1:30003"
+    pool_size: 600
+    min_idle_conns: 300
+    dial_timeout_ms: 1000
+    pool_timeout_ms: 1000
+    idle_timeout_ms: 12000
+    read_timeout_ms: 100
+    write_timeout_ms: 100
+
+log:
+    default:
+      console:
+        level: debug
+
+
+metric:
+  prefix: "bytepower_room"
+  host: "127.0.0.1:8125"
+
+# vector, collect access information
+event_service:
+  dsn: "127.0.0.1:7006"
+  timeout: 3
+  write_timeout: 0
+    
+# 用于同步数据的后端数据库
+db_cluster:
+    sharding_count: 5
+    shardings:
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
+        conn_max_lifetime_sec: 3600
+        max_open_conns: 100
+        min_idle_conns: 10
+        max_retries: 5
+        start_index: 0
+        end_index: 1
+
+      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+        conn_max_lifetime_sec: 3600
+        max_open_conns: 100
+        min_idle_conns: 10
+        max_retries: 5
+        start_index: 2
+        end_index: 4
+
+interval_tasks:
+        s3:
+            xxxx
+        access_info_database:
+            // redis or postgresql
+        tasks:
+        - name: sync_data_task
+          interval: 1 hour
+        - name: clear_inactive_data
+          interval: 1 day

@@ -1,0 +1,16 @@
+data_dir = "/var/lib/vector"
+
+[sources.src_tcp]
+  type = "socket"
+  address = "127.0.0.1:7006"
+  max_length = 16777216 # 16MB
+  mode = "tcp"
+
+[sinks.sink_file]
+  # General
+  type = "file" # required
+  inputs = ["src_tcp"] # required
+  healthcheck = true # optional, default
+  path = "/var/lib/vector/vector-%Y-%m-%d.log" # required
+  # Encoding
+  encoding.codec = "text"
