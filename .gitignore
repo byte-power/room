@@ -3,3 +3,6 @@ pgdata/
 vectordata/
 backup/
 room_service
+room_sync
+linux_room_service
+linux_room_sync
