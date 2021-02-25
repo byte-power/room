@@ -48,6 +48,7 @@ func StartServer() {
 
 	logger.Info("starting room server...", log.String("url", config.URL))
 	server := redcon.NewServer(config.URL, connServeHandler, connAcceptHandler, connCloseHandler)
+	server.AcceptError = connAcceptErrorHandler
 	listener, err := greuse.Listen("tcp", config.URL)
 	if err != nil {
 		logger.Error("start room server failed", log.Error(err))
@@ -109,6 +110,11 @@ func connAcceptHandler(conn redcon.Conn) bool {
 		log.Int("transaction_count", transactionManager.transactionCount()),
 	)
 	return true
+}
+
+func connAcceptErrorHandler(err error) {
+	base.GetMetricService().MetricIncrease("error.accept")
+	base.GetServerLogger().Error("accept error", log.Error(err))
 }
 
 func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
