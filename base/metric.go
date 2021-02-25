@@ -20,11 +20,11 @@ type MetricClient struct {
 // 初始化Metric (statsd)
 //
 // Returns:
-//   - metric连接对象
+//   - metric连接对象的指针
 //   - 测试连接可能出现的错误
-func InitMetric(config MetricConfig) (MetricClient, error) {
+func InitMetric(config MetricConfig) (*MetricClient, error) {
 	if err := config.check(); err != nil {
-		return MetricClient{}, err
+		return nil, err
 	}
 	var opts []statsd.Option
 	opts = append(opts, statsd.Address(config.Host))
@@ -46,7 +46,7 @@ func InitMetric(config MetricConfig) (MetricClient, error) {
 	if len(config.Tags) > 0 {
 		opts = append(opts, statsd.Tags(config.Tags...))
 	}
-	c := MetricClient{}
+	c := &MetricClient{}
 	client, err := statsd.New(opts...)
 	c.Client = client
 	return c, err

@@ -14,8 +14,8 @@ var dbCluster *DBCluster
 var writtenRecordDBCluster *DBCluster
 var accessedRecordDBCluster *DBCluster
 var eventService *EventService
-var metricService MetricClient
-var taskMetricService MetricClient
+var metricService *MetricClient
+var taskMetricService *MetricClient
 var loggers map[string]*log.Logger
 var serverConfig Config
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -126,7 +126,7 @@ func GetEventService() *EventService {
 	return eventService
 }
 
-func GetMetricService() MetricClient {
+func GetMetricService() *MetricClient {
 	return metricService
 }
 
@@ -138,7 +138,7 @@ func GetTaskLogger() *log.Logger {
 	return loggers["task"]
 }
 
-func GetTaskMetricService() MetricClient {
+func GetTaskMetricService() *MetricClient {
 	return taskMetricService
 }
 
