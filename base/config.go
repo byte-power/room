@@ -234,6 +234,7 @@ type SyncServiceConfig struct {
 	AccessedRecordDBCluster DBClusterConfig      `yaml:"accessed_record_db_cluster"`
 	SQS                     SQSConfig            `yaml:"sqs"`
 	S3                      S3Config             `yaml:"s3"`
+	Coordinator             CoordinatorConfig    `yaml:"coordinator"`
 	SyncRecordTask          SyncRecordTaskConfig `yaml:"sync_record_task"`
 	SyncKeyTask             SyncKeyTaskConfig    `yaml:"sync_key_task"`
 	CleanKeyTask            CleanKeyTaskConfig   `yaml:"clean_key_task"`
@@ -253,6 +254,9 @@ func (config SyncServiceConfig) check() error {
 		return fmt.Errorf("sync.%w", err)
 	}
 	if err := config.S3.check(); err != nil {
+		return fmt.Errorf("sync.%w", err)
+	}
+	if err := config.Coordinator.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
 	if err := config.SyncRecordTask.check(); err != nil {
@@ -327,6 +331,21 @@ type S3Config struct {
 func (config S3Config) check() error {
 	if err := config.Session.check(); err != nil {
 		return fmt.Errorf("s3.%w", err)
+	}
+	return nil
+}
+
+type CoordinatorConfig struct {
+	Name  string   `yaml:"name"`
+	Addrs []string `yaml:"addrs"`
+}
+
+func (config CoordinatorConfig) check() error {
+	if config.Name == "" {
+		return errors.New("coordinator.name should not be empty")
+	}
+	if len(config.Addrs) == 0 {
+		return errors.New("coordinator.addrs should not be empty")
 	}
 	return nil
 }

@@ -21,16 +21,26 @@ func main() {
 	if err := base.InitSyncService(*configPath); err != nil {
 		panic(err)
 	}
+	coordinatorConfig := base.GetServerConfig().SyncService.Coordinator
+	coordinator := task.NewCoordinatorFromRedisCluster(coordinatorConfig.Name, coordinatorConfig.Addrs)
 	syncRecordTaskConfig := base.GetServerConfig().SyncService.SyncRecordTask
 	syncRecordTask := "sync_records"
 	if !syncRecordTaskConfig.Off {
-		task.Periodic(syncRecordTask, service.SyncRecordsTask).EveryMinutes(syncRecordTaskConfig.IntervalMinutes).AtSecondInMinute(20)
+		job, err := task.Periodic(syncRecordTask, service.SyncRecordsTask).EveryMinutes(syncRecordTaskConfig.IntervalMinutes).AtSecondInMinute(20)
+		if err != nil {
+			panic(err)
+		}
+		job.SetCoordinate(coordinator)
 	}
 
 	syncKeyTaskConfig := base.GetServerConfig().SyncService.SyncKeyTask
 	syncKeyTask := "sync_keys"
 	if !syncKeyTaskConfig.Off {
-		task.Periodic(syncKeyTask, service.SyncKeysTask).EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
+		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask).EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
+		if err != nil {
+			panic(err)
+		}
+		job.SetCoordinate(coordinator)
 	}
 
 	cleanKeyTaskConfig := base.GetServerConfig().SyncService.CleanKeyTask
@@ -38,7 +48,11 @@ func main() {
 	if !cleanKeyTaskConfig.Off {
 		cleanKeyTaskInterval := cleanKeyTaskConfig.IntervalMinutes
 		inactiveDuration := cleanKeyTaskConfig.InactiveDuration
-		task.Periodic(cleanKeyTask, service.CleanKeysTask, inactiveDuration).EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
+		job, err := task.Periodic(cleanKeyTask, service.CleanKeysTask, inactiveDuration).EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
+		if err != nil {
+			panic(err)
+		}
+		job.SetCoordinate(coordinator)
 	}
 	go monitorScheduler()
 	task.StartScheduler()

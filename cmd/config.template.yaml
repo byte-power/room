@@ -115,6 +115,12 @@ sync:
     aws_access_key_id: {aws_access_key_id}
     aws_secret_access_key: {aws_secret_access_key}
     region: {aws_region}
+  coordinator:
+    name: "room_sync"
+    addrs:
+      - "127.0.0.1:30001"
+      - "127.0.0.1:30002"
+      - "127.0.0.1:30003"
   sync_record_task:
     interval_minutes: 5
     off: false
