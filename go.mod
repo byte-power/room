@@ -4,7 +4,7 @@ go 1.14
 
 require (
 	github.com/aws/aws-sdk-go v1.36.15
-	github.com/byte-power/gorich v1.0.3
+	github.com/byte-power/gorich v1.0.4
 	github.com/go-pg/pg/v10 v10.7.3
 	github.com/go-redis/redis/v8 v8.4.3
 	github.com/gogf/greuse v1.1.0
