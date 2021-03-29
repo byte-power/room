@@ -227,19 +227,26 @@ func preProcessKey(key string) error {
 	// if !iskeyValid(key) {
 	// 	return newInvalidKeyError(key)
 	// }
+	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
+	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
+	var err error
 
-	needLoaded, err := isKeyNeedLoaded(key)
-	if err != nil {
-		return err
+	for i := 0; i < loadRetryTimes; i++ {
+		err = loadKey(key)
+		if err != nil {
+			if errors.Is(err, errLoadConflict) {
+				time.Sleep(loadRetryInterval)
+				base.GetServerLogger().Info(
+					"load key conflict, will retry after wait",
+					log.String("key", key),
+					log.Int("retry_times", i+1),
+				)
+				continue
+			}
+			return newLoadError(err)
+		}
 	}
-	if !needLoaded {
-		return nil
-	}
-
-	if err := loadKey(key); err != nil {
-		return newLoadError(err)
-	}
-	return nil
+	return err
 }
 
 func getTransactionIfNeeded(conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {

@@ -36,6 +36,13 @@ func generateRandString(n int) string {
 // 2. Load key from database to redis
 // 3. Set metadata loaded = 1
 func loadKey(key string) error {
+	needLoaded, err := isKeyNeedLoaded(key)
+	if err != nil {
+		return err
+	}
+	if !needLoaded {
+		return nil
+	}
 	client := base.GetRedisCluster()
 	lockKey := getLockKey(key)
 	isLockSet, err := client.SetNX(contextTODO, lockKey, 1, time.Second).Result()

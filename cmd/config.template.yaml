@@ -42,6 +42,10 @@ event_service:
     worker_process_interval: 1m
     worker_drain_duration: 5s
 
+load_key:
+  retry_times: 5
+  retry_interval: "2ms"
+
     
 # 用于同步数据的后端数据库
 db_cluster:
