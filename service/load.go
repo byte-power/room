@@ -2,17 +2,19 @@ package service
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/base/log"
 	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 )
 
 var errDataFormatError = errors.New("data format is invalid")
-var errLoadConflict = errors.New("load key conflict")
+var errLoadTimeout = errors.New("load key timeout")
 
 func newParseError(err error) error {
 	return fmt.Errorf("parse value error, %w", err)
@@ -32,41 +34,111 @@ func generateRandString(n int) string {
 	return string(b)
 }
 
-// 1. Get lock, lock is set to avoid duplicate load
-// 2. Load key from database to redis
-// 3. Set metadata loaded = 1
+// 1. check if key exists: if key exists, return else go to step 2
+// 2. check if key needs loaded: if not needs, return, else go to step 3
+// 3. load key from database
 func loadKey(key string) error {
+	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
+	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
+	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
+	logger := base.GetServerLogger()
+	metric := base.GetMetricService()
+	var loadErr error
+	for i := 0; i < loadRetryTimes; i++ {
+		needLoaded, err := isKeyNeedLoaded(key)
+		if err != nil {
+			return err
+		}
+		if !needLoaded {
+			return nil
+		}
+		if err := loadKeyOnce(key, loadTimeout); err != nil {
+			loadErr = err
+			if isRetryLoadError(err) {
+				time.Sleep(loadRetryInterval)
+				metric.MetricIncrease("loadkey.retry")
+				logger.Info("load key retry", log.String("key", key), log.Int("load_times", i+1))
+				continue
+			}
+			metric.MetricIncrease("error.loadkey")
+			return err
+		}
+	}
+	return loadErr
+}
+
+func isRetryLoadError(err error) bool {
+	return errors.Is(err, errLoadTimeout) || errors.Is(err, redis.TxFailedErr)
+}
+
+// loadingKeys is a map from key to *sync.Once
+var loadingKeys sync.Map
+
+func loadKeyOnce(key string, loadTimeout time.Duration) error {
+	once, _ := loadingKeys.LoadOrStore(key, &sync.Once{})
+	var err error
+	once.(*sync.Once).Do(
+		func() {
+			startTime := time.Now()
+			metric := base.GetMetricService()
+			logger := base.GetServerLogger()
+			defer loadingKeys.Delete(key)
+			ch := make(chan error, 1)
+			// TODO: may add context to cancel loadKeyFromDBToRedis when timeout.
+			go loadKeyFromDBToRedis(key, ch)
+			select {
+			case e := <-ch:
+				err = e
+			case <-time.After(loadTimeout):
+				err = errLoadTimeout
+			}
+			loadDuration := time.Since(startTime)
+			if err != nil {
+				logger.Error(
+					"load key error",
+					log.String("key", key),
+					log.Error(err),
+					log.String("duration", loadDuration.String()))
+			} else {
+				logger.Info(
+					"load key success",
+					log.String("key", key),
+					log.String("duration", loadDuration.String()))
+			}
+			metric.MetricTimeDuration("loadkey.duration", time.Since(startTime))
+		})
+	return err
+}
+
+// 1. Load key from database to redis
+// 2. Set metadata loaded = 1
+func loadKeyFromDBToRedis(key string, ch chan error) {
 	client := base.GetRedisCluster()
-	lockKey := getLockKey(key)
-	isLockSet, err := client.SetNX(contextTODO, lockKey, 1, time.Second).Result()
-	if err != nil {
-		return err
-	}
-	if !isLockSet {
-		return errLoadConflict
-	}
-	defer client.Del(contextTODO, lockKey)
 	model, err := loadDataByKey(key)
 	if err != nil {
-		return err
+		ch <- err
+		return
 	}
 	if model == nil {
-		return setLoadedMeta(key)
+		ch <- setLoadedMeta(key)
+		return
 	}
 	var duration time.Duration
 	if !model.ExpireAt.IsZero() {
 		duration = time.Until(model.ExpireAt)
 		// key is expired
 		if duration <= 0 {
-			return setLoadedMeta(key)
+			ch <- setLoadedMeta(key)
+			return
 		}
 	}
-	tempKey := fmt.Sprintf("%s:temp:%s", key, generateRandString(5))
+	tempKey := fmt.Sprintf("%s:temp:%s", key, generateRandString(10))
 	defer client.Del(contextTODO, tempKey)
 	switch model.Type {
 	case stringType:
 		if _, err = client.Set(contextTODO, tempKey, model.Value, 0).Result(); err != nil {
-			return err
+			ch <- err
+			return
 		}
 	case setType, hashType, listType, zsetType:
 		var size int
@@ -77,13 +149,16 @@ func loadKey(key string) error {
 		}
 		slices, err := loadDataIntoSlices(model.Value, size)
 		if err != nil {
-			return newParseError(err)
+			ch <- newParseError(err)
+			return
 		}
 		if err := loadDataIntoRedis(tempKey, slices, model.Type); err != nil {
-			return err
+			ch <- err
+			return
 		}
 	default:
-		return fmt.Errorf("data type %s is not supported", model.Type)
+		ch <- fmt.Errorf("data type %s is not supported", model.Type)
+		return
 	}
 	metaKey := getMetaKey(key)
 	err = client.Watch(
@@ -99,7 +174,7 @@ func loadKey(key string) error {
 			})
 			return err
 		}, key, metaKey)
-	return err
+	ch <- err
 }
 
 func getLockKey(key string) string {

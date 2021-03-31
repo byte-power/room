@@ -220,22 +220,10 @@ func preProcessCommand(command commands.Commander) error {
 	return nil
 }
 
-// 1. check if key exists: if key exists, return else go to step 2
-// 2. check if key needs loaded: if not needs, return, else go to step 3
-// 3. load key from database
 func preProcessKey(key string) error {
 	// if !iskeyValid(key) {
 	// 	return newInvalidKeyError(key)
 	// }
-
-	needLoaded, err := isKeyNeedLoaded(key)
-	if err != nil {
-		return err
-	}
-	if !needLoaded {
-		return nil
-	}
-
 	if err := loadKey(key); err != nil {
 		return newLoadError(err)
 	}
