@@ -45,7 +45,7 @@ func loadKey(key string) error {
 	metric := base.GetMetricService()
 	var loadErr error
 	for i := 0; i < loadRetryTimes; i++ {
-		needLoaded, err := isKeyNeedLoaded(key)
+		needLoaded, err := isKeyNeedLoad(key)
 		if err != nil {
 			return err
 		}

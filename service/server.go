@@ -301,7 +301,7 @@ func iskeyValid(key string) bool {
 	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex < rightBraceIndex)
 }
 
-func isKeyNeedLoaded(key string) (bool, error) {
+func isKeyNeedLoad(key string) (bool, error) {
 	redisClient := base.GetRedisCluster()
 	commands, err := redisClient.Pipelined(
 		context.TODO(),

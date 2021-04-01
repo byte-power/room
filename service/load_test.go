@@ -466,7 +466,7 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	metaKey := getMetaKey(key)
 	// both key and meta key do not exist
 	testEmptyKeysInRedis(key, metaKey)
-	needLoaded, err := isKeyNeedLoaded(key)
+	needLoaded, err := isKeyNeedLoad(key)
 	assert.True(t, needLoaded)
 	assert.Nil(t, err)
 	testEmptyKeysInRedis(key, metaKey)
@@ -474,7 +474,7 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	// key exists, meta key does not exist
 	testEmptyKeysInRedis(key, metaKey)
 	client.Set(testContextTODO, key, "value", 0)
-	needLoaded, err = isKeyNeedLoaded(key)
+	needLoaded, err = isKeyNeedLoad(key)
 	assert.False(t, needLoaded)
 	assert.Nil(t, err)
 	testEmptyKeysInRedis(key, metaKey)
@@ -482,7 +482,7 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	// key does not exist, meta key exists
 	testEmptyKeysInRedis(key, metaKey)
 	client.HSet(testContextTODO, metaKey, "loaded", "1")
-	needLoaded, err = isKeyNeedLoaded(key)
+	needLoaded, err = isKeyNeedLoad(key)
 	assert.False(t, needLoaded)
 	assert.Nil(t, err)
 	testEmptyKeysInRedis(key, metaKey)
@@ -491,7 +491,7 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	testEmptyKeysInRedis(key, metaKey)
 	client.Set(testContextTODO, key, "value", 0)
 	client.HSet(testContextTODO, metaKey, "loaded", "1")
-	needLoaded, err = isKeyNeedLoaded(key)
+	needLoaded, err = isKeyNeedLoad(key)
 	assert.False(t, needLoaded)
 	assert.Nil(t, err)
 	testEmptyKeysInRedis(key, metaKey)
@@ -499,7 +499,7 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	// metaKey exist, but loaded filed not exist
 	testEmptyKeysInRedis(key, metaKey)
 	client.HSet(testContextTODO, metaKey, "loaded_test", "1")
-	needLoaded, err = isKeyNeedLoaded(key)
+	needLoaded, err = isKeyNeedLoad(key)
 	assert.True(t, needLoaded)
 	assert.Nil(t, err)
 	testEmptyKeysInRedis(key, metaKey)
@@ -507,7 +507,7 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	// metaKey exist, but loaded filed != "1"
 	testEmptyKeysInRedis(key, metaKey)
 	client.HSet(testContextTODO, metaKey, "loaded", "2")
-	needLoaded, err = isKeyNeedLoaded(key)
+	needLoaded, err = isKeyNeedLoad(key)
 	assert.True(t, needLoaded)
 	assert.Nil(t, err)
 	testEmptyKeysInRedis(key, metaKey)
