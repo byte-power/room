@@ -63,6 +63,17 @@ func InitServices(configPath string) error {
 		return nil
 	}
 	eventService = event
+	d, err := time.ParseDuration(serverConfig.LoadKey.RawRetryInterval)
+	if err != nil {
+		return err
+	}
+	serverConfig.LoadKey.retryInterval = d
+
+	d, err = time.ParseDuration(serverConfig.LoadKey.RawLoadTimeout)
+	if err != nil {
+		return err
+	}
+	serverConfig.LoadKey.loadTimeout = d
 	return nil
 }
 

@@ -24,6 +24,7 @@ type Config struct {
 	EventService EventServiceConfig                `yaml:"event_service"`
 	Metric       MetricConfig                      `yaml:"metric"`
 	Log          map[string]map[string]interface{} `yaml:"log"`
+	LoadKey      LoadKeyConfig                     `yaml:"load_key"`
 	SyncService  SyncServiceConfig                 `yaml:"sync"`
 }
 
@@ -45,6 +46,9 @@ func (config Config) check() error {
 	}
 	if len(config.Log) == 0 {
 		return errors.New("config.log should not be empty.")
+	}
+	if err := config.LoadKey.check(); err != nil {
+		return fmt.Errorf("config.%w", err)
 	}
 	if err := config.SyncService.check(); err != nil {
 		return fmt.Errorf("config.%w", err)
@@ -226,6 +230,47 @@ func (config MetricConfig) check() error {
 		return errors.New("metric.tags count should be even")
 	}
 	return nil
+}
+
+type LoadKeyConfig struct {
+	RetryTimes       int    `yaml:"retry_times"`
+	RawRetryInterval string `yaml:"retry_interval"`
+	RawLoadTimeout   string `yaml:"load_timeout"`
+	loadTimeout      time.Duration
+	retryInterval    time.Duration
+}
+
+func (config LoadKeyConfig) check() error {
+	if config.RetryTimes <= 0 {
+		return fmt.Errorf("load_key.retry_times=%d, should be greater than 0", config.RetryTimes)
+	}
+	d, err := time.ParseDuration(config.RawRetryInterval)
+	if err != nil {
+		return fmt.Errorf("load_key.retry_interval=%s, should be in valid duration format", config.RawRetryInterval)
+	}
+	if d <= 0 {
+		return fmt.Errorf("load_key.retry_interval=%s, duration should be positive", config.RawRetryInterval)
+	}
+	d, err = time.ParseDuration(config.RawLoadTimeout)
+	if err != nil {
+		return fmt.Errorf("load_key.load_timeout=%s, should be in valid duration format", config.RawLoadTimeout)
+	}
+	if d <= 0 {
+		return fmt.Errorf("load_key.load_timeout=%s, duration should be positive", config.RawLoadTimeout)
+	}
+	return nil
+}
+
+func (config LoadKeyConfig) GetRetryTimes() int {
+	return config.RetryTimes
+}
+
+func (config LoadKeyConfig) GetRetryInterval() time.Duration {
+	return config.retryInterval
+}
+
+func (config LoadKeyConfig) GetLoadTimeout() time.Duration {
+	return config.loadTimeout
 }
 
 type SyncServiceConfig struct {
