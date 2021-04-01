@@ -52,7 +52,8 @@ func loadKey(key string) error {
 		if !needLoaded {
 			return nil
 		}
-		if err := loadKeyOnce(key, loadTimeout); err != nil {
+		loaded, err := loadKeyOnce(key, loadTimeout)
+		if err != nil {
 			loadErr = err
 			if isRetryLoadError(err) {
 				time.Sleep(loadRetryInterval)
@@ -62,6 +63,9 @@ func loadKey(key string) error {
 			}
 			metric.MetricIncrease("error.loadkey")
 			return err
+		}
+		if loaded {
+			return nil
 		}
 	}
 	return loadErr
@@ -74,8 +78,9 @@ func isRetryLoadError(err error) bool {
 // loadingKeys is a map from key to *sync.Once
 var loadingKeys sync.Map
 
-func loadKeyOnce(key string, loadTimeout time.Duration) error {
+func loadKeyOnce(key string, loadTimeout time.Duration) (bool, error) {
 	once, _ := loadingKeys.LoadOrStore(key, &sync.Once{})
+	var loaded bool
 	var err error
 	once.(*sync.Once).Do(
 		func() {
@@ -100,6 +105,7 @@ func loadKeyOnce(key string, loadTimeout time.Duration) error {
 					log.Error(err),
 					log.String("duration", loadDuration.String()))
 			} else {
+				loaded = true
 				logger.Info(
 					"load key success",
 					log.String("key", key),
@@ -107,7 +113,7 @@ func loadKeyOnce(key string, loadTimeout time.Duration) error {
 			}
 			metric.MetricTimeDuration("loadkey.duration", time.Since(startTime))
 		})
-	return err
+	return loaded, err
 }
 
 // 1. Load key from database to redis
