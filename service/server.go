@@ -196,7 +196,9 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		log.String("command", command.String()),
 		log.String("result", result.String()),
 	)
-	metric.MetricTimeDuration("process.command.duration", time.Since(serveStartTime))
+	duration := time.Since(serveStartTime)
+	logger.Info("execute command", log.String("command", command.String()), log.String("duration", duration.String()))
+	metric.MetricTimeDuration("process.command.duration", duration)
 }
 
 func isTransactionNeeded(command commands.Commander) bool {
