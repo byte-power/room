@@ -120,7 +120,14 @@ func loadKeyOnce(key string, loadTimeout time.Duration) (bool, error) {
 // 2. Set metadata loaded = 1
 func loadKeyFromDBToRedis(key string, ch chan error) {
 	client := base.GetRedisCluster()
+	logger := base.GetServerLogger()
+	startTime := time.Now()
 	model, err := loadDataByKey(key)
+	logger.Info(
+		"load from database",
+		log.String("key", key),
+		log.String("duration", time.Since(startTime).String()),
+	)
 	if err != nil {
 		ch <- err
 		return
