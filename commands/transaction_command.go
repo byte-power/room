@@ -9,25 +9,26 @@ import (
 )
 
 type Transaction struct {
-	tx       *redis.Tx
-	keys     []string
-	started  bool
-	commands []redis.Cmder
-	closed   bool
+	tx          *redis.Tx
+	watchedKeys []string
+	keys        []string
+	started     bool
+	commands    []redis.Cmder
+	closed      bool
 }
 
-func NewTransaction(keys ...string) (*Transaction, error) {
+func NewTransaction() *Transaction {
+	return &Transaction{}
+}
+
+func newRedisTransaction(keys ...string) (*redis.Tx, error) {
 	if len(keys) == 0 {
-		return &Transaction{}, nil
+		return base.GetRedisCluster().NewTransation(contextTODO, "")
 	}
 	if !redis.AreKeysInSameSlot(keys...) {
 		return nil, errors.New("ERR keys in transaction should be in the same slot")
 	}
-	tx, err := base.GetRedisCluster().NewTransation(contextTODO, keys[0])
-	if err != nil {
-		return nil, err
-	}
-	return &Transaction{tx: tx, keys: keys}, nil
+	return base.GetRedisCluster().NewTransation(contextTODO, keys[0])
 }
 
 func (transaction *Transaction) multi() RESPData {
@@ -38,6 +39,21 @@ func (transaction *Transaction) multi() RESPData {
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
+func (transaction *Transaction) reset() error {
+	if transaction.tx != nil {
+		if err := transaction.tx.Close(contextTODO); err != nil {
+			return err
+		}
+		transaction.tx = nil
+	}
+	transaction.watchedKeys = make([]string, 0)
+	transaction.keys = make([]string, 0)
+	transaction.started = false
+	transaction.commands = make([]redis.Cmder, 0)
+	transaction.closed = false
+	return nil
+}
+
 func (transaction *Transaction) watch(keys ...string) RESPData {
 	if transaction.started {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR WATCH inside MULTI is not allowed")}
@@ -45,20 +61,27 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 	if len(keys) == 0 {
 		return convertErrorToRESPData(newWrongNumberOfArgumentsError("watch"))
 	}
+
+	if transaction.tx != nil {
+		if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.watchedKeys, keys...)...) {
+			if err := transaction.reset(); err != nil {
+				return convertErrorToRESPData(err)
+			}
+		}
+	}
+
 	if transaction.tx == nil {
-		tx, err := NewTransaction(keys...)
+		tx, err := newRedisTransaction(keys...)
 		if err != nil {
 			return convertErrorToRESPData(err)
 		}
-		transaction.tx = tx.tx
-		if _, err := transaction.tx.Watch(contextTODO, keys...).Result(); err != nil {
-			return convertErrorToRESPData(err)
-		}
-	} else {
-		if _, err := transaction.tx.Watch(contextTODO, keys...).Result(); err != nil {
-			return convertErrorToRESPData(err)
-		}
+		transaction.tx = tx
 	}
+
+	if _, err := transaction.tx.Watch(contextTODO, keys...).Result(); err != nil {
+		return convertErrorToRESPData(err)
+	}
+	transaction.watchedKeys = append(transaction.watchedKeys, keys...)
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
@@ -68,15 +91,19 @@ func (transaction *Transaction) addCommand(command Commander) RESPData {
 		transaction.commands = append(transaction.commands, command.Cmd())
 		transaction.keys = append(transaction.keys, append(command.ReadKeys(), command.WriteKeys()...)...)
 		if (transaction.tx == nil) && len(transaction.keys) != 0 {
-			tx, err := NewTransaction(transaction.keys...)
+			tx, err := newRedisTransaction(transaction.keys...)
 			if err != nil {
 				return convertErrorToRESPData(err)
 			}
-			transaction.tx = tx.tx
+			transaction.tx = tx
 		}
 		result = RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}
 	} else {
-		result = ExecuteCommand(command)
+		if command.Name() == "unwatch" {
+			result = transaction.unwatch()
+		} else {
+			result = ExecuteCommand(command)
+		}
 	}
 	return result
 }
@@ -98,19 +125,27 @@ func (transaction *Transaction) exec() RESPData {
 	if !redis.AreKeysInSameSlot(transaction.keys...) {
 		return convertErrorToRESPData(errors.New("ERR keys in transaction should be in the same slot"))
 	}
+	if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.keys, transaction.watchedKeys...)...) {
+		if transaction.tx != nil {
+			if err := transaction.tx.Close(contextTODO); err != nil {
+				logger := base.GetServerLogger()
+				logger.Error(
+					"close redis transaction error",
+					log.String("command", "exec"),
+					log.Error(err),
+				)
+			}
+			transaction.tx = nil
+			transaction.watchedKeys = make([]string, 0)
+		}
+	}
 
 	if transaction.tx == nil {
-		var tx *Transaction
-		var err error
-		if len(transaction.keys) > 0 {
-			tx, err = NewTransaction(transaction.keys...)
-		} else {
-			tx, err = NewTransaction("")
-		}
+		tx, err := newRedisTransaction(transaction.keys...)
 		if err != nil {
 			return convertErrorToRESPData(err)
 		}
-		transaction.tx = tx.tx
+		transaction.tx = tx
 	}
 
 	pipeline := transaction.tx.TxPipeline()
@@ -138,8 +173,14 @@ func (transaction *Transaction) exec() RESPData {
 func (transaction *Transaction) Close() error {
 	transaction.closed = true
 	if transaction.tx != nil {
-		return transaction.tx.Close(contextTODO)
+		if err := transaction.tx.Close(contextTODO); err != nil {
+			return err
+		}
+		transaction.tx = nil
 	}
+	transaction.watchedKeys = make([]string, 0)
+	transaction.keys = make([]string, 0)
+	transaction.commands = make([]redis.Cmder, 0)
 	return nil
 }
 
@@ -164,7 +205,10 @@ func (transaction *Transaction) discard() RESPData {
 
 func (transaction *Transaction) unwatch() RESPData {
 	if transaction.tx != nil {
-		transaction.tx.Unwatch(contextTODO)
+		if _, err := transaction.tx.Unwatch(contextTODO).Result(); err != nil {
+			return convertErrorToRESPData(err)
+		}
+		transaction.watchedKeys = make([]string, 0)
 	}
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
@@ -179,8 +223,6 @@ func (transaction *Transaction) Process(command Commander) RESPData {
 		result = transaction.exec()
 	} else if command.Name() == "discard" {
 		result = transaction.discard()
-	} else if command.Name() == "unwatch" {
-		result = transaction.unwatch()
 	} else {
 		result = transaction.addCommand(command)
 	}

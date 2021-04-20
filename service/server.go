@@ -234,29 +234,19 @@ func preProcessKey(key string) error {
 
 func getTransactionIfNeeded(conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
 	logger := base.GetServerLogger()
-	transaction := transactionManager.getTransaction(conn)
 	metric := base.GetMetricService()
+	transaction := transactionManager.getTransaction(conn)
 	if transaction == nil {
 		if isTransactionNeeded(command) {
+			transaction = commands.NewTransaction()
+			transactionManager.addTransaction(conn, transaction)
 			metric.MetricIncrease("transaction.new")
-			tx, err := commands.NewTransaction(append(command.ReadKeys(), command.WriteKeys()...)...)
-			if err != nil {
-				metric.MetricIncrease("error.transaction.new")
-				logger.Error(
-					"new transaction error",
-					log.String("command", command.String()),
-					log.Error(err),
-				)
-				return nil, err
-			}
-			transaction = tx
 			logger.Debug(
 				"create transaction",
 				log.String("command", command.Name()),
 				log.String("remote_addr", conn.RemoteAddr()),
 				log.String("local_addr", conn.NetConn().LocalAddr().String()),
 			)
-			transactionManager.addTransaction(conn, transaction)
 		}
 	}
 	return transaction, nil
