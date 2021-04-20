@@ -48,7 +48,7 @@ func InitServices(configPath string) error {
 	}
 	metricService = metric
 
-	rdsCluster, err := NewRedisClusterFromConfig(config.RedisCluster)
+	rdsCluster, err := NewRedisClusterFromConfig(config.RedisCluster, GetServerLogger())
 	if err != nil {
 		return err
 	}
