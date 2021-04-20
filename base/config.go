@@ -127,6 +127,7 @@ func NewRedisClusterFromConfig(config RedisClusterConfig) (*redis.ClusterClient,
 		PoolTimeout:  time.Duration(config.PoolTimeoutMS) * time.Millisecond,
 		PoolSize:     config.PoolSize,
 	}
+	fmt.Printf("trace redis: options:%+v\n", *opt)
 	return redis.NewClusterClient(opt), nil
 }
 

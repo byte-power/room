@@ -61,7 +61,14 @@ func newDBClient(config DBConfig, logger *log.Logger) (*pg.DB, error) {
 	opt.MaxConnAge = time.Second * time.Duration(config.ConnMaxLifetimeSeconds)
 	opt.MinIdleConns = config.MinIdleConns
 	opt.PoolSize = config.MaxOpenConns
+	//TODO: add in config
 	opt.IdleTimeout = time.Hour
+	opt.ReadTimeout = time.Second
+	opt.DialTimeout = time.Second
+	opt.WriteTimeout = time.Second
+	opt.MinRetryBackoff = 5 * time.Millisecond
+	opt.MaxRetryBackoff = 10 * time.Millisecond
+
 	if config.MaxRetries == 0 {
 		opt.MaxRetries = defaultDBConnMaxRetries
 	} else {
