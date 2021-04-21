@@ -52,15 +52,12 @@ func InitServices(configPath string) error {
 	if err != nil {
 		return err
 	}
-	redisHook := newRedisRecordHook(
-		metricService, GetServerLogger(),
-		redisCommandDurationMetricKey,
-		redisPipelineDurationMetricKey)
+	redisHook := newRedisRecordHook(metricService, GetServerLogger())
 
 	rdsCluster.AddHook(redisHook)
 	redisCluster = rdsCluster
 
-	databaseCluster, err := NewDBClusterFromConfig(config.DBCluster, GetServerLogger())
+	databaseCluster, err := NewDBClusterFromConfig(config.DBCluster, GetServerLogger(), GetMetricService())
 	if err != nil {
 		return err
 	}
@@ -106,12 +103,12 @@ func InitSyncService(configPath string) error {
 	}
 	taskMetricService = metric
 
-	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster, GetServerLogger())
+	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster, GetTaskLogger(), GetTaskMetricService())
 	if err != nil {
 		return err
 	}
 	writtenRecordDBCluster = writtenRecordCluster
-	accessedRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.AccessedRecordDBCluster, GetServerLogger())
+	accessedRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.AccessedRecordDBCluster, GetTaskLogger(), GetTaskMetricService())
 	if err != nil {
 		return err
 	}
@@ -177,19 +174,12 @@ const (
 )
 
 type redisRecordHook struct {
-	metricClient      *MetricClient
-	logger            *log.Logger
-	commandMetricKey  string
-	pipelineMetricKey string
+	metricClient *MetricClient
+	logger       *log.Logger
 }
 
-func newRedisRecordHook(metricClient *MetricClient, logger *log.Logger, commandMetricKey, pipelineMetricKey string) redisRecordHook {
-	return redisRecordHook{
-		metricClient:      metricClient,
-		logger:            logger,
-		commandMetricKey:  commandMetricKey,
-		pipelineMetricKey: pipelineMetricKey,
-	}
+func newRedisRecordHook(metricClient *MetricClient, logger *log.Logger) redisRecordHook {
+	return redisRecordHook{metricClient: metricClient, logger: logger}
 }
 
 func (hook redisRecordHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
@@ -199,12 +189,12 @@ func (hook redisRecordHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) 
 func (hook redisRecordHook) AfterProcess(ctx context.Context, cmd redis.Cmder) error {
 	if startTime, ok := ctx.Value(redisCommandStartTimeContextKey).(time.Time); ok {
 		duration := time.Since(startTime)
-		hook.logger.Info(
-			"redis command latency",
+		hook.logger.Debug(
+			"execute redis command",
 			log.String("command", cmd.String()),
 			log.String("duration", duration.String()),
 		)
-		metricService.MetricTimeDuration(hook.commandMetricKey, duration)
+		hook.metricClient.MetricTimeDuration(redisCommandDurationMetricKey, duration)
 	}
 	return nil
 }
@@ -223,12 +213,12 @@ func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []red
 		}
 		sb.WriteString("]")
 		duration := time.Since(startTime)
-		hook.logger.Info(
-			"redis pipeline latency",
+		hook.logger.Debug(
+			"execute redis pipeline",
 			log.String("commands", sb.String()),
 			log.String("duration", duration.String()),
 		)
-		metricService.MetricTimeDuration(hook.pipelineMetricKey, duration)
+		hook.metricClient.MetricTimeDuration(redisPipelineDurationMetricKey, duration)
 	}
 	return nil
 }

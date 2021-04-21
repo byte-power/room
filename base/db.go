@@ -32,14 +32,14 @@ type Model interface {
 	GetTablePrefix() string
 }
 
-func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger) (*DBCluster, error) {
+func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metricClient *MetricClient) (*DBCluster, error) {
 	shardingCount := config.ShardingCount
 	if shardingCount <= 0 {
 		return nil, errors.New("sharding_count should be greater than 0")
 	}
 	dbCluster := &DBCluster{shardingCount: shardingCount, clients: make([]dbClient, 0)}
 	for _, cfg := range config.Shardings {
-		client, err := newDBClient(cfg, logger)
+		client, err := newDBClient(cfg, logger, metricClient)
 		if err != nil {
 			return nil, err
 		}
@@ -50,13 +50,13 @@ func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger) (*DBClus
 	return dbCluster, nil
 }
 
-func newDBClient(config DBConfig, logger *log.Logger) (*pg.DB, error) {
+func newDBClient(config DBConfig, logger *log.Logger, metricClient *MetricClient) (*pg.DB, error) {
 	opt, err := initDBOption(config)
 	if err != nil {
 		return nil, err
 	}
 	client := pg.Connect(opt)
-	client.AddQueryHook(dbLogger{logger: logger})
+	client.AddQueryHook(dbLogger{logger: logger, metricClient: metricClient})
 	logger.Info("initialize db client", log.String("options", fmt.Sprintf("%+v", *opt)))
 	return client, nil
 }
@@ -151,19 +151,34 @@ func getTableIndex(shardingKey string, shardingCount int) int {
 	return int(crc32.ChecksumIEEE([]byte(shardingKey)) % uint32(shardingCount))
 }
 
+const (
+	dbQueryStartTimeContextKey = "query_start_time"
+	dbQueryDurationMetricKey   = "database.query.duration"
+)
+
 type dbLogger struct {
-	logger *log.Logger
+	logger       *log.Logger
+	metricClient *MetricClient
 }
 
-func (d dbLogger) BeforeQuery(c context.Context, q *pg.QueryEvent) (context.Context, error) {
-	return c, nil
+func (d dbLogger) BeforeQuery(ctx context.Context, queryEvent *pg.QueryEvent) (context.Context, error) {
+	return context.WithValue(ctx, dbQueryStartTimeContextKey, time.Now()), nil
 }
 
-func (d dbLogger) AfterQuery(c context.Context, q *pg.QueryEvent) error {
-	query, err := q.FormattedQuery()
+func (d dbLogger) AfterQuery(ctx context.Context, queryEvent *pg.QueryEvent) error {
+	query, err := queryEvent.FormattedQuery()
 	if err != nil {
+		d.logger.Error("dbLogger error", log.Error(err))
 		return err
 	}
-	d.logger.Debug(string(query))
+	if startTime, ok := ctx.Value(dbQueryStartTimeContextKey).(time.Time); ok {
+		duration := time.Since(startTime)
+		d.logger.Debug(
+			"execute database query",
+			log.String("query", string(query)),
+			log.String("duration", duration.String()),
+		)
+		d.metricClient.MetricTimeDuration(dbQueryDurationMetricKey, duration)
+	}
 	return nil
 }
