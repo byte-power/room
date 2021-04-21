@@ -70,11 +70,11 @@ func (config RoomServerConfig) check() error {
 type connectionConfig struct {
 	PoolSize int `yaml:"pool_size"`
 
-	DialTimeoutMS  int `yaml:"dial_timeout_ms"`
-	ReadTimeoutMS  int `yaml:"read_timeout_ms"`
-	WriteTimeoutMS int `yaml:"write_timeout_ms"`
-	IdleTimeoutMS  int `yaml:"idle_timeout_ms"`
-	PoolTimeoutMS  int `yaml:"pool_timeout_ms"`
+	DialTimeoutMS     int `yaml:"dial_timeout_ms"`
+	ReadTimeoutMS     int `yaml:"read_timeout_ms"`
+	WriteTimeoutMS    int `yaml:"write_timeout_ms"`
+	IdleTimeoutSecond int `yaml:"idle_timeout_second"`
+	PoolTimeoutMS     int `yaml:"pool_timeout_ms"`
 
 	MaxRetries                int `yaml:"max_retries"`
 	MaxConnAgeSeconds         int `yaml:"max_conn_age_second"`
@@ -97,8 +97,8 @@ func (config connectionConfig) check() error {
 	if v := config.WriteTimeoutMS; v < 0 {
 		return fmt.Errorf("write_timeout_ms=%d, it should be >= 0", v)
 	}
-	if v := config.IdleTimeoutMS; v < -1 {
-		return fmt.Errorf("idle_timeout_ms=%d, it should be >= -1", v)
+	if v := config.IdleTimeoutSecond; v < -1 {
+		return fmt.Errorf("idle_timeout_second=%d, it should be >= -1", v)
 	}
 	if v := config.PoolTimeoutMS; v < 0 {
 		return fmt.Errorf("pool_timeout_ms=%d, it should be >= 0", v)

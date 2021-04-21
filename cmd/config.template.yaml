@@ -12,7 +12,7 @@ redis_cluster:
     min_idle_conns: 300
     dial_timeout_ms: 1000
     pool_timeout_ms: 1000
-    idle_timeout_ms: 12000
+    idle_timeout_second: 14400
     read_timeout_ms: 100
     write_timeout_ms: 100
     max_retries: 5
@@ -61,7 +61,7 @@ db_cluster:
         min_idle_conns: 10
         dial_timeout_ms: 1000
         pool_timeout_ms: 1000
-        idle_timeout_ms: 12000
+        idle_timeout_second: 14400
         read_timeout_ms: 100
         write_timeout_ms: 100
         max_retries: 5
@@ -78,7 +78,7 @@ db_cluster:
         min_idle_conns: 10
         dial_timeout_ms: 1000
         pool_timeout_ms: 1000
-        idle_timeout_ms: 12000
+        idle_timeout_second: 14400
         read_timeout_ms: 100
         write_timeout_ms: 100
         max_retries: 5
@@ -101,7 +101,7 @@ sync:
           min_idle_conns: 10
           dial_timeout_ms: 1000
           pool_timeout_ms: 1000
-          idle_timeout_ms: 12000
+          idle_timeout_second: 14400
           read_timeout_ms: 100
           write_timeout_ms: 100
           max_retries: 5
@@ -118,7 +118,7 @@ sync:
           min_idle_conns: 10
           dial_timeout_ms: 1000
           pool_timeout_ms: 1000
-          idle_timeout_ms: 12000
+          idle_timeout_second: 14400
           read_timeout_ms: 100
           write_timeout_ms: 100
           max_retries: 5
@@ -138,7 +138,7 @@ sync:
           min_idle_conns: 10
           dial_timeout_ms: 1000
           pool_timeout_ms: 1000
-          idle_timeout_ms: 12000
+          idle_timeout_second: 14400
           read_timeout_ms: 100
           write_timeout_ms: 100
           max_retries: 5
@@ -155,7 +155,7 @@ sync:
           min_idle_conns: 10
           dial_timeout_ms: 1000
           pool_timeout_ms: 1000
-          idle_timeout_ms: 12000
+          idle_timeout_second: 14400
           read_timeout_ms: 100
           write_timeout_ms: 100
           max_retries: 5

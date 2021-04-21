@@ -33,10 +33,10 @@ func initRedisOption(config RedisClusterConfig) (*redis.ClusterOptions, error) {
 		MaxRetries:   config.Connection.MaxRetries,
 		MaxConnAge:   time.Duration(config.Connection.MaxConnAgeSeconds) * time.Second,
 	}
-	if config.Connection.IdleTimeoutMS == -1 {
+	if config.Connection.IdleTimeoutSecond == -1 {
 		opt.IdleTimeout = -1
 	} else {
-		opt.IdleTimeout = time.Duration(config.Connection.IdleTimeoutMS) * time.Millisecond
+		opt.IdleTimeout = time.Duration(config.Connection.IdleTimeoutSecond) * time.Second
 	}
 	if config.Connection.MinRetryBackoffMS == -1 {
 		opt.MinRetryBackoff = -1
