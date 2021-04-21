@@ -67,23 +67,71 @@ func (config RoomServerConfig) check() error {
 	return nil
 }
 
-type RedisClusterConfig struct {
-	Addrs []string `yaml:"addrs"`
+type connectionConfig struct {
+	PoolSize int `yaml:"pool_size"`
 
-	PoolSize       int `yaml:"pool_size"`
-	MinIdleConns   int `yaml:"min_idle_conns"`
 	DialTimeoutMS  int `yaml:"dial_timeout_ms"`
-	PoolTimeoutMS  int `yaml:"pool_timeout_ms"`
-	IdleTimeoutMS  int `yaml:"idle_timeout_ms"`
 	ReadTimeoutMS  int `yaml:"read_timeout_ms"`
 	WriteTimeoutMS int `yaml:"write_timeout_ms"`
+	IdleTimeoutMS  int `yaml:"idle_timeout_ms"`
+	PoolTimeoutMS  int `yaml:"pool_timeout_ms"`
 
-	MaxRetries int `yaml:"max_retries"`
-
+	MaxRetries                int `yaml:"max_retries"`
+	MaxConnAgeSeconds         int `yaml:"max_conn_age_second"`
+	MinIdleConns              int `yaml:"min_idle_conns"`
 	MinRetryBackoffMS         int `yaml:"min_retry_backoff_ms"`
 	MaxRetryBackoffMS         int `yaml:"max_retry_backoff_ms"`
-	MaxConnAgeSeconds         int `yaml:"max_conn_age_second"`
 	IdleCheckFrequencySeconds int `yaml:"idle_check_frequency_second"`
+}
+
+func (config connectionConfig) check() error {
+	if v := config.PoolSize; v <= 0 {
+		return fmt.Errorf("pool_size=%d, it should be > 0", v)
+	}
+	if v := config.DialTimeoutMS; v < 0 {
+		return fmt.Errorf("dial_timeout_ms=%d, it should be >= 0", v)
+	}
+	if v := config.ReadTimeoutMS; v < 0 {
+		return fmt.Errorf("read_timeout_ms=%d, it should be >= 0", v)
+	}
+	if v := config.WriteTimeoutMS; v < 0 {
+		return fmt.Errorf("write_timeout_ms=%d, it should be >= 0", v)
+	}
+	if v := config.IdleTimeoutMS; v < -1 {
+		return fmt.Errorf("idle_timeout_ms=%d, it should be >= -1", v)
+	}
+	if v := config.PoolTimeoutMS; v < 0 {
+		return fmt.Errorf("pool_timeout_ms=%d, it should be >= 0", v)
+	}
+	if v := config.MaxRetries; v < 0 {
+		return fmt.Errorf("max_retries=%d, it should be >= 0", v)
+	}
+	if v := config.MaxConnAgeSeconds; v < 0 {
+		return fmt.Errorf("max_conn_age_second=%d, it should be >= 0", v)
+	}
+	if v := config.MinIdleConns; v < 0 {
+		return fmt.Errorf("min_idle_conns=%d, it should be >= 0", v)
+	}
+	if v := config.MinRetryBackoffMS; v < -1 {
+		return fmt.Errorf("min_retry_backoff_ms=%d, it should be >= -1", v)
+	}
+	if v := config.MaxRetryBackoffMS; v < -1 {
+		return fmt.Errorf("max_retry_backoff_ms=%d, it should be >= -1", v)
+	}
+	if config.MinRetryBackoffMS > config.MaxRetryBackoffMS {
+		return fmt.Errorf(
+			"min_retry_backoff_ms=%d, max_retry_backoff_ms=%d, min_retry_backoff_ms shoule be less than or equal to max_retry_backoff_ms",
+			config.MinRetryBackoffMS, config.MaxRetryBackoffMS)
+	}
+	if v := config.IdleCheckFrequencySeconds; v < -1 {
+		return fmt.Errorf("idle_check_frequency_seconds=%d, it should be >= -1", v)
+	}
+	return nil
+}
+
+type RedisClusterConfig struct {
+	Addrs      []string         `yaml:"addrs"`
+	Connection connectionConfig `yaml:",inline"`
 }
 
 func (config RedisClusterConfig) check() error {
@@ -95,46 +143,8 @@ func (config RedisClusterConfig) check() error {
 			return fmt.Errorf("address in redis_cluster.adds should not be empty")
 		}
 	}
-	if v := config.PoolSize; v < 0 {
-		return fmt.Errorf("redis_cluster.pool_size=%d, it should be >= 0", v)
-	}
-	if v := config.MinIdleConns; v < 0 {
-		return fmt.Errorf("redis_cluster.min_idle_conns=%d, it should be >= 0", v)
-	}
-	if v := config.DialTimeoutMS; v < 0 {
-		return fmt.Errorf("redis_cluster.dial_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.PoolTimeoutMS; v < 0 {
-		return fmt.Errorf("redis_cluster.pool_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.IdleTimeoutMS; v < -1 {
-		return fmt.Errorf("redis_cluster.idle_timeout_ms=%d, it should be >= -1", v)
-	}
-	if v := config.ReadTimeoutMS; v < 0 {
-		return fmt.Errorf("redis_cluster.read_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.WriteTimeoutMS; v < 0 {
-		return fmt.Errorf("redis_cluster.write_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.MaxRetries; v < 0 {
-		return fmt.Errorf("redis_cluster.max_retries=%d, it should be >= 0", v)
-	}
-	if v := config.MinRetryBackoffMS; v < -1 {
-		return fmt.Errorf("redis_cluster.min_retry_backoff_ms=%d, it should be >= -1", v)
-	}
-	if v := config.MaxRetryBackoffMS; v < -1 {
-		return fmt.Errorf("redis_cluster.max_retry_backoff_ms=%d, it should be >= -1", v)
-	}
-	if config.MinRetryBackoffMS > config.MaxRetryBackoffMS {
-		return fmt.Errorf(
-			"redis_cluster.min_retry_backoff_ms=%d, max_retry_backoff_ms=%d, min_retry_backoff_ms shoule be less than or equal to max_retry_backoff_ms",
-			config.MinRetryBackoffMS, config.MaxRetryBackoffMS)
-	}
-	if v := config.MaxConnAgeSeconds; v < 0 {
-		return fmt.Errorf("redis_cluster.max_conn_age_second=%d, it should be >= 0", v)
-	}
-	if v := config.IdleCheckFrequencySeconds; v < -1 {
-		return fmt.Errorf("redis_cluster.idle_check_frequency_seconds=%d, it should be >= -1", v)
+	if err := config.Connection.check(); err != nil {
+		return fmt.Errorf("redis_cluster.%w", err)
 	}
 
 	return nil
@@ -160,20 +170,7 @@ func (config DBClusterConfig) check() error {
 type DBConfig struct {
 	URL string `yaml:"url"`
 
-	PoolSize int `yaml:"pool_size"`
-
-	DialTimeoutMS  int `yaml:"dial_timeout_ms"`
-	ReadTimeoutMS  int `yaml:"read_timeout_ms"`
-	WriteTimeoutMS int `yaml:"write_timeout_ms"`
-	IdleTimeoutMS  int `yaml:"idle_timeout_ms"`
-	PoolTimeoutMS  int `yaml:"pool_timeout_ms"`
-
-	MaxRetries                int `yaml:"max_retries"`
-	MaxConnAgeSeconds         int `yaml:"max_conn_age_second"`
-	MinIdleConns              int `yaml:"min_idle_conns"`
-	MinRetryBackoffMS         int `yaml:"min_retry_backoff_ms"`
-	MaxRetryBackoffMS         int `yaml:"max_retry_backoff_ms"`
-	IdleCheckFrequencySeconds int `yaml:"idle_check_frequency_second"`
+	Connection connectionConfig `yaml:",inline"`
 
 	StartShardingIndex int `yaml:"start_index"`
 	EndShardingIndex   int `yaml:"end_index"`
@@ -183,44 +180,8 @@ func (config DBConfig) check() error {
 	if config.URL == "" {
 		return errors.New("db_config.url should not be empty")
 	}
-	if config.PoolSize <= 0 {
-		return errors.New("db_config.pool_size should be greater than 0")
-	}
-	if config.DialTimeoutMS < 0 {
-		return errors.New("db_config.dial_timeout_ms should be equal to or greater than 0")
-	}
-	if config.ReadTimeoutMS < 0 {
-		return errors.New("db_config.read_timeout_ms should be equal to or greater than 0")
-	}
-	if config.WriteTimeoutMS < 0 {
-		return errors.New("db_config.write_timeout_ms shoule be equal to or greater than 0")
-	}
-	if config.IdleTimeoutMS < -1 {
-		return errors.New("db_config.idle_timeout_ms shoule be equal to or greater than -1")
-	}
-	if config.PoolTimeoutMS < 0 {
-		return errors.New("db_config.pool_timeout_ms shoule be equal to or greater than 0")
-	}
-	if config.MaxRetries < 0 {
-		return errors.New("db_config.max_retries should be equal to or greater than 0")
-	}
-	if config.MaxConnAgeSeconds < 0 {
-		return errors.New("db_config.max_conn_age_second should be greater than 0")
-	}
-	if config.MinIdleConns < 0 {
-		return errors.New("db_config.min_idle_conns should be equal to or greater than 0")
-	}
-	if config.MinRetryBackoffMS < -1 {
-		return errors.New("db_config.min_retry_backoff_ms should be equal to or greater than -1")
-	}
-	if config.MaxRetryBackoffMS < -1 {
-		return errors.New("db_config.max_retry_backoff_ms should be equal to or greater than -1")
-	}
-	if config.MinRetryBackoffMS > config.MaxRetryBackoffMS {
-		return errors.New("db_config.min_retry_backoff_ms shoule be equal to or less than max_retry_backoff_ms")
-	}
-	if config.IdleCheckFrequencySeconds < -1 {
-		return errors.New("db_config.idle_check_frequency_second should be equal to or greater than -1")
+	if err := config.Connection.check(); err != nil {
+		return fmt.Errorf("db_config.%w", err)
 	}
 	if config.StartShardingIndex < 0 {
 		return errors.New("db_config.start_index shoule be equal to or greater than 0")

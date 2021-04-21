@@ -70,34 +70,34 @@ func initDBOption(config DBConfig) (*pg.Options, error) {
 		return nil, err
 	}
 
-	opt.ReadTimeout = time.Duration(config.ReadTimeoutMS) * time.Millisecond
-	opt.WriteTimeout = time.Duration(config.WriteTimeoutMS) * time.Millisecond
-	opt.DialTimeout = time.Duration(config.DialTimeoutMS) * time.Millisecond
-	opt.MinIdleConns = config.MinIdleConns
-	opt.PoolTimeout = time.Duration(config.PoolTimeoutMS) * time.Millisecond
-	opt.PoolSize = config.PoolSize
-	opt.MaxRetries = config.MaxRetries
-	opt.MaxConnAge = time.Duration(config.MaxConnAgeSeconds) * time.Second
+	opt.ReadTimeout = time.Duration(config.Connection.ReadTimeoutMS) * time.Millisecond
+	opt.WriteTimeout = time.Duration(config.Connection.WriteTimeoutMS) * time.Millisecond
+	opt.DialTimeout = time.Duration(config.Connection.DialTimeoutMS) * time.Millisecond
+	opt.MinIdleConns = config.Connection.MinIdleConns
+	opt.PoolTimeout = time.Duration(config.Connection.PoolTimeoutMS) * time.Millisecond
+	opt.PoolSize = config.Connection.PoolSize
+	opt.MaxRetries = config.Connection.MaxRetries
+	opt.MaxConnAge = time.Duration(config.Connection.MaxConnAgeSeconds) * time.Second
 
-	if config.IdleTimeoutMS == -1 {
+	if config.Connection.IdleTimeoutMS == -1 {
 		opt.IdleTimeout = -1
 	} else {
-		opt.IdleTimeout = time.Duration(config.IdleTimeoutMS) * time.Millisecond
+		opt.IdleTimeout = time.Duration(config.Connection.IdleTimeoutMS) * time.Millisecond
 	}
-	if config.MinRetryBackoffMS == -1 {
+	if config.Connection.MinRetryBackoffMS == -1 {
 		opt.MinRetryBackoff = -1
 	} else {
-		opt.MinRetryBackoff = time.Duration(config.MinRetryBackoffMS) * time.Millisecond
+		opt.MinRetryBackoff = time.Duration(config.Connection.MinRetryBackoffMS) * time.Millisecond
 	}
-	if config.MaxRetryBackoffMS == -1 {
+	if config.Connection.MaxRetryBackoffMS == -1 {
 		opt.MaxRetryBackoff = -1
 	} else {
-		opt.MaxRetryBackoff = time.Duration(config.MaxRetryBackoffMS) * time.Millisecond
+		opt.MaxRetryBackoff = time.Duration(config.Connection.MaxRetryBackoffMS) * time.Millisecond
 	}
-	if config.IdleCheckFrequencySeconds == -1 {
+	if config.Connection.IdleCheckFrequencySeconds == -1 {
 		opt.IdleCheckFrequency = -1
 	} else {
-		opt.IdleCheckFrequency = time.Duration(config.IdleCheckFrequencySeconds) * time.Second
+		opt.IdleCheckFrequency = time.Duration(config.Connection.IdleCheckFrequencySeconds) * time.Second
 	}
 	return opt, nil
 }
