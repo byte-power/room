@@ -8,6 +8,17 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
+type TransactionCloseReason string
+
+const (
+	TransactionCloseReasonTxClosed    TransactionCloseReason = "transaction is closed"
+	TransactionCloseReasonConnClosed  TransactionCloseReason = "connection is closed"
+	TransactionCloseReasonDiscard     TransactionCloseReason = "execute discard command"
+	TransactionCloseReasonExec        TransactionCloseReason = "execute exec command"
+	TransactionCloseReasonReset       TransactionCloseReason = "reset old transaction"
+	TransactionCloseReasonResetInExec TransactionCloseReason = "reset old transaction in exec command"
+)
+
 type Transaction struct {
 	tx          *redis.Tx
 	watchedKeys []string
@@ -113,14 +124,7 @@ func (transaction *Transaction) exec() RESPData {
 		return convertErrorToRESPData(errors.New("ERR EXEC without MULTI"))
 	}
 	defer func() {
-		if err := transaction.Close(); err != nil {
-			logger := base.GetServerLogger()
-			logger.Error(
-				"close transaction error",
-				log.String("command", "exec"),
-				log.Error(err),
-			)
-		}
+		transaction.Close(TransactionCloseReasonExec)
 	}()
 	if !redis.AreKeysInSameSlot(transaction.keys...) {
 		return convertErrorToRESPData(errors.New("ERR keys in transaction should be in the same slot"))
@@ -128,12 +132,7 @@ func (transaction *Transaction) exec() RESPData {
 	if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.keys, transaction.watchedKeys...)...) {
 		if transaction.tx != nil {
 			if err := transaction.tx.Close(contextTODO); err != nil {
-				logger := base.GetServerLogger()
-				logger.Error(
-					"close redis transaction error",
-					log.String("command", "exec"),
-					log.Error(err),
-				)
+				recordTransactionCloseError(err, TransactionCloseReasonResetInExec)
 			}
 			transaction.tx = nil
 			transaction.watchedKeys = make([]string, 0)
@@ -170,10 +169,11 @@ func (transaction *Transaction) exec() RESPData {
 	return result
 }
 
-func (transaction *Transaction) Close() error {
+func (transaction *Transaction) Close(reason TransactionCloseReason) error {
 	transaction.closed = true
 	if transaction.tx != nil {
 		if err := transaction.tx.Close(contextTODO); err != nil {
+			recordTransactionCloseError(err, reason)
 			return err
 		}
 		transaction.tx = nil
@@ -192,13 +192,8 @@ func (transaction *Transaction) discard() RESPData {
 	if !transaction.started {
 		return convertErrorToRESPData(errors.New("ERR DISCARD without MULTI"))
 	}
-	if err := transaction.Close(); err != nil {
-		logger := base.GetServerLogger()
-		logger.Error(
-			"close transaction error",
-			log.String("command", "discard"),
-			log.Error(err),
-		)
+	if err := transaction.Close(TransactionCloseReasonDiscard); err != nil {
+		return convertErrorToRESPData(err)
 	}
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
@@ -322,4 +317,15 @@ func NewUnwatchCommand(args []string) (Commander, error) {
 
 func (command *UnwatchCommand) Cmd() redis.Cmder {
 	return redis.NewStatusCmd(contextTODO, command.name)
+}
+
+func recordTransactionCloseError(err error, reason TransactionCloseReason) {
+	logger := base.GetServerLogger()
+	logger.Error(
+		"transaction close error",
+		log.String("reason", string(reason)),
+		log.Error(err),
+	)
+	metric := base.GetMetricService()
+	metric.MetricIncrease("error.transaction.close")
 }

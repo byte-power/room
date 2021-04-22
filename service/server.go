@@ -176,7 +176,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		metric.MetricIncrease("process.transaction")
 		result = transaction.Process(command)
 		if transaction.IsClosed() {
-			transactionManager.removeTransaction(conn, "transaction_is_closed")
+			transactionManager.removeTransaction(conn, commands.TransactionCloseReasonTxClosed)
 		}
 	} else {
 		metric.MetricIncrease("process.single_command")
@@ -341,7 +341,7 @@ func sendCommandEvents(command commands.Commander) error {
 func connCloseHandler(conn redcon.Conn, err error) {
 	metric := base.GetMetricService()
 	metric.MetricIncrease("connection.close")
-	transactionManager.removeTransaction(conn, "close_connection")
+	transactionManager.removeTransaction(conn, commands.TransactionCloseReasonConnClosed)
 	transactionCount := transactionManager.transactionCount()
 	logger := base.GetServerLogger()
 	if err == nil {
