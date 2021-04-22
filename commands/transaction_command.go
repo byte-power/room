@@ -11,25 +11,33 @@ import (
 type TransactionCloseReason string
 
 const (
-	TransactionCloseReasonTxClosed    TransactionCloseReason = "transaction is closed"
-	TransactionCloseReasonConnClosed  TransactionCloseReason = "connection is closed"
-	TransactionCloseReasonDiscard     TransactionCloseReason = "execute discard command"
-	TransactionCloseReasonExec        TransactionCloseReason = "execute exec command"
-	TransactionCloseReasonReset       TransactionCloseReason = "reset old transaction"
-	TransactionCloseReasonResetInExec TransactionCloseReason = "reset old transaction in exec command"
+	TransactionCloseReasonTxClosed     TransactionCloseReason = "transaction is closed"
+	TransactionCloseReasonConnClosed   TransactionCloseReason = "connection is closed"
+	TransactionCloseReasonDiscard      TransactionCloseReason = "execute discard command"
+	TransactionCloseReasonExec         TransactionCloseReason = "execute exec command"
+	TransactionCloseReasonReset        TransactionCloseReason = "reset old transaction"
+	TransactionCloseReasonResetInWatch TransactionCloseReason = "reset old transaction in watch"
+	TransactionCloseReasonResetInExec  TransactionCloseReason = "reset old transaction in exec command"
+)
+
+type TransactionStatus string
+
+const (
+	TransactionStatusInited  TransactionStatus = "inited"
+	TransactionStatusStarted TransactionStatus = "started"
+	TransactionStatusClosed  TransactionStatus = "closed"
 )
 
 type Transaction struct {
 	tx          *redis.Tx
 	watchedKeys []string
 	keys        []string
-	started     bool
+	status      TransactionStatus
 	commands    []redis.Cmder
-	closed      bool
 }
 
 func NewTransaction() *Transaction {
-	return &Transaction{}
+	return &Transaction{status: TransactionStatusInited}
 }
 
 func newRedisTransaction(keys ...string) (*redis.Tx, error) {
@@ -43,30 +51,30 @@ func newRedisTransaction(keys ...string) (*redis.Tx, error) {
 }
 
 func (transaction *Transaction) multi() RESPData {
-	if transaction.started {
+	if transaction.isStarted() {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR MULTI calls can not be nested")}
 	}
-	transaction.started = true
+	transaction.status = TransactionStatusStarted
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
-func (transaction *Transaction) reset() error {
+func (transaction *Transaction) reset(reason TransactionCloseReason, status TransactionStatus) error {
 	if transaction.tx != nil {
 		if err := transaction.tx.Close(contextTODO); err != nil {
+			recordTransactionCloseError(err, reason)
 			return err
 		}
 		transaction.tx = nil
 	}
 	transaction.watchedKeys = make([]string, 0)
 	transaction.keys = make([]string, 0)
-	transaction.started = false
 	transaction.commands = make([]redis.Cmder, 0)
-	transaction.closed = false
+	transaction.status = status
 	return nil
 }
 
 func (transaction *Transaction) watch(keys ...string) RESPData {
-	if transaction.started {
+	if transaction.isStarted() {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR WATCH inside MULTI is not allowed")}
 	}
 	if len(keys) == 0 {
@@ -75,7 +83,7 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 
 	if transaction.tx != nil {
 		if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.watchedKeys, keys...)...) {
-			if err := transaction.reset(); err != nil {
+			if err := transaction.reset(TransactionCloseReasonResetInWatch, TransactionStatusInited); err != nil {
 				return convertErrorToRESPData(err)
 			}
 		}
@@ -98,7 +106,7 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 
 func (transaction *Transaction) addCommand(command Commander) RESPData {
 	var result RESPData
-	if transaction.started {
+	if transaction.isStarted() {
 		transaction.commands = append(transaction.commands, command.Cmd())
 		transaction.keys = append(transaction.keys, append(command.ReadKeys(), command.WriteKeys()...)...)
 		if (transaction.tx == nil) && len(transaction.keys) != 0 {
@@ -120,7 +128,7 @@ func (transaction *Transaction) addCommand(command Commander) RESPData {
 }
 
 func (transaction *Transaction) exec() RESPData {
-	if !transaction.started {
+	if !transaction.isStarted() {
 		return convertErrorToRESPData(errors.New("ERR EXEC without MULTI"))
 	}
 	defer func() {
@@ -170,26 +178,26 @@ func (transaction *Transaction) exec() RESPData {
 }
 
 func (transaction *Transaction) Close(reason TransactionCloseReason) error {
-	transaction.closed = true
-	if transaction.tx != nil {
-		if err := transaction.tx.Close(contextTODO); err != nil {
-			recordTransactionCloseError(err, reason)
-			return err
-		}
-		transaction.tx = nil
+	if transaction.IsClosed() {
+		return nil
 	}
-	transaction.watchedKeys = make([]string, 0)
-	transaction.keys = make([]string, 0)
-	transaction.commands = make([]redis.Cmder, 0)
-	return nil
+	return transaction.reset(reason, TransactionStatusClosed)
 }
 
 func (transaction *Transaction) IsClosed() bool {
-	return transaction.closed
+	return transaction.status == TransactionStatusClosed
+}
+
+func (transaction *Transaction) isStarted() bool {
+	return transaction.status == TransactionStatusStarted
+}
+
+func (transaction *Transaction) Status() TransactionStatus {
+	return transaction.status
 }
 
 func (transaction *Transaction) discard() RESPData {
-	if !transaction.started {
+	if !transaction.isStarted() {
 		return convertErrorToRESPData(errors.New("ERR DISCARD without MULTI"))
 	}
 	if err := transaction.Close(TransactionCloseReasonDiscard); err != nil {
