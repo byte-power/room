@@ -16,7 +16,7 @@ const (
 	TransactionCloseReasonDiscard      TransactionCloseReason = "execute discard command"
 	TransactionCloseReasonExec         TransactionCloseReason = "execute exec command"
 	TransactionCloseReasonReset        TransactionCloseReason = "reset old transaction"
-	TransactionCloseReasonResetInWatch TransactionCloseReason = "reset old transaction in watch"
+	TransactionCloseReasonResetInWatch TransactionCloseReason = "reset old transaction in watch command"
 	TransactionCloseReasonResetInExec  TransactionCloseReason = "reset old transaction in exec command"
 )
 
@@ -109,20 +109,11 @@ func (transaction *Transaction) addCommand(command Commander) RESPData {
 	if transaction.isStarted() {
 		transaction.commands = append(transaction.commands, command.Cmd())
 		transaction.keys = append(transaction.keys, append(command.ReadKeys(), command.WriteKeys()...)...)
-		if (transaction.tx == nil) && len(transaction.keys) != 0 {
-			tx, err := newRedisTransaction(transaction.keys...)
-			if err != nil {
-				return convertErrorToRESPData(err)
-			}
-			transaction.tx = tx
-		}
 		result = RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}
+	} else if command.Name() == "unwatch" {
+		result = transaction.unwatch()
 	} else {
-		if command.Name() == "unwatch" {
-			result = transaction.unwatch()
-		} else {
-			result = ExecuteCommand(command)
-		}
+		result = ExecuteCommand(command)
 	}
 	return result
 }
