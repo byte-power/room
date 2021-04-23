@@ -14,17 +14,24 @@ import (
 )
 
 var key = pflag.StringP("key", "k", "{a}:counter", "tested key")
+var host = pflag.StringP("host", "h", "localhost", "room server host")
+var port = pflag.StringP("port", "p", "6379", "room server port")
 
 func main() {
 	pflag.Parse()
 	if key == nil {
 		panic("key is not set")
 	}
-	transaction(*key)
+	if host == nil {
+		panic("host is not set")
+	}
+	if port == nil {
+		panic("port is not set")
+	}
+	transaction(*key, *host, *port)
 }
 
 var roomConfig = &redis.Options{
-	Addr:         "localhost:6379",
 	PoolSize:     50,
 	ReadTimeout:  500 * time.Millisecond,
 	WriteTimeout: 500 * time.Millisecond,
@@ -33,9 +40,12 @@ var roomConfig = &redis.Options{
 	PoolTimeout:  500 * time.Millisecond,
 }
 
-func transaction(key string) {
+func transaction(key, host, port string) {
 	const maxRetries = 1000
 	ctx := context.TODO()
+	addr := fmt.Sprintf("%s:%s", host, port)
+	roomConfig.Addr = addr
+	fmt.Printf("room server is located at %s\n", addr)
 	client := redis.NewClient(roomConfig)
 
 	// Increment transactionally increments key using GET and SET commands.

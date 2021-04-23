@@ -180,7 +180,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 			metric.MetricTimeDuration("process.transaction.duration", time.Since(startTime))
 		}
 		if transaction.IsClosed() {
-			transactionManager.removeTransaction(conn, "transaction_is_closed")
+			transactionManager.removeTransaction(conn, commands.TransactionCloseReasonTxClosed)
 		}
 	} else {
 		metric.MetricIncrease("process.single_command")
@@ -242,29 +242,19 @@ func preProcessKey(key string) error {
 
 func getTransactionIfNeeded(conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
 	logger := base.GetServerLogger()
-	transaction := transactionManager.getTransaction(conn)
 	metric := base.GetMetricService()
+	transaction := transactionManager.getTransaction(conn)
 	if transaction == nil {
 		if isTransactionNeeded(command) {
+			transaction = commands.NewTransaction()
+			transactionManager.addTransaction(conn, transaction)
 			metric.MetricIncrease("transaction.new")
-			tx, err := commands.NewTransaction(append(command.ReadKeys(), command.WriteKeys()...)...)
-			if err != nil {
-				metric.MetricIncrease("error.transaction.new")
-				logger.Error(
-					"new transaction error",
-					log.String("command", command.String()),
-					log.Error(err),
-				)
-				return nil, err
-			}
-			transaction = tx
 			logger.Debug(
 				"create transaction",
 				log.String("command", command.Name()),
 				log.String("remote_addr", conn.RemoteAddr()),
 				log.String("local_addr", conn.NetConn().LocalAddr().String()),
 			)
-			transactionManager.addTransaction(conn, transaction)
 		}
 	}
 	return transaction, nil
@@ -359,7 +349,7 @@ func sendCommandEvents(command commands.Commander) error {
 func connCloseHandler(conn redcon.Conn, err error) {
 	metric := base.GetMetricService()
 	metric.MetricIncrease("connection.close")
-	transactionManager.removeTransaction(conn, "close_connection")
+	transactionManager.removeTransaction(conn, commands.TransactionCloseReasonConnClosed)
 	transactionCount := transactionManager.transactionCount()
 	logger := base.GetServerLogger()
 	if err == nil {

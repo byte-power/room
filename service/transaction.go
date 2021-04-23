@@ -1,12 +1,9 @@
 package service
 
 import (
-	"bytepower_room/base"
-	"bytepower_room/base/log"
 	"bytepower_room/commands"
 	"sync"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/tidwall/redcon"
 )
 
@@ -27,14 +24,7 @@ func (manager *TransactionManager) addTransaction(conn redcon.Conn, tx *commands
 	manager.connTransMap[conn] = tx
 	manager.mutex.Unlock()
 	if oldTx != nil {
-		if err := oldTx.Close(); err != nil {
-			logger := base.GetServerLogger()
-			logger.Error(
-				"close transaction error",
-				log.String("command", "add transaction"),
-				log.Error(err),
-			)
-		}
+		oldTx.Close(commands.TransactionCloseReasonReset)
 	}
 }
 
@@ -44,20 +34,13 @@ func (manager *TransactionManager) getTransaction(conn redcon.Conn) *commands.Tr
 	return manager.connTransMap[conn]
 }
 
-func (manager *TransactionManager) removeTransaction(conn redcon.Conn, reason string) {
+func (manager *TransactionManager) removeTransaction(conn redcon.Conn, reason commands.TransactionCloseReason) {
 	manager.mutex.Lock()
 	tx := manager.connTransMap[conn]
 	delete(manager.connTransMap, conn)
 	manager.mutex.Unlock()
 	if tx != nil {
-		if err := tx.Close(); err != nil && err != redis.ErrClosed {
-			logger := base.GetServerLogger()
-			logger.Error(
-				"close transaction error",
-				log.String("reason", reason),
-				log.Error(err),
-			)
-		}
+		tx.Close(reason)
 	}
 }
 
