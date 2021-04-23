@@ -79,6 +79,38 @@ func TestMulti(t *testing.T) {
 
 // test commands:
 // multi
+// multi
+// set {a}1 a
+// exec
+func TestNestedMulti(t *testing.T) {
+	transaction := NewTransaction()
+	command, _ := NewMultiCommand([]string{"multi"})
+	transaction.Process(command)
+
+	command, _ = NewMultiCommand([]string{"multi"})
+	result := transaction.Process(command)
+	assert.Equal(t, ErrorRespType, result.DataType)
+	assert.Equal(t, TransactionStatusStarted, transaction.status)
+
+	key := "{a}1"
+	value := "a"
+	command, _ = NewSetCommand([]string{"set", key, value})
+	result = transaction.Process(command)
+	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
+
+	command, _ = NewExecCommand([]string{"exec"})
+	result = transaction.Process(command)
+	assert.Equal(
+		t,
+		RESPData{
+			DataType: ArrayRespType,
+			Value:    []RESPData{{DataType: SimpleStringRespType, Value: "OK"}}},
+		result)
+	testEmptyKeysInRedis(key)
+}
+
+// test commands:
+// multi
 // watch {a}1 {a}2
 func TestWatchInMulti(t *testing.T) {
 	transaction := NewTransaction()
@@ -171,13 +203,93 @@ func TestExec(t *testing.T) {
 }
 
 // test commands:
+// tx1: multi
+// tx2: multi
+// tx1: set {a}1 10
+// tx1: get {a}1
+// tx2: set {a}1 x
+// tx1: get {a}1
+// tx1: set {a}2 100
+// tx1: get {a}2
+// tx2: set {a}2 y
+// tx2: get {a}2
+// tx1: exec
+// tx2: exec
+func TestConcurrentTransactionSuccess(t *testing.T) {
+	tx1 := NewTransaction()
+	ch1 := make(chan RESPData, 0)
+	commandSet1 := []Commander{}
+	command, _ := NewSetCommand([]string{"set", "{a}1", "10"})
+	commandSet1 = append(commandSet1, command)
+	command, _ = NewGetCommand([]string{"get", "{a}1"})
+	commandSet1 = append(commandSet1, command)
+	command, _ = NewSetCommand([]string{"set", "{a}2", "100"})
+	commandSet1 = append(commandSet1, command)
+	command, _ = NewGetCommand([]string{"get", "{a}2"})
+	commandSet1 = append(commandSet1, command)
+
+	tx2 := NewTransaction()
+	ch2 := make(chan RESPData, 0)
+	commandSet2 := []Commander{}
+	command, _ = NewSetCommand([]string{"set", "{a}1", "x"})
+	commandSet2 = append(commandSet2, command)
+	command, _ = NewGetCommand([]string{"get", "{a}1"})
+	commandSet2 = append(commandSet2, command)
+	command, _ = NewSetCommand([]string{"set", "{a}2", "y"})
+	commandSet2 = append(commandSet2, command)
+	command, _ = NewGetCommand([]string{"get", "{a}2"})
+	commandSet2 = append(commandSet2, command)
+	go func() { testExecuteTransaction(tx1, ch1, commandSet1...) }()
+	go func() { testExecuteTransaction(tx2, ch2, commandSet2...) }()
+	result1 := <-ch1
+	result2 := <-ch2
+	assert.Equal(
+		t,
+		RESPData{
+			DataType: ArrayRespType,
+			Value: []RESPData{
+				{DataType: SimpleStringRespType, Value: "OK"},
+				{DataType: BulkStringRespType, Value: "10"},
+				{DataType: SimpleStringRespType, Value: "OK"},
+				{DataType: BulkStringRespType, Value: "100"},
+			}},
+		result1,
+	)
+	assert.Equal(
+		t,
+		RESPData{
+			DataType: ArrayRespType,
+			Value: []RESPData{
+				{DataType: SimpleStringRespType, Value: "OK"},
+				{DataType: BulkStringRespType, Value: "x"},
+				{DataType: SimpleStringRespType, Value: "OK"},
+				{DataType: BulkStringRespType, Value: "y"},
+			}},
+		result2,
+	)
+	assert.True(t, tx1.IsClosed())
+	assert.True(t, tx2.IsClosed())
+	testEmptyKeysInRedis("{a}1", "{a}2")
+}
+
+func testExecuteTransaction(tx *Transaction, result chan<- RESPData, commands ...Commander) {
+	command, _ := NewMultiCommand([]string{"multi"})
+	tx.Process(command)
+	for _, command := range commands {
+		tx.Process(command)
+	}
+	command, _ = NewExecCommand([]string{"exec"})
+	result <- tx.Process(command)
+}
+
+// test commands:
 // tx1: watch {a}1 {a}2
 // tx2: set {a}1 a
 // tx1: multi
 // tx1: set {a}2 b
 // tx1: exec
 
-func TestOptimisticLockLost(t *testing.T) {
+func TestTransactionFail(t *testing.T) {
 	tx1 := NewTransaction()
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
@@ -208,6 +320,45 @@ func TestOptimisticLockLost(t *testing.T) {
 
 	testCloseTransaction(t, tx1, tx2)
 	testEmptyKeysInRedis("{a}1")
+}
+
+// test commands:
+// watch {a}1 {a}2
+// set {a}1 10
+// multi
+// set {a}2 100
+// exec
+func TestTransactionFailSameClient(t *testing.T) {
+	transaction := NewTransaction()
+	watchedKeys := []string{"{a}1", "{a}2"}
+	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
+	transaction.Process(command)
+
+	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
+	transaction.Process(command)
+
+	command, _ = NewMultiCommand([]string{"multi"})
+	transaction.Process(command)
+	command, _ = NewSetCommand([]string{"set", "{a}2", "100"})
+	result := transaction.Process(command)
+	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
+
+	command, _ = NewExecCommand([]string{"exec"})
+	result = transaction.Process(command)
+	assert.Equal(t, RESPData{DataType: ErrorRespType, Value: redis.TxFailedErr}, result)
+	assert.True(t, transaction.IsClosed())
+
+	command, _ = NewGetCommand([]string{"get", "{a}1"})
+	result = ExecuteCommand(command)
+	assert.Equal(t, RESPData{DataType: BulkStringRespType, Value: "10"}, result)
+
+	command, _ = NewGetCommand([]string{"get", "{a}2"})
+	result = ExecuteCommand(command)
+	assert.Equal(t, RESPData{DataType: NilRespType, Value: nil}, result)
+
+	testCloseTransaction(t, transaction)
+	testEmptyKeysInRedis("{a}1")
+
 }
 
 // test commands:
@@ -301,6 +452,51 @@ func TestDiscardWithoutMultiAfterWatch(t *testing.T) {
 }
 
 // test commands:
+// tx1: watch {a}1 {a}2
+// tx2: set {a}1 10
+// tx1: multi
+// tx1: discard
+// tx1: multi
+// tx1: set {a}1 100
+// exec
+func TestDiscardUnwatchSuccess(t *testing.T) {
+	tx1 := NewTransaction()
+	tx2 := NewTransaction()
+
+	watchedKeys := []string{"{a}1", "{a}2"}
+	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
+	tx1.Process(command)
+
+	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
+	tx2.Process(command)
+
+	command, _ = NewMultiCommand([]string{"multi"})
+	tx1.Process(command)
+	command, _ = NewDiscardCommand([]string{"discard"})
+	tx1.Process(command)
+	command, _ = NewMultiCommand([]string{"multi"})
+	tx1.Process(command)
+	command, _ = NewSetCommand([]string{"set", "{a}1", "100"})
+	tx1.Process(command)
+	command, _ = NewExecCommand([]string{"exec"})
+	result := tx1.Process(command)
+	assert.Equal(
+		t,
+		RESPData{
+			DataType: ArrayRespType,
+			Value:    []RESPData{{DataType: SimpleStringRespType, Value: "OK"}},
+		},
+		result,
+	)
+
+	command, _ = NewGetCommand([]string{"get", "{a}1"})
+	result = ExecuteCommand(command)
+	assert.Equal(t, RESPData{DataType: BulkStringRespType, Value: "100"}, result)
+	testCloseTransaction(t, tx1, tx2)
+	testEmptyKeysInRedis("{a}1")
+}
+
+// test commands:
 // watch {a}1 {a}2
 // unwatch
 func TestUnwatch(t *testing.T) {
@@ -341,4 +537,46 @@ func TestWatchAfterUnwatch(t *testing.T) {
 	assert.Equal(t, 2, len(transaction.watchedKeys))
 	assert.NotNil(t, transaction.tx)
 	testCloseTransaction(t, transaction)
+}
+
+// test commands:
+// tx1: watch {a}1 {a}2
+// tx2: set {a}1 10
+// tx1: unwatch
+// tx1: multi
+// tx1: set {a}1 100
+// exec
+func TestExecAfterUnWatch(t *testing.T) {
+	tx1 := NewTransaction()
+	tx2 := NewTransaction()
+
+	watchedKeys := []string{"{a}1", "{a}2"}
+	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
+	tx1.Process(command)
+
+	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
+	tx2.Process(command)
+
+	command, _ = NewUnwatchCommand([]string{"unwatch"})
+	tx1.Process(command)
+	command, _ = NewMultiCommand([]string{"multi"})
+	tx1.Process(command)
+	command, _ = NewSetCommand([]string{"set", "{a}1", "100"})
+	tx1.Process(command)
+	command, _ = NewExecCommand([]string{"exec"})
+	result := tx1.Process(command)
+	assert.Equal(
+		t,
+		RESPData{
+			DataType: ArrayRespType,
+			Value:    []RESPData{{DataType: SimpleStringRespType, Value: "OK"}},
+		},
+		result,
+	)
+
+	command, _ = NewGetCommand([]string{"get", "{a}1"})
+	result = ExecuteCommand(command)
+	assert.Equal(t, RESPData{DataType: BulkStringRespType, Value: "100"}, result)
+	testCloseTransaction(t, tx1, tx2)
+	testEmptyKeysInRedis("{a}1")
 }
