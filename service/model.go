@@ -50,16 +50,11 @@ func loadDataByKey(key string) (*roomDataModel, error) {
 	logger := base.GetServerLogger()
 	dbCluster := base.GetDBCluster()
 	model := &roomDataModel{Key: key}
-	startTime := time.Now()
 	query, err := dbCluster.Model(model)
 	if err != nil {
 		return nil, err
 	}
-	logger.Info(
-		"generate query",
-		log.String("key", key),
-		log.String("duration", time.Since(startTime).String()))
-	startTime = time.Now()
+	startTime := time.Now()
 	if err := query.WherePK().Where("deleted != ?", true).Select(); err != nil {
 		if errors.Is(err, pg.ErrNoRows) {
 			logger.Info(
