@@ -11,13 +11,15 @@ import (
 type TransactionCloseReason string
 
 const (
-	TransactionCloseReasonTxClosed     TransactionCloseReason = "transaction is closed"
-	TransactionCloseReasonConnClosed   TransactionCloseReason = "connection is closed"
-	TransactionCloseReasonDiscard      TransactionCloseReason = "execute discard command"
-	TransactionCloseReasonExec         TransactionCloseReason = "execute exec command"
-	TransactionCloseReasonReset        TransactionCloseReason = "reset old transaction"
-	TransactionCloseReasonResetInWatch TransactionCloseReason = "reset old transaction in watch command"
-	TransactionCloseReasonResetInExec  TransactionCloseReason = "reset old transaction in exec command"
+	TransactionCloseReasonTxClosed                 TransactionCloseReason = "transaction is closed"
+	TransactionCloseReasonConnClosed               TransactionCloseReason = "connection is closed"
+	TransactionCloseReasonDiscard                  TransactionCloseReason = "execute discard command"
+	TransactionCloseReasonUnwatch                  TransactionCloseReason = "execute unwatch command"
+	TransactionCloseReasonExec                     TransactionCloseReason = "execute exec command"
+	TransactionCloseReasonReset                    TransactionCloseReason = "reset old transaction"
+	TransactionCloseReasonResetInWatch             TransactionCloseReason = "reset old transaction in watch command"
+	TransactionCloseReasonResetInExec              TransactionCloseReason = "reset old transaction in exec command"
+	TransactionCloseReasonWatchedKeysNotInSameSlot TransactionCloseReason = "watched keys not in the same slot"
 )
 
 type TransactionStatus string
@@ -40,12 +42,14 @@ func NewTransaction() *Transaction {
 	return &Transaction{status: TransactionStatusInited}
 }
 
+var errTxKeysNotInSameSlot = errors.New("ERR keys in transaction should be in the same slot")
+
 func newRedisTransaction(keys ...string) (*redis.Tx, error) {
 	if len(keys) == 0 {
 		return base.GetRedisCluster().NewTransation(contextTODO, "")
 	}
 	if !redis.AreKeysInSameSlot(keys...) {
-		return nil, errors.New("ERR keys in transaction should be in the same slot")
+		return nil, errTxKeysNotInSameSlot
 	}
 	return base.GetRedisCluster().NewTransation(contextTODO, keys[0])
 }
@@ -92,6 +96,9 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 	if transaction.tx == nil {
 		tx, err := newRedisTransaction(keys...)
 		if err != nil {
+			if err == errTxKeysNotInSameSlot {
+				transaction.Close(TransactionCloseReasonWatchedKeysNotInSameSlot)
+			}
 			return convertErrorToRESPData(err)
 		}
 		transaction.tx = tx
@@ -101,6 +108,7 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 		return convertErrorToRESPData(err)
 	}
 	transaction.watchedKeys = append(transaction.watchedKeys, keys...)
+	transaction.status = TransactionStatusInited
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
@@ -110,8 +118,6 @@ func (transaction *Transaction) addCommand(command Commander) RESPData {
 		transaction.commands = append(transaction.commands, command.Cmd())
 		transaction.keys = append(transaction.keys, append(command.ReadKeys(), command.WriteKeys()...)...)
 		result = RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}
-	} else if command.Name() == "unwatch" {
-		result = transaction.unwatch()
 	} else {
 		result = ExecuteCommand(command)
 	}
@@ -126,7 +132,7 @@ func (transaction *Transaction) exec() RESPData {
 		transaction.Close(TransactionCloseReasonExec)
 	}()
 	if !redis.AreKeysInSameSlot(transaction.keys...) {
-		return convertErrorToRESPData(errors.New("ERR keys in transaction should be in the same slot"))
+		return convertErrorToRESPData(errTxKeysNotInSameSlot)
 	}
 	if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.keys, transaction.watchedKeys...)...) {
 		if transaction.tx != nil {
@@ -198,26 +204,30 @@ func (transaction *Transaction) discard() RESPData {
 }
 
 func (transaction *Transaction) unwatch() RESPData {
-	if transaction.tx != nil {
-		if _, err := transaction.tx.Unwatch(contextTODO).Result(); err != nil {
-			return convertErrorToRESPData(err)
-		}
-		transaction.watchedKeys = make([]string, 0)
+	if transaction.isStarted() {
+		command, _ := NewUnwatchCommand([]string{"unwatch"})
+		return transaction.addCommand(command)
+	}
+	if err := transaction.Close(TransactionCloseReasonUnwatch); err != nil {
+		return convertErrorToRESPData(err)
 	}
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
 func (transaction *Transaction) Process(command Commander) RESPData {
 	var result RESPData
-	if command.Name() == "watch" {
+	switch command.Name() {
+	case "watch":
 		result = transaction.watch(command.ReadKeys()...)
-	} else if command.Name() == "multi" {
+	case "multi":
 		result = transaction.multi()
-	} else if command.Name() == "exec" {
+	case "exec":
 		result = transaction.exec()
-	} else if command.Name() == "discard" {
+	case "discard":
 		result = transaction.discard()
-	} else {
+	case "unwatch":
+		result = transaction.unwatch()
+	default:
 		result = transaction.addCommand(command)
 	}
 	return result
