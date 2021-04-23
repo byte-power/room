@@ -174,15 +174,22 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 	var result commands.RESPData
 	if transaction != nil {
 		metric.MetricIncrease("process.transaction")
+		startTime := time.Now()
 		result = transaction.Process(command)
+		if command.Name() == "exec" {
+			metric.MetricTimeDuration("process.transaction.duration", time.Since(startTime))
+		}
 		if transaction.IsClosed() {
 			transactionManager.removeTransaction(conn, "transaction_is_closed")
 		}
 	} else {
 		metric.MetricIncrease("process.single_command")
+		startTime := time.Now()
 		result = commands.ExecuteCommand(command)
+		metric.MetricTimeDuration("process.single_connamd.duration", time.Since(startTime))
 	}
 	writeDataToConnection(conn, result)
+	startTime := time.Now()
 	if err := sendCommandEvents(command); err != nil {
 		metric.MetricIncrease("error.send_event")
 		logger.Error(
@@ -191,6 +198,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 			log.Error(err),
 		)
 	}
+	metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
 	logger.Debug(
 		"end to exec command",
 		log.String("command", command.String()),

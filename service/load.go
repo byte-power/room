@@ -52,8 +52,14 @@ func loadKey(key string) error {
 		if !needLoaded {
 			return nil
 		}
+		startTime := time.Now()
 		loaded, err := loadKeyOnce(key, loadTimeout)
 		if err != nil {
+			logger.Error(
+				"load key error",
+				log.String("key", key),
+				log.Error(err),
+				log.String("duration", time.Since(startTime).String()))
 			loadErr = err
 			if isRetryLoadError(err) {
 				time.Sleep(loadRetryInterval)
@@ -65,6 +71,11 @@ func loadKey(key string) error {
 			return err
 		}
 		if loaded {
+			logger.Info(
+				"load key success",
+				log.String("key", key),
+				log.String("duration", time.Since(startTime).String()))
+			metric.MetricTimeDuration("loadkey.duration", time.Since(startTime))
 			return nil
 		}
 	}
@@ -84,9 +95,6 @@ func loadKeyOnce(key string, loadTimeout time.Duration) (bool, error) {
 	var err error
 	once.(*sync.Once).Do(
 		func() {
-			startTime := time.Now()
-			metric := base.GetMetricService()
-			logger := base.GetServerLogger()
 			defer loadingKeys.Delete(key)
 			ch := make(chan error, 1)
 			// TODO: may add context to cancel loadKeyFromDBToRedis when timeout.
@@ -97,21 +105,9 @@ func loadKeyOnce(key string, loadTimeout time.Duration) (bool, error) {
 			case <-time.After(loadTimeout):
 				err = errLoadTimeout
 			}
-			loadDuration := time.Since(startTime)
-			if err != nil {
-				logger.Error(
-					"load key error",
-					log.String("key", key),
-					log.Error(err),
-					log.String("duration", loadDuration.String()))
-			} else {
+			if err == nil {
 				loaded = true
-				logger.Info(
-					"load key success",
-					log.String("key", key),
-					log.String("duration", loadDuration.String()))
 			}
-			metric.MetricTimeDuration("loadkey.duration", time.Since(startTime))
 		})
 	return loaded, err
 }

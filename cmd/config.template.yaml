@@ -12,9 +12,14 @@ redis_cluster:
     min_idle_conns: 300
     dial_timeout_ms: 1000
     pool_timeout_ms: 1000
-    idle_timeout_ms: 12000
+    idle_timeout_second: 14400
     read_timeout_ms: 100
     write_timeout_ms: 100
+    max_retries: 5
+    min_retry_backoff_ms: 1
+    max_retry_backoff_ms: 5
+    max_conn_age_second: 3600
+    idle_check_frequency_second: 60
 
 log:
     server:
@@ -52,18 +57,36 @@ db_cluster:
     sharding_count: 5
     shardings:
       - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        conn_max_lifetime_sec: 3600
-        max_open_conns: 100
+        pool_size: 100
         min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
         max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
         start_index: 0
         end_index: 1
 
       - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
-        conn_max_lifetime_sec: 3600
-        max_open_conns: 100
+        pool_size: 100
         min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
         max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
         start_index: 2
         end_index: 4
 sync:
@@ -74,18 +97,36 @@ sync:
       sharding_count: 10
       shardings:
         - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-          conn_max_lifetime_sec: 3600
-          max_open_conns: 100
+          pool_size: 100
           min_idle_conns: 10
+          dial_timeout_ms: 1000
+          pool_timeout_ms: 1000
+          idle_timeout_second: 14400
+          read_timeout_ms: 100
+          write_timeout_ms: 100
           max_retries: 5
+          min_retry_backoff_ms: 1
+          max_retry_backoff_ms: 5
+          max_conn_age_second: 3600
+          idle_check_frequency_second: 60
+
           start_index: 0
           end_index: 5
 
         - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
-          conn_max_lifetime_sec: 3600
-          max_open_conns: 100
+          pool_size: 100
           min_idle_conns: 10
+          dial_timeout_ms: 1000
+          pool_timeout_ms: 1000
+          idle_timeout_second: 14400
+          read_timeout_ms: 100
+          write_timeout_ms: 100
           max_retries: 5
+          min_retry_backoff_ms: 1
+          max_retry_backoff_ms: 5
+          max_conn_age_second: 3600
+          idle_check_frequency_second: 60
+
           start_index: 6
           end_index: 9
 
@@ -93,18 +134,36 @@ sync:
       sharding_count: 5
       shardings:
         - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-          conn_max_lifetime_sec: 3600
-          max_open_conns: 100
+          pool_size: 100
           min_idle_conns: 10
+          dial_timeout_ms: 1000
+          pool_timeout_ms: 1000
+          idle_timeout_second: 14400
+          read_timeout_ms: 100
+          write_timeout_ms: 100
           max_retries: 5
+          min_retry_backoff_ms: 1
+          max_retry_backoff_ms: 5
+          max_conn_age_second: 3600
+          idle_check_frequency_second: 60
+
           start_index: 0
           end_index: 1
 
         - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
-          conn_max_lifetime_sec: 3600
-          max_open_conns: 100
+          pool_size: 100
           min_idle_conns: 10
+          dial_timeout_ms: 1000
+          pool_timeout_ms: 1000
+          idle_timeout_second: 14400
+          read_timeout_ms: 100
+          write_timeout_ms: 100
           max_retries: 5
+          min_retry_backoff_ms: 1
+          max_retry_backoff_ms: 5
+          max_conn_age_second: 3600
+          idle_check_frequency_second: 60
+
           start_index: 2
           end_index: 4
   sqs:
