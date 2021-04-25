@@ -6,6 +6,7 @@ import (
 	"bytepower_room/utility"
 	"bytes"
 	"context"
+	"strings"
 
 	"errors"
 	"fmt"
@@ -761,6 +762,12 @@ func cleanInactiveKey(key string) error {
 	redisClient := base.GetRedisCluster()
 	metaKey := getMetaKey(key)
 	_, err := redisClient.Del(contextTODO, key, metaKey).Result()
+	// When metaKey and key not in the same slot, only for test data
+	if err != nil && strings.Contains(err.Error(), "CROSSSLOT Keys") {
+		redisClient.Del(contextTODO, metaKey)
+		redisClient.Del(contextTODO, key)
+		return nil
+	}
 	return err
 }
 
