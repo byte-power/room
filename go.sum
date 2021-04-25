@@ -3,8 +3,8 @@ github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/aws/aws-sdk-go v1.36.15 h1:nGqgPlXegCKPZOKXvWnYCLvLPJPRoSOHHn9d0N0DG7Y=
 github.com/aws/aws-sdk-go v1.36.15/go.mod h1:hcU610XS61/+aQV88ixoOzUoG7v3b31pl2zKMmprdro=
-github.com/byte-power/gorich v1.0.4 h1:S0/xEuDBwv0n7lNT7dPXQUHsZjOqZ6Od5PCqZcgfQZo=
-github.com/byte-power/gorich v1.0.4/go.mod h1:NYYsMne80C3zKG0EGaBPdz2vFQ6Nj7ptlpqn6pP1+Zo=
+github.com/byte-power/gorich v1.0.5 h1:ZOlB4lHhw4sPo2EYZaDpXxcTC4PuxPL/2u/AurV8pBQ=
+github.com/byte-power/gorich v1.0.5/go.mod h1:NYYsMne80C3zKG0EGaBPdz2vFQ6Nj7ptlpqn6pP1+Zo=
 github.com/byte-power/redis/v8 v8.4.3 h1:EzDoREl7WQESwajFzBkmUDax3IK3z4RDOLe06Q498qg=
 github.com/byte-power/redis/v8 v8.4.3/go.mod h1:A1tbYoHSa1fXwN+//ljcCYYJeLmVrwL9hbQN45Jdy0M=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=

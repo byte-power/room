@@ -67,7 +67,7 @@ func monitorScheduler() {
 		allJobStats := task.JobStats()
 		for jobName, jobStats := range allJobStats {
 			for _, stat := range jobStats {
-				if !stat.IsSuccess {
+				if !stat.IsSuccess && !task.IsCoordinateError(stat.Err) {
 					logger.Info(
 						"job stats",
 						log.String("name", jobName),
