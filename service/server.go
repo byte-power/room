@@ -231,7 +231,7 @@ func preProcessCommand(command commands.Commander) error {
 }
 
 func preProcessKey(key string) error {
-	if !iskeyValid(key) {
+	if !isKeyValid(key) {
 		return newInvalidKeyError(key)
 	}
 	if err := loadKey(key); err != nil {
@@ -295,10 +295,10 @@ func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {
 	}
 }
 
-func iskeyValid(key string) bool {
+func isKeyValid(key string) bool {
 	leftBraceIndex := strings.Index(key, "{")
 	rightBraceIndex := strings.Index(key, "}")
-	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex < rightBraceIndex)
+	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex+1 < rightBraceIndex)
 }
 
 func isKeyNeedLoad(key string) (bool, error) {

@@ -526,3 +526,21 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	assert.Equal(t, "2", loadedStatus)
 	testEmptyKeysInRedis(key, metaKey)
 }
+
+func TestIsKeyValid(t *testing.T) {
+	cases := []struct {
+		key    string
+		result bool
+	}{
+		{"a", false},
+		{"a}{", false},
+		{"{}a", false},
+		{"{a}", true},
+		{"{a}b", true},
+		{"a{b}", true},
+	}
+	for _, c := range cases {
+		valid := isKeyValid(c.key)
+		assert.Equal(t, c.result, valid)
+	}
+}
