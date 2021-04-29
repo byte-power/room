@@ -308,6 +308,8 @@ func isKeyNeedLoad(key string) (bool, error) {
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return false, newInternalError(err)
 	}
+	// err is redis.Nil means either metaKey does not exist or metaKey's `loaded` field does not exist.
+	// for current implementation, there is only one filed `loaded` in metaKey, so that's the same.
 	if errors.Is(err, redis.Nil) {
 		if err := setLoadedMeta(key); err != nil {
 			return false, newInternalError(err)
