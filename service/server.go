@@ -231,9 +231,9 @@ func preProcessCommand(command commands.Commander) error {
 }
 
 func preProcessKey(key string) error {
-	// if !iskeyValid(key) {
-	// 	return newInvalidKeyError(key)
-	// }
+	if !iskeyValid(key) {
+		return newInvalidKeyError(key)
+	}
 	if err := loadKey(key); err != nil {
 		return newLoadError(err)
 	}
