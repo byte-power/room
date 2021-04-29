@@ -303,28 +303,18 @@ func iskeyValid(key string) bool {
 
 func isKeyNeedLoad(key string) (bool, error) {
 	redisClient := base.GetRedisCluster()
-	commands, err := redisClient.Pipelined(
-		context.TODO(),
-		func(pipe redis.Pipeliner) error {
-			pipe.Exists(context.TODO(), key)
-			pipe.HGet(context.TODO(), getMetaKey(key), "loaded")
-			return nil
-		})
+	metaKey := getMetaKey(key)
+	loadStatus, err := redisClient.HGet(context.TODO(), metaKey, "loaded").Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return false, newInternalError(err)
 	}
-	existed := commands[0].(*redis.IntCmd).Val()
-	loaded := commands[1].(*redis.StringCmd).Val()
-	if existed == 1 {
-		// this happens when key is migrated from redis to room
-		if loaded != "1" {
-			if err := setLoadedMeta(key); err != nil {
-				return false, newInternalError(err)
-			}
+	if errors.Is(err, redis.Nil) {
+		if err := setLoadedMeta(key); err != nil {
+			return false, newInternalError(err)
 		}
 		return false, nil
 	}
-	return loaded != "1", nil
+	return loadStatus != "1", nil
 }
 
 func getMetaKey(key string) string {
