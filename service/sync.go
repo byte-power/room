@@ -761,11 +761,15 @@ func isTwoZSetEqual(s1, s2 []string) bool {
 func cleanInactiveKey(key string) error {
 	redisClient := base.GetRedisCluster()
 	metaKey := getMetaKey(key)
-	_, err := redisClient.Del(contextTODO, key, metaKey).Result()
+	_, err := redisClient.TxPipelined(contextTODO, func(piper redis.Pipeliner) error {
+		piper.Del(contextTODO, key)
+		piper.HSet(contextTODO, metaKey, "loaded", "2")
+		return nil
+	})
 	// When metaKey and key not in the same slot, only for test data
 	if err != nil && strings.Contains(err.Error(), "CROSSSLOT Keys") {
-		redisClient.Del(contextTODO, metaKey)
 		redisClient.Del(contextTODO, key)
+		redisClient.HSet(contextTODO, metaKey, "loaded", "2")
 		return nil
 	}
 	return err
