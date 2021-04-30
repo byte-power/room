@@ -231,9 +231,9 @@ func preProcessCommand(command commands.Commander) error {
 }
 
 func preProcessKey(key string) error {
-	// if !iskeyValid(key) {
-	// 	return newInvalidKeyError(key)
-	// }
+	if !isKeyValid(key) {
+		return newInvalidKeyError(key)
+	}
 	if err := loadKey(key); err != nil {
 		return newLoadError(err)
 	}
@@ -295,36 +295,28 @@ func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {
 	}
 }
 
-func iskeyValid(key string) bool {
+func isKeyValid(key string) bool {
 	leftBraceIndex := strings.Index(key, "{")
 	rightBraceIndex := strings.Index(key, "}")
-	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex < rightBraceIndex)
+	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex+1 < rightBraceIndex)
 }
 
 func isKeyNeedLoad(key string) (bool, error) {
 	redisClient := base.GetRedisCluster()
-	commands, err := redisClient.Pipelined(
-		context.TODO(),
-		func(pipe redis.Pipeliner) error {
-			pipe.Exists(context.TODO(), key)
-			pipe.HGet(context.TODO(), getMetaKey(key), "loaded")
-			return nil
-		})
+	metaKey := getMetaKey(key)
+	loadStatus, err := redisClient.HGet(context.TODO(), metaKey, "loaded").Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return false, newInternalError(err)
 	}
-	existed := commands[0].(*redis.IntCmd).Val()
-	loaded := commands[1].(*redis.StringCmd).Val()
-	if existed == 1 {
-		// this happens when key is migrated from redis to room
-		if loaded != "1" {
-			if err := setLoadedMeta(key); err != nil {
-				return false, newInternalError(err)
-			}
+	// err is redis.Nil means either metaKey does not exist or metaKey's `loaded` field does not exist.
+	// for current implementation, there is only one filed `loaded` in metaKey, so that's the same.
+	if errors.Is(err, redis.Nil) {
+		if err := setLoadedMeta(key); err != nil {
+			return false, newInternalError(err)
 		}
 		return false, nil
 	}
-	return loaded != "1", nil
+	return loadStatus != "1", nil
 }
 
 func getMetaKey(key string) string {

@@ -93,6 +93,12 @@ func testInsertRoomData(input testInsertRoomDataInput) (*roomDataModel, error) {
 	return model, nil
 }
 
+func testSetMetaKeyCleaned(key string) {
+	client := base.GetRedisCluster()
+	metaKey := getMetaKey(key)
+	client.HSet(context.TODO(), metaKey, "loaded", "2")
+}
+
 func TestLoadKeyNotExist(t *testing.T) {
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
@@ -119,6 +125,7 @@ func TestLoadKeyStringWithExpire(t *testing.T) {
 	// Insert data
 	input := testInsertRoomDataInput{key: key, dataType: stringType, value: &value, expireAt: time.Now().Add(100 * time.Second)}
 	testInsertRoomData(input)
+	testSetMetaKeyCleaned(key)
 
 	// load data
 	err := loadKey(key)
@@ -149,6 +156,7 @@ func TestLoadKeyString(t *testing.T) {
 	// Insert data
 	input := testInsertRoomDataInput{key: key, dataType: stringType, value: &value}
 	testInsertRoomData(input)
+	testSetMetaKeyCleaned(key)
 
 	// load data
 	err := loadKey(key)
@@ -214,6 +222,7 @@ func TestLoadKeyList(t *testing.T) {
 		// Insert data
 		input := testInsertRoomDataInput{key: key, dataType: listType, value: &value}
 		testInsertRoomData(input)
+		testSetMetaKeyCleaned(key)
 
 		// load data
 		err := loadKey(key)
@@ -284,6 +293,7 @@ func TestLoadKeyHash(t *testing.T) {
 		// Insert data
 		input := testInsertRoomDataInput{key: key, dataType: hashType, value: &value}
 		testInsertRoomData(input)
+		testSetMetaKeyCleaned(key)
 
 		// load data
 		err := loadKey(key)
@@ -353,6 +363,7 @@ func TestLoadKeySet(t *testing.T) {
 		// Insert data
 		input := testInsertRoomDataInput{key: key, dataType: setType, value: &value}
 		testInsertRoomData(input)
+		testSetMetaKeyCleaned(key)
 
 		// load data
 		err := loadKey(key)
@@ -432,6 +443,7 @@ func TestLoadKeyZSet(t *testing.T) {
 		// Insert data
 		input := testInsertRoomDataInput{key: key, dataType: zsetType, value: &value}
 		testInsertRoomData(input)
+		testSetMetaKeyCleaned(key)
 
 		// load data
 		err := loadKey(key)
@@ -464,11 +476,13 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	client := base.GetRedisCluster()
 	key := "{a}:need_loaded"
 	metaKey := getMetaKey(key)
-	// both key and meta key do not exist
+	// neither key nor meta key exist
 	testEmptyKeysInRedis(key, metaKey)
 	needLoaded, err := isKeyNeedLoad(key)
-	assert.True(t, needLoaded)
+	assert.False(t, needLoaded)
 	assert.Nil(t, err)
+	loadedStatus, _ := client.HGet(context.TODO(), metaKey, "loaded").Result()
+	assert.Equal(t, "1", loadedStatus)
 	testEmptyKeysInRedis(key, metaKey)
 
 	// key exists, meta key does not exist
@@ -477,6 +491,8 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	needLoaded, err = isKeyNeedLoad(key)
 	assert.False(t, needLoaded)
 	assert.Nil(t, err)
+	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
+	assert.Equal(t, "1", loadedStatus)
 	testEmptyKeysInRedis(key, metaKey)
 
 	// key does not exist, meta key exists
@@ -485,6 +501,8 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	needLoaded, err = isKeyNeedLoad(key)
 	assert.False(t, needLoaded)
 	assert.Nil(t, err)
+	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
+	assert.Equal(t, "1", loadedStatus)
 	testEmptyKeysInRedis(key, metaKey)
 
 	// both key and meta key exist
@@ -494,14 +512,8 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	needLoaded, err = isKeyNeedLoad(key)
 	assert.False(t, needLoaded)
 	assert.Nil(t, err)
-	testEmptyKeysInRedis(key, metaKey)
-
-	// metaKey exist, but loaded filed not exist
-	testEmptyKeysInRedis(key, metaKey)
-	client.HSet(testContextTODO, metaKey, "loaded_test", "1")
-	needLoaded, err = isKeyNeedLoad(key)
-	assert.True(t, needLoaded)
-	assert.Nil(t, err)
+	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
+	assert.Equal(t, "1", loadedStatus)
 	testEmptyKeysInRedis(key, metaKey)
 
 	// metaKey exist, but loaded filed != "1"
@@ -510,5 +522,25 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	needLoaded, err = isKeyNeedLoad(key)
 	assert.True(t, needLoaded)
 	assert.Nil(t, err)
+	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
+	assert.Equal(t, "2", loadedStatus)
 	testEmptyKeysInRedis(key, metaKey)
+}
+
+func TestIsKeyValid(t *testing.T) {
+	cases := []struct {
+		key    string
+		result bool
+	}{
+		{"a", false},
+		{"a}{", false},
+		{"{}a", false},
+		{"{a}", true},
+		{"{a}b", true},
+		{"a{b}", true},
+	}
+	for _, c := range cases {
+		valid := isKeyValid(c.key)
+		assert.Equal(t, c.result, valid)
+	}
 }
