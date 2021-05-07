@@ -283,3 +283,135 @@ func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModel
 	}
 	return clusterModels, nil
 }
+
+type redisValue struct {
+	Type     string `json:"type"`
+	Value    string `json:"value"`
+	SyncedTs int64  `json:"synced_ts"`
+	ExpireTs int64  `json:"expire_ts"`
+}
+
+func (v redisValue) isExpired(t time.Time) bool {
+	if v.ExpireTs == 0 {
+		return false
+	}
+	if t.IsZero() {
+		return false
+	}
+	return t.UnixNano()/1000/1000 >= v.ExpireTs
+}
+
+type roomDataModelV2 struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag   string                `pg:"hash_tag,pk"`
+	Value     map[string]redisValue `pg:"value"`
+	DeletedAt time.Time             `pg:"deleted_at"`
+	CreatedAt time.Time             `pg:"created_at"`
+	UpdatedAt time.Time             `pg:"updated_at"`
+	Version   int                   `pg:"version"`
+}
+
+func (model *roomDataModelV2) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomDataModelV2) GetTablePrefix() string {
+	return "room_data_v2"
+}
+
+func loadDataByID(hashTag string) (*roomDataModelV2, error) {
+	logger := base.GetServerLogger()
+	dbCluster := base.GetDBCluster()
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := dbCluster.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	startTime := time.Now()
+	if err := query.WherePK().Where("deleted_at is NULL").Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			logger.Info(
+				"query database",
+				log.String("hash_tag", hashTag),
+				log.String("duration", time.Since(startTime).String()))
+			return nil, nil
+		}
+		return nil, err
+	}
+	logger.Info(
+		"query database",
+		log.String("hash_tag", hashTag),
+		log.String("duration", time.Since(startTime).String()))
+	return model, nil
+}
+
+var errNoRowsUpdated = errors.New("no rows is updated")
+
+func upsertRoomData(hashTag, key string, value redisValue) error {
+	retryTimes := 3
+	var err error
+	for i := 0; i < retryTimes; i++ {
+		if err = _updateRoomData(hashTag, key, value); err != nil {
+			if !isRetryErrorForUpdate(err) {
+				return err
+			}
+			continue
+		}
+		break
+	}
+	return err
+}
+
+func isRetryErrorForUpdate(err error) bool {
+	if errors.Is(err, errNoRowsUpdated) {
+		return true
+	}
+	var pgErr pg.Error
+	if errors.As(err, &pgErr) && pgErr.IntegrityViolation() {
+		return true
+	}
+	return false
+}
+
+func _updateRoomData(hashTag, key string, value redisValue) error {
+	db := base.GetDBCluster()
+	currentTime := time.Now()
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	err = query.WherePK().Select()
+	if err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			model = &roomDataModelV2{
+				HashTag:   hashTag,
+				Value:     map[string]redisValue{key: value},
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
+				Version:   0,
+			}
+			query, err = db.Model(model)
+			if err != nil {
+				return err
+			}
+			_, err = query.Insert()
+			return err
+		}
+		return err
+	}
+	result, err := query.Set("value=jsonb_set(value, ?, ?)", key, value).
+		Set("updated_at=?", currentTime).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
