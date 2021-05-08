@@ -235,7 +235,7 @@ func preProcessKey(key string) error {
 	if hashTag == "" {
 		return newInvalidKeyError(key)
 	}
-	if err := loadKeysByHashTag(hashTag); err != nil {
+	if err := loadByHashTag(hashTag); err != nil {
 		return newLoadError(err)
 	}
 	return nil
