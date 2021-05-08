@@ -148,15 +148,10 @@ func loadKeysByHashTag(hashTag string) error {
 	if status == keysStatusLoaded {
 		return nil
 	}
-	lockKey := getLockKeyByHashTag(hashTag)
-	locked, err := client.SetNX(contextTODO, lockKey, "locked", 5*time.Second).Result()
-	if err != nil {
-		return newInternalError(err)
+	if err := acquireLoadLock(client, hashTag); err != nil {
+		return err
 	}
-	if !locked {
-		return errLoadKeysLockFailed
-	}
-	defer client.Del(contextTODO, lockKey)
+	defer releaseLoadLock(client, hashTag)
 	db := base.GetDBCluster()
 	logger := base.GetServerLogger()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
@@ -166,6 +161,25 @@ func loadKeysByHashTag(hashTag string) error {
 		return err
 	}
 	return setKeysAsLoaded(client, hashTag)
+}
+
+const loadLockDuration = 5 * time.Second
+
+func acquireLoadLock(client *redis.ClusterClient, hashTag string) error {
+	lockKey := getLockKeyByHashTag(hashTag)
+	locked, err := client.SetNX(contextTODO, lockKey, "locked", loadLockDuration).Result()
+	if err != nil {
+		return newInternalError(err)
+	}
+	if !locked {
+		return errLoadKeysLockFailed
+	}
+	return nil
+}
+
+func releaseLoadLock(client *redis.ClusterClient, hashTag string) {
+	lockKey := getLockKeyByHashTag(hashTag)
+	client.Del(contextTODO, lockKey)
 }
 
 func loadKeysFromDBToRedis(ctx context.Context, db *base.DBCluster, client *redis.ClusterClient, logger *log.Logger, hashTag string) error {
