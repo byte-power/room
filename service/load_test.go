@@ -527,20 +527,23 @@ func TestIsKeyNeedLoaded(t *testing.T) {
 	testEmptyKeysInRedis(key, metaKey)
 }
 
-func TestIsKeyValid(t *testing.T) {
+func TestExtractHashTagFromKey(t *testing.T) {
 	cases := []struct {
-		key    string
-		result bool
+		key     string
+		hashTag string
 	}{
-		{"a", false},
-		{"a}{", false},
-		{"{}a", false},
-		{"{a}", true},
-		{"{a}b", true},
-		{"a{b}", true},
+		{"a", ""},
+		{"a}{", ""},
+		{"{}a", ""},
+		{"{a}", "a"},
+		{"{a}b", "a"},
+		{"a{b}", "b"},
+		{"}{ab}cab", "ab"},
+		{"{}{abc}xy", ""},
+		{"{{abc}}xy", "{abc"},
 	}
 	for _, c := range cases {
-		valid := isKeyValid(c.key)
-		assert.Equal(t, c.result, valid)
+		hashTag := extractHashTagFromKey(c.key)
+		assert.Equal(t, c.hashTag, hashTag)
 	}
 }

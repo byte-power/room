@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"context"
 	"errors"
 	"time"
 
@@ -301,6 +302,13 @@ func (v redisValue) isExpired(t time.Time) bool {
 	return t.UnixNano()/1000/1000 >= v.ExpireTs
 }
 
+func (v redisValue) expireDuration(t time.Time) time.Duration {
+	if v.ExpireTs == 0 {
+		return 0
+	}
+	return time.Unix(v.ExpireTs/1000, v.ExpireTs%1000*1000*1000).Sub(t)
+}
+
 type roomDataModelV2 struct {
 	tableName struct{} `pg:"_"`
 
@@ -318,6 +326,25 @@ func (model *roomDataModelV2) ShardingKey() string {
 
 func (model *roomDataModelV2) GetTablePrefix() string {
 	return "room_data_v2"
+}
+
+type loadResult struct {
+	model *roomDataModelV2
+	err   error
+}
+
+func loadDataByIDWithContext(ctx context.Context, hashTag string) (*roomDataModelV2, error) {
+	loadResultCh := make(chan loadResult)
+	go func(ch chan loadResult) {
+		model, err := loadDataByID(hashTag)
+		ch <- loadResult{model: model, err: err}
+	}(loadResultCh)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-loadResultCh:
+		return r.model, r.err
+	}
 }
 
 func loadDataByID(hashTag string) (*roomDataModelV2, error) {
@@ -348,11 +375,11 @@ func loadDataByID(hashTag string) (*roomDataModelV2, error) {
 
 var errNoRowsUpdated = errors.New("no rows is updated")
 
-func upsertRoomData(hashTag, key string, value redisValue) error {
+func UpsertRoomData(hashTag, key string, value redisValue) error {
 	retryTimes := 3
 	var err error
 	for i := 0; i < retryTimes; i++ {
-		if err = _updateRoomData(hashTag, key, value); err != nil {
+		if err = updateRoomData(hashTag, key, value); err != nil {
 			if !isRetryErrorForUpdate(err) {
 				return err
 			}
@@ -374,7 +401,7 @@ func isRetryErrorForUpdate(err error) bool {
 	return false
 }
 
-func _updateRoomData(hashTag, key string, value redisValue) error {
+func updateRoomData(hashTag, key string, value redisValue) error {
 	db := base.GetDBCluster()
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
