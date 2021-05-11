@@ -82,6 +82,8 @@ func logTaskStart(taskName string, startTime time.Time) {
 	)
 }
 
+const syncRecordsProcessMessageIntervalDuration = 10 * time.Millisecond
+
 // SyncRecordsTask syncs accessed and written keys to Record Database
 // 1. Get access record file names from SQS
 // 2. Download S3 file
@@ -118,6 +120,7 @@ func SyncRecordsTask() error {
 		}
 
 		for _, message := range messages {
+			time.Sleep(syncRecordsProcessMessageIntervalDuration)
 			logger.Info(
 				"start process sqs message",
 				log.String("task", taskName),
@@ -326,6 +329,8 @@ func processAccessEvent(eventBytes []byte) (*base.Event, error) {
 	return event, nil
 }
 
+const syncKeysIntervalDuration = 10 * time.Millisecond
+
 // SyncKeysTask syncs written keys to room databse
 // 1. Get key and written time from record database
 // 2. Sync to room database
@@ -338,6 +343,7 @@ func SyncKeysTask() error {
 	metric := base.GetTaskMetricService()
 	count := 1000
 	for {
+		time.Sleep(syncKeysIntervalDuration)
 		models, err := loadWrittenRecordModels(count)
 		if err != nil {
 			recordTaskError(taskName, err, "load_written_record", nil)
@@ -588,6 +594,8 @@ func serializeNonStringValue(key, keyType string) ([]string, error) {
 	return items, nil
 }
 
+const cleanKeysIntervalDuration = 10 * time.Millisecond
+
 // CleanKeysTask cleans inactive keys in redis cluster
 // 1. Get key and access time from record database
 // 2. Clean key and metaKey from redis cluster
@@ -602,6 +610,7 @@ func CleanKeysTask(inactiveDuration time.Duration) error {
 	logTaskStart(taskName, startTime)
 	excludedKeys := utility.NewStringSet()
 	for {
+		time.Sleep(cleanKeysIntervalDuration)
 		models, err := loadAccessedRecordModels(count, inactiveTime, excludedKeys.ToSlice())
 		if err != nil {
 			recordTaskError(taskName, err, "load_accessed_record", nil)
