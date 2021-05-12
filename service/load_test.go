@@ -533,11 +533,18 @@ func TestExtractHashTagFromKey(t *testing.T) {
 		hashTag string
 	}{
 		{"a", ""},
+		{"", ""},
 		{"a}{", ""},
 		{"{}a", ""},
 		{"{a}", "a"},
+		{"{ab}", "ab"},
 		{"{a}b", "a"},
+		{"{ab}c", "ab"},
+		{"{ab}c{d}", "ab"},
+		{"x{ab}c{d}", "ab"},
 		{"a{b}", "b"},
+		{"a{bc}", "bc"},
+		{"a{bc}d", "bc"},
 		{"}{ab}cab", "ab"},
 		{"{}{abc}xy", ""},
 		{"{{abc}}xy", "{abc"},

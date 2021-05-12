@@ -308,8 +308,8 @@ func extractHashTagFromKey(key string) string {
 		return ""
 	}
 	rightBraceIndex := strings.Index(key[leftBraceIndex:], "}")
-	if (rightBraceIndex != -1) && (leftBraceIndex+1 < rightBraceIndex) {
-		return key[leftBraceIndex+1 : rightBraceIndex]
+	if rightBraceIndex > 1 {
+		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
 	}
 	return ""
 }
