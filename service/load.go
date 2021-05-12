@@ -111,10 +111,14 @@ func recordLoadSuccess(hashTag string, duration time.Duration) {
 func loadByHashTag(hashTag string) error {
 	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
+	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
+	redisClient := base.GetRedisCluster()
+	db := base.GetDBCluster()
+	logger := base.GetServerLogger()
 	var err error
 	for i := 0; i < loadRetryTimes; i++ {
 		startTime := time.Now()
-		err = loadKeysByHashTag(hashTag)
+		err = loadKeysByHashTag(redisClient, db, logger, hashTag, loadTimeout)
 		if err != nil {
 			if isRetryLoadErrorV2(err) {
 				time.Sleep(loadRetryInterval)
@@ -133,8 +137,7 @@ func loadByHashTag(hashTag string) error {
 // 1. if metaKey.state == "loaded", return; else: go to step 2
 // 2. acquire lock, if lock is acquired, load keys from database, go to step 3; else go to step 1 and retry
 // 3. release lock, update metaKey.state to loaded
-func loadKeysByHashTag(hashTag string) error {
-	client := base.GetRedisCluster()
+func loadKeysByHashTag(client *redis.ClusterClient, db *base.DBCluster, logger *log.Logger, hashTag string, loadTimeout time.Duration) error {
 	status, err := getStatusForHashTag(client, hashTag)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
@@ -152,9 +155,6 @@ func loadKeysByHashTag(hashTag string) error {
 		return err
 	}
 	defer releaseLoadLock(client, hashTag)
-	db := base.GetDBCluster()
-	logger := base.GetServerLogger()
-	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
 	ctx, cancel := context.WithTimeout(context.Background(), loadTimeout)
 	defer cancel()
 	if err := loadKeysFromDBToRedis(ctx, db, client, logger, hashTag); err != nil {
@@ -184,7 +184,7 @@ func releaseLoadLock(client *redis.ClusterClient, hashTag string) {
 
 func loadKeysFromDBToRedis(ctx context.Context, db *base.DBCluster, client *redis.ClusterClient, logger *log.Logger, hashTag string) error {
 	startTime := time.Now()
-	model, err := loadDataByIDWithContext(ctx, hashTag)
+	model, err := loadDataByIDWithContext(ctx, db, hashTag)
 	if err != nil {
 		logger.Info(
 			"load from databse",

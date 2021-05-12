@@ -333,10 +333,10 @@ type loadResult struct {
 	err   error
 }
 
-func loadDataByIDWithContext(ctx context.Context, hashTag string) (*roomDataModelV2, error) {
+func loadDataByIDWithContext(ctx context.Context, db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
 	loadResultCh := make(chan loadResult)
 	go func(ch chan loadResult) {
-		model, err := loadDataByID(hashTag)
+		model, err := loadDataByID(db, hashTag)
 		ch <- loadResult{model: model, err: err}
 	}(loadResultCh)
 	select {
@@ -347,29 +347,18 @@ func loadDataByIDWithContext(ctx context.Context, hashTag string) (*roomDataMode
 	}
 }
 
-func loadDataByID(hashTag string) (*roomDataModelV2, error) {
-	logger := base.GetServerLogger()
-	dbCluster := base.GetDBCluster()
+func loadDataByID(db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
 	model := &roomDataModelV2{HashTag: hashTag}
-	query, err := dbCluster.Model(model)
+	query, err := db.Model(model)
 	if err != nil {
 		return nil, err
 	}
-	startTime := time.Now()
 	if err := query.WherePK().Where("deleted_at is NULL").Select(); err != nil {
 		if errors.Is(err, pg.ErrNoRows) {
-			logger.Info(
-				"query database",
-				log.String("hash_tag", hashTag),
-				log.String("duration", time.Since(startTime).String()))
 			return nil, nil
 		}
 		return nil, err
 	}
-	logger.Info(
-		"query database",
-		log.String("hash_tag", hashTag),
-		log.String("duration", time.Since(startTime).String()))
 	return model, nil
 }
 
