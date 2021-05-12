@@ -23,7 +23,7 @@ type roomDataModel struct {
 
 	Key       string    `pg:"key,pk"`
 	Type      string    `pg:"type"`
-	Value     string    `pg:"value"`
+	Value     string    `pg:"value,use_zero"`
 	Deleted   bool      `pg:"deleted"`
 	UpdatedAt time.Time `pg:"updated_at"`
 	SyncedAt  time.Time `pg:"synced_at"`
