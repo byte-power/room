@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytepower_room/base"
-	"bytepower_room/base/log"
 	"context"
 	"errors"
 	"fmt"
@@ -84,31 +83,6 @@ func (tag HashTag) Load(timeout time.Duration) error {
 		return err
 	}
 	return tag.meta.SetAsLoaded()
-}
-
-func recordLoadDBSuccess(logger *log.Logger, hashTag string, duration time.Duration) {
-	logger.Info(
-		"load from databse",
-		log.String("hash_tag", hashTag),
-		log.String("duration", duration.String()),
-	)
-}
-
-func recordLoadDBError(logger *log.Logger, hashTag string, duration time.Duration, err error) {
-	logger.Error(
-		"load from databse error",
-		log.String("hash_tag", hashTag),
-		log.String("duration", duration.String()),
-		log.Error(err),
-	)
-}
-
-func recordLoadDBRecordNotFound(logger *log.Logger, metric *base.MetricClient, hashTag string) {
-	logger.Error(
-		"load from database record not found",
-		log.String("hash_tag", hashTag),
-	)
-	metric.MetricIncrease("error.load_record_not_found")
 }
 
 func (tag HashTag) loadKeys(ctx context.Context) error {
@@ -196,39 +170,7 @@ func (meta HashTagMetaInfo) SetAsCleaned() error {
 	return err
 }
 
-func recordLoadError(hashTag string, err error, duration time.Duration) {
-	logger := base.GetServerLogger()
-	metric := base.GetMetricService()
-	logger.Error(
-		"load keys error",
-		log.String("hash_tag", hashTag),
-		log.Error(err),
-		log.String("duration", duration.String()))
-	metric.MetricIncrease("error.loadkey")
-}
-
-func recordLoadRetry(hashTag string, err error, times int) {
-	logger := base.GetServerLogger()
-	metric := base.GetMetricService()
-	logger.Info(
-		"load keys retry",
-		log.String("hash_tag", hashTag),
-		log.Int("load_times", times),
-		log.Error(err))
-	metric.MetricIncrease("loadkey.retry")
-}
-
-func recordLoadSuccess(hashTag string, duration time.Duration) {
-	logger := base.GetServerLogger()
-	metric := base.GetMetricService()
-	logger.Info(
-		"load keys success",
-		log.String("hash_tag", hashTag),
-		log.String("duration", duration.String()))
-	metric.MetricTimeDuration("loadkey.duration", duration)
-}
-
-func load(hashTag string) error {
+func Load(hashTag string) error {
 	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
@@ -244,13 +186,13 @@ func load(hashTag string) error {
 		if err != nil {
 			if isRetryLoadErrorV2(err) {
 				time.Sleep(loadRetryInterval)
-				recordLoadRetry(hashTag, err, i+1)
+				recordLoadKeyRetryError(dep.Logger, dep.Metric, hashTag, err, i+1)
 				continue
 			}
-			recordLoadError(hashTag, err, time.Since(startTime))
+			recordLoadKeyError(dep.Logger, dep.Metric, hashTag, err, time.Since(startTime))
 			return err
 		}
-		recordLoadSuccess(hashTag, time.Since(startTime))
+		recordLoadKeySuccess(dep.Logger, dep.Metric, hashTag, time.Since(startTime))
 		return nil
 	}
 	return err
