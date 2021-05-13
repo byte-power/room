@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/gogf/greuse"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/tidwall/redcon"
@@ -235,7 +234,7 @@ func preProcessKey(key string) error {
 	if hashTag == "" {
 		return newInvalidKeyError(key)
 	}
-	if err := loadByHashTag(hashTag); err != nil {
+	if err := load(hashTag); err != nil {
 		return newLoadError(err)
 	}
 	return nil
@@ -312,24 +311,6 @@ func extractHashTagFromKey(key string) string {
 		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
 	}
 	return ""
-}
-
-func isKeyNeedLoad(key string) (bool, error) {
-	redisClient := base.GetRedisCluster()
-	metaKey := getMetaKey(key)
-	loadStatus, err := redisClient.HGet(context.TODO(), metaKey, "loaded").Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return false, newInternalError(err)
-	}
-	// err is redis.Nil means either metaKey does not exist or metaKey's `loaded` field does not exist.
-	// for current implementation, there is only one filed `loaded` in metaKey, so that's the same.
-	if errors.Is(err, redis.Nil) {
-		if err := setLoadedMeta(key); err != nil {
-			return false, newInternalError(err)
-		}
-		return false, nil
-	}
-	return loadStatus != "1", nil
 }
 
 func getMetaKey(key string) string {
