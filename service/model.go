@@ -364,11 +364,11 @@ func loadDataByID(db *base.DBCluster, hashTag string) (*roomDataModelV2, error) 
 
 var errNoRowsUpdated = errors.New("no rows is updated")
 
-func UpsertRoomData(hashTag, key string, value redisValue) error {
+func UpsertRoomData(db base.DBCluster, hashTag, key string, value redisValue) error {
 	retryTimes := 3
 	var err error
 	for i := 0; i < retryTimes; i++ {
-		if err = updateRoomData(hashTag, key, value); err != nil {
+		if err = updateRoomData(db, hashTag, key, value); err != nil {
 			if !isRetryErrorForUpdate(err) {
 				return err
 			}
@@ -390,8 +390,7 @@ func isRetryErrorForUpdate(err error) bool {
 	return false
 }
 
-func updateRoomData(hashTag, key string, value redisValue) error {
-	db := base.GetDBCluster()
+func updateRoomData(db base.DBCluster, hashTag, key string, value redisValue) error {
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, err := db.Model(model)
