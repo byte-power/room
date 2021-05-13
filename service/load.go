@@ -184,7 +184,7 @@ func Load(hashTag string) error {
 		}
 		err = tag.Load(loadTimeout)
 		if err != nil {
-			if isRetryLoadErrorV2(err) {
+			if isRetryLoadError(err) {
 				time.Sleep(loadRetryInterval)
 				recordLoadKeyRetryError(dep.Logger, dep.Metric, hashTag, err, i+1)
 				continue
@@ -218,7 +218,7 @@ func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string
 		if err != nil {
 			return newParseError(err)
 		}
-		if err := loadDataIntoRedisV2(ctx, client, key, slices, value.Type, expire); err != nil {
+		if err := loadDataIntoRedis(ctx, client, key, slices, value.Type, expire); err != nil {
 			return err
 		}
 	default:
@@ -227,7 +227,7 @@ func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string
 	return nil
 }
 
-func loadDataIntoRedisV2(
+func loadDataIntoRedis(
 	ctx context.Context, client *redis.ClusterClient,
 	key string, slices [][]interface{},
 	dataType string, expire time.Duration) error {
@@ -274,7 +274,7 @@ func loadDataIntoRedisV2(
 	return nil
 }
 
-func isRetryLoadErrorV2(err error) bool {
+func isRetryLoadError(err error) bool {
 	return errors.Is(err, errLoadKeysLockFailed) || errors.Is(err, context.DeadlineExceeded)
 }
 
