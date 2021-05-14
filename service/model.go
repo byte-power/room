@@ -340,14 +340,14 @@ func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordMod
 	return clusterModels, nil
 }
 
-type redisValue struct {
+type RedisValue struct {
 	Type     string `json:"type"`
 	Value    string `json:"value"`
 	SyncedTs int64  `json:"synced_ts"`
 	ExpireTs int64  `json:"expire_ts"`
 }
 
-func (v redisValue) isExpired(t time.Time) bool {
+func (v RedisValue) IsExpired(t time.Time) bool {
 	if v.ExpireTs == 0 {
 		return false
 	}
@@ -357,18 +357,18 @@ func (v redisValue) isExpired(t time.Time) bool {
 	return t.UnixNano()/1000/1000 >= v.ExpireTs
 }
 
-func (v redisValue) expireDuration(t time.Time) time.Duration {
+func (v RedisValue) ExpireDuration(t time.Time) time.Duration {
 	if v.ExpireTs == 0 {
 		return 0
 	}
 	return time.Unix(v.ExpireTs/1000, v.ExpireTs%1000*1000*1000).Sub(t)
 }
 
-func (v redisValue) IsZero() bool {
+func (v RedisValue) IsZero() bool {
 	return v.Type == ""
 }
 
-func (v redisValue) String() string {
+func (v RedisValue) String() string {
 	return fmt.Sprintf(
 		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
 		v.Type, v.Value, v.SyncedTs, v.ExpireTs)
@@ -378,7 +378,7 @@ type roomDataModelV2 struct {
 	tableName struct{} `pg:"_"`
 
 	HashTag   string                `pg:"hash_tag,pk"`
-	Value     map[string]redisValue `pg:"value"`
+	Value     map[string]RedisValue `pg:"value"`
 	DeletedAt time.Time             `pg:"deleted_at"`
 	CreatedAt time.Time             `pg:"created_at"`
 	UpdatedAt time.Time             `pg:"updated_at"`
@@ -429,7 +429,7 @@ func loadDataByID(db *base.DBCluster, hashTag string) (*roomDataModelV2, error) 
 
 var errNoRowsUpdated = errors.New("no rows is updated")
 
-func upsertRoomData(db *base.DBCluster, hashTag, key string, value redisValue) error {
+func upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) error {
 	retryTimes := 3
 	var err error
 	for i := 0; i < retryTimes; i++ {
@@ -455,7 +455,7 @@ func isRetryErrorForUpdate(err error) bool {
 	return false
 }
 
-func _upsertRoomData(db *base.DBCluster, hashTag, key string, value redisValue) error {
+func _upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) error {
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, err := db.Model(model)
@@ -467,7 +467,7 @@ func _upsertRoomData(db *base.DBCluster, hashTag, key string, value redisValue) 
 		if errors.Is(err, pg.ErrNoRows) {
 			model = &roomDataModelV2{
 				HashTag:   hashTag,
-				Value:     map[string]redisValue{key: value},
+				Value:     map[string]RedisValue{key: value},
 				CreatedAt: currentTime,
 				UpdatedAt: currentTime,
 				Version:   0,

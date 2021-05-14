@@ -422,37 +422,37 @@ func deleteWrittenRecordModels(models []*roomWrittenRecordModel) error {
 	return nil
 }
 
-func getValueFromRedis(key string) (redisValue, error) {
+func getValueFromRedis(key string) (RedisValue, error) {
 	redisClient := base.GetRedisCluster()
 	currentTime := time.Now()
 
 	// Get redis key type.
 	keyType, err := redisClient.Type(contextTODO, key).Result()
 	if err != nil {
-		return redisValue{}, err
+		return RedisValue{}, err
 	}
 	if keyType == redisKeyNotExist {
-		return redisValue{}, nil
+		return RedisValue{}, nil
 	}
 
 	keyValue, err := serializeValue(keyType, key)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return redisValue{}, nil
+			return RedisValue{}, nil
 		}
-		return redisValue{}, err
+		return RedisValue{}, err
 	}
 
 	ttl, err := redisClient.PTTL(contextTODO, key).Result()
 	if err != nil {
-		return redisValue{}, err
+		return RedisValue{}, err
 	}
 	// Key does not exist.
 	if ttl == -2 {
-		return redisValue{}, nil
+		return RedisValue{}, nil
 	}
 
-	value := redisValue{
+	value := RedisValue{
 		Type: keyType, Value: keyValue,
 		SyncedTs: utility.TimestampInMS(currentTime),
 	}
@@ -627,8 +627,8 @@ func CleanKeysTask(inactiveDuration time.Duration) error {
 	return nil
 }
 
-func isKeyShouldBeSynced(key string, value redisValue) (bool, error) {
-	isKeyInvalid := value.IsZero() || value.isExpired(time.Now())
+func isKeyShouldBeSynced(key string, value RedisValue) (bool, error) {
+	isKeyInvalid := value.IsZero() || value.IsExpired(time.Now())
 
 	redisClient := base.GetRedisCluster()
 	keyType, err := redisClient.Type(contextTODO, key).Result()
@@ -680,7 +680,7 @@ func isKeyShouldBeSynced(key string, value redisValue) (bool, error) {
 	return !isEqual, nil
 }
 
-func isValueEqual(keyType string, valueInRedis []string, value redisValue) (bool, error) {
+func isValueEqual(keyType string, valueInRedis []string, value RedisValue) (bool, error) {
 	var equal bool
 	var err error
 	if keyType != value.Type {

@@ -210,8 +210,8 @@ func Load(hashTag string) error {
 	return err
 }
 
-func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string, value redisValue) error {
-	expire := value.expireDuration(time.Now())
+func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string, value RedisValue) error {
+	expire := value.ExpireDuration(time.Now())
 	if expire < 0 {
 		return nil
 	}
