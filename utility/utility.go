@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -595,4 +596,8 @@ func IsTwoStringMapEqual(m1, m2 map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func TimestampInMS(t time.Time) int64 {
+	return t.UnixNano() / 1000 / 1000
 }

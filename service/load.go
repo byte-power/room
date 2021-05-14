@@ -59,6 +59,18 @@ func (tag HashTag) Name() string {
 	return tag.name
 }
 
+func (tag HashTag) CleanKeys(keys ...string) error {
+	if err := tag.acquireLoadLock(); err != nil {
+		return err
+	}
+	defer tag.releaseLoadLock()
+	if err := tag.meta.SetAsCleaned(); err != nil {
+		return err
+	}
+	_, err := tag.dep.Redis.Del(contextTODO, keys...).Result()
+	return err
+}
+
 func (tag HashTag) Load(timeout time.Duration) error {
 	status, err := tag.meta.GetLoadStatus()
 	if err != nil {

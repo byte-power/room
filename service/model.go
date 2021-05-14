@@ -5,6 +5,7 @@ import (
 	"bytepower_room/base/log"
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-pg/pg/v10"
@@ -117,6 +118,16 @@ func (model *roomWrittenRecordModel) GetTablePrefix() string {
 	return "room_written_record"
 }
 
+func deleteRoomWrittenRecordModel(db *base.DBCluster, key string, writtenAt time.Time) error {
+	model := &roomWrittenRecordModel{Key: key}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	_, err = query.WherePK().Where("written_at=?", writtenAt).Delete()
+	return err
+}
+
 func loadWrittenRecordModels(count int) ([]*roomWrittenRecordModel, error) {
 	db := base.GetWrittenRecordDBCluster()
 	shardingCount := db.GetShardingCount()
@@ -203,27 +214,43 @@ func (model *roomAccessedRecordModel) GetTablePrefix() string {
 	return "room_accessed_record"
 }
 
-func loadAccessedRecordModels(count int, t time.Time, excludedKeys []string) ([]*roomAccessedRecordModel, error) {
+type roomAccessedRecordModelV2 struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag    string    `pg:"hash_tag,pk"`
+	AccessedAt time.Time `pg:"accessed_at"`
+	CreatedAt  time.Time `pg:"created_at"`
+}
+
+func (model *roomAccessedRecordModelV2) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
+	return "room_accessed_record_v2"
+}
+
+func loadAccessedRecordModels(count int, t time.Time, excludedHashTags []string) ([]*roomAccessedRecordModelV2, error) {
 	db := base.GetAccessedRecordDBCluster()
 	shardingCount := db.GetShardingCount()
-	tablePrefix := (&roomAccessedRecordModel{}).GetTablePrefix()
+	tablePrefix := (&roomAccessedRecordModelV2{}).GetTablePrefix()
 	excludedKeysInSharding := make(map[int][]string)
-	for _, key := range excludedKeys {
-		index := db.GetShardingIndex(key)
-		if keys, ok := excludedKeysInSharding[index]; !ok {
-			excludedKeysInSharding[index] = []string{key}
+	for _, hashTag := range excludedHashTags {
+		index := db.GetShardingIndex(hashTag)
+		if hashTags, ok := excludedKeysInSharding[index]; !ok {
+			excludedKeysInSharding[index] = []string{hashTag}
 		} else {
-			excludedKeysInSharding[index] = append(keys, key)
+			excludedKeysInSharding[index] = append(hashTags, hashTag)
 		}
 	}
-	var models []*roomAccessedRecordModel
+	var models []*roomAccessedRecordModelV2
 	for index := 0; index < shardingCount; index++ {
 		query, err := db.Models(&models, tablePrefix, index)
 		if err != nil {
 			return nil, err
 		}
-		if keys, ok := excludedKeysInSharding[index]; ok {
-			query = query.Where("key not in (?)", pg.In(keys))
+		if hashTags, ok := excludedKeysInSharding[index]; ok {
+			query = query.Where("hash_tag not in (?)", pg.In(hashTags))
 		}
 		if err := query.Where("accessed_at<?", t).Limit(count).Select(); err != nil {
 			if errors.Is(err, pg.ErrNoRows) {
@@ -238,17 +265,17 @@ func loadAccessedRecordModels(count int, t time.Time, excludedKeys []string) ([]
 	return nil, nil
 }
 
-func bulkUpsertAccessedRecordModels(models ...*roomAccessedRecordModel) error {
-	clusterModels, err := getClusterModelsFromAccessedRecordModels(models...)
+func bulkUpsertAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) error {
+	clusterModels, err := getClusterModelsFromAccessedRecordModelsV2(models...)
 	if err != nil {
 		return err
 	}
 	for _, clusterModel := range clusterModels {
 		_, err := clusterModel.client.Model(&clusterModel.models).
 			Table(clusterModel.tableName).
-			OnConflict("(key) DO UPDATE").
+			OnConflict("(hash_tag) DO UPDATE").
 			Set("accessed_at=EXCLUDED.accessed_at").
-			Where("room_accessed_record_model.accessed_at<EXCLUDED.accessed_at").
+			Where("room_accessed_record_model_v2.accessed_at<EXCLUDED.accessed_at").
 			Insert()
 		if err != nil {
 			return err
@@ -263,9 +290,9 @@ type clusterAccessedRecordModel struct {
 	models    []*roomAccessedRecordModel
 }
 
-func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModel) ([]clusterAccessedRecordModel, error) {
+func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
 	db := base.GetAccessedRecordDBCluster()
-	clusterModelsMap := make(map[string]clusterAccessedRecordModel)
+	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
 	for _, model := range models {
 		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
 		if err != nil {
@@ -275,10 +302,38 @@ func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModel
 			origin.models = append(origin.models, model)
 			clusterModelsMap[tableName] = origin
 		} else {
-			clusterModelsMap[tableName] = clusterAccessedRecordModel{tableName: tableName, client: client, models: []*roomAccessedRecordModel{model}}
+			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
 		}
 	}
-	clusterModels := make([]clusterAccessedRecordModel, 0, len(clusterModelsMap))
+	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
+	for _, clusterModel := range clusterModelsMap {
+		clusterModels = append(clusterModels, clusterModel)
+	}
+	return clusterModels, nil
+}
+
+type clusterAccessedRecordModelV2 struct {
+	tableName string
+	client    *pg.DB
+	models    []*roomAccessedRecordModelV2
+}
+
+func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
+	db := base.GetAccessedRecordDBCluster()
+	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
+	for _, model := range models {
+		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
+		if err != nil {
+			return nil, err
+		}
+		if origin, ok := clusterModelsMap[tableName]; ok {
+			origin.models = append(origin.models, model)
+			clusterModelsMap[tableName] = origin
+		} else {
+			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
+		}
+	}
+	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
 	for _, clusterModel := range clusterModelsMap {
 		clusterModels = append(clusterModels, clusterModel)
 	}
@@ -307,6 +362,16 @@ func (v redisValue) expireDuration(t time.Time) time.Duration {
 		return 0
 	}
 	return time.Unix(v.ExpireTs/1000, v.ExpireTs%1000*1000*1000).Sub(t)
+}
+
+func (v redisValue) IsZero() bool {
+	return v.Type == ""
+}
+
+func (v redisValue) String() string {
+	return fmt.Sprintf(
+		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
+		v.Type, v.Value, v.SyncedTs, v.ExpireTs)
 }
 
 type roomDataModelV2 struct {
@@ -364,11 +429,11 @@ func loadDataByID(db *base.DBCluster, hashTag string) (*roomDataModelV2, error) 
 
 var errNoRowsUpdated = errors.New("no rows is updated")
 
-func UpsertRoomData(db base.DBCluster, hashTag, key string, value redisValue) error {
+func upsertRoomData(db *base.DBCluster, hashTag, key string, value redisValue) error {
 	retryTimes := 3
 	var err error
 	for i := 0; i < retryTimes; i++ {
-		if err = updateRoomData(db, hashTag, key, value); err != nil {
+		if err = _upsertRoomData(db, hashTag, key, value); err != nil {
 			if !isRetryErrorForUpdate(err) {
 				return err
 			}
@@ -390,7 +455,7 @@ func isRetryErrorForUpdate(err error) bool {
 	return false
 }
 
-func updateRoomData(db base.DBCluster, hashTag, key string, value redisValue) error {
+func _upsertRoomData(db *base.DBCluster, hashTag, key string, value redisValue) error {
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, err := db.Model(model)
@@ -429,4 +494,19 @@ func updateRoomData(db base.DBCluster, hashTag, key string, value redisValue) er
 		return errNoRowsUpdated
 	}
 	return nil
+}
+
+func deleteRoomData(db *base.DBCluster, hashTag, key string) error {
+	currentTime := time.Now()
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	_, err = query.Set("value=value-?", key).
+		Set("updated_at=?", currentTime).
+		Set("version=version+1").
+		WherePK().
+		Update()
+	return err
 }

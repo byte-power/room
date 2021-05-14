@@ -180,7 +180,7 @@ func SyncRecordsTask() error {
 
 			accessedModels := accessedMapToModels(accessedMap)
 			writtenModels := writtenMapToModels(writtenMap)
-			if err := bulkUpsertAccessedRecordModels(accessedModels...); err != nil {
+			if err := bulkUpsertAccessedRecordModelsV2(accessedModels...); err != nil {
 				recordTaskError(
 					taskName, err, "bulk_upsert_access_record",
 					map[string]string{"message": message.String()})
@@ -230,12 +230,12 @@ func mergeMapsByTime(maps ...map[string]time.Time) map[string]time.Time {
 	return result
 }
 
-func accessedMapToModels(m map[string]time.Time) []*roomAccessedRecordModel {
+func accessedMapToModels(m map[string]time.Time) []*roomAccessedRecordModelV2 {
 	currentTime := time.Now()
-	models := make([]*roomAccessedRecordModel, len(m))
+	models := make([]*roomAccessedRecordModelV2, len(m))
 	index := 0
-	for key, t := range m {
-		model := &roomAccessedRecordModel{Key: key, AccessedAt: t, CreatedAt: currentTime}
+	for hashTag, t := range m {
+		model := &roomAccessedRecordModelV2{HashTag: hashTag, AccessedAt: t, CreatedAt: currentTime}
 		models[index] = model
 		index++
 	}
@@ -287,8 +287,8 @@ func processAccessFiles(contents [][]byte) (map[string]time.Time, map[string]tim
 }
 
 func processAccessFile(content []byte) (map[string]time.Time, map[string]time.Time, error) {
-	accessMap := make(map[string]time.Time)
-	writeAccessMap := make(map[string]time.Time)
+	accessedMap := make(map[string]time.Time)
+	writtenMap := make(map[string]time.Time)
 	accessEventsInBytes := bytes.Split(content, []byte("\n"))
 	for _, eventInBytes := range accessEventsInBytes {
 		eventInBytes = bytes.Trim(eventInBytes, "\n \t")
@@ -301,11 +301,14 @@ func processAccessFile(content []byte) (map[string]time.Time, map[string]time.Ti
 			return nil, nil, err
 		}
 		if event.AccessMode == base.KeyAccessModeWrite {
-			writeAccessMap[event.Key] = getLaterTime(writeAccessMap[event.Key], event.AccessTime)
+			writtenMap[event.Key] = getLaterTime(writtenMap[event.Key], event.AccessTime)
 		}
-		accessMap[event.Key] = getLaterTime(accessMap[event.Key], event.AccessTime)
+		hashTag := extractHashTagFromKey(event.Key)
+		if hashTag != "" {
+			accessedMap[hashTag] = getLaterTime(accessedMap[hashTag], event.AccessTime)
+		}
 	}
-	return accessMap, writeAccessMap, nil
+	return accessedMap, writtenMap, nil
 }
 
 func getLaterTime(t1, t2 time.Time) time.Time {
@@ -339,9 +342,10 @@ func SyncKeysTask() error {
 	startTime := time.Now()
 	logger := base.GetTaskLogger()
 	taskName := "sync_keys"
+	dep := base.GetTaskDependency()
 	logTaskStart(taskName, startTime)
 	metric := base.GetTaskMetricService()
-	count := 1000
+	count := 100
 	for {
 		time.Sleep(syncKeysIntervalDuration)
 		models, err := loadWrittenRecordModels(count)
@@ -352,15 +356,36 @@ func SyncKeysTask() error {
 		if len(models) == 0 {
 			break
 		}
-		updatedCount, deletedCount, err := syncWrittenModels(models)
-		if err != nil {
-			recordTaskError(taskName, err, "sync_written_record", nil)
-			return err
-		}
-
-		if err := deleteWrittenRecordModels(models); err != nil {
-			recordTaskError(taskName, err, "delete_written_record", nil)
-			return err
+		updatedCount := 0
+		deletedCount := 0
+		for _, model := range models {
+			key := model.Key
+			hashTag := extractHashTagFromKey(key)
+			if hashTag == "" {
+				err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			value, err := getValueFromRedis(key)
+			if err != nil {
+				return err
+			}
+			if value.IsZero() {
+				if err := deleteRoomData(dep.DB, hashTag, key); err != nil {
+					return err
+				}
+				deletedCount += 1
+			} else {
+				if err := upsertRoomData(dep.DB, hashTag, key, value); err != nil {
+					return err
+				}
+				updatedCount += 1
+			}
+			if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+				return err
+			}
 		}
 		logger.Info(
 			"sync keys success",
@@ -375,62 +400,6 @@ func SyncKeysTask() error {
 	}
 	recordTaskSuccess(taskName, time.Since(startTime))
 	return nil
-}
-
-// If key does not exist in redis cluster, mark as deleted in database
-// If key exists in redis cluster, sync data to database
-func syncWrittenModels(models []*roomWrittenRecordModel) (int, int, error) {
-	updatedModels := make([]*roomDataModel, 0)
-	deletedModels := make([]*roomDataModel, 0)
-	for _, model := range models {
-		m, existed, err := newRoomDataModelFromRedis(model.Key, model.WrittenAt)
-		if err != nil {
-			return 0, 0, err
-		}
-		if existed {
-			updatedModels = append(updatedModels, m)
-		} else {
-			deletedModels = append(deletedModels, m)
-		}
-	}
-	updatedCount := len(updatedModels)
-	deletedCount := len(deletedModels)
-	updatedClusterModels, err := getClusterModelsFromRoomDataModels(updatedModels...)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, clusterModel := range updatedClusterModels {
-		_, err = clusterModel.client.Model(&clusterModel.models).
-			Table(clusterModel.tableName).
-			OnConflict("(key) DO UPDATE").
-			Set("type=EXCLUDED.type").
-			Set("value=EXCLUDED.value").
-			Set("deleted=EXCLUDED.deleted").
-			Set("updated_at=EXCLUDED.updated_at").
-			Set("synced_at=EXCLUDED.synced_at").
-			Set("created_at=EXCLUDED.created_at").
-			Set("expire_at=EXCLUDED.expire_at").
-			//Set("version=?version+1").
-			Insert()
-		if err != nil {
-			return 0, 0, err
-		}
-	}
-	deletedClsuterModels, err := getClusterModelsFromRoomDataModels(deletedModels...)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, clusterModel := range deletedClsuterModels {
-		_, err = clusterModel.client.Model(&clusterModel.models).
-			Table(clusterModel.tableName).
-			Column("updated_at", "synced_at", "deleted").
-			WherePK().
-			Update()
-		if err != nil {
-			return 0, 0, err
-		}
-	}
-	return updatedCount, deletedCount, nil
 }
 
 func deleteWrittenRecordModels(models []*roomWrittenRecordModel) error {
@@ -453,68 +422,45 @@ func deleteWrittenRecordModels(models []*roomWrittenRecordModel) error {
 	return nil
 }
 
-func newRoomDataModelFromRedis(key string, writtenAt time.Time) (*roomDataModel, bool, error) {
+func getValueFromRedis(key string) (redisValue, error) {
 	redisClient := base.GetRedisCluster()
 	currentTime := time.Now()
 
 	// Get redis key type.
 	keyType, err := redisClient.Type(contextTODO, key).Result()
 	if err != nil {
-		return nil, false, err
+		return redisValue{}, err
 	}
 	if keyType == redisKeyNotExist {
-		m := &roomDataModel{
-			Key:       key,
-			UpdatedAt: writtenAt,
-			SyncedAt:  currentTime,
-			Deleted:   true,
-		}
-		return m, false, nil
+		return redisValue{}, nil
 	}
 
 	keyValue, err := serializeValue(keyType, key)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			m := &roomDataModel{
-				Key:       key,
-				UpdatedAt: writtenAt,
-				SyncedAt:  currentTime,
-				Deleted:   true,
-			}
-			return m, false, nil
+			return redisValue{}, nil
 		}
-		return nil, false, err
+		return redisValue{}, err
 	}
 
 	ttl, err := redisClient.PTTL(contextTODO, key).Result()
 	if err != nil {
-		return nil, false, err
+		return redisValue{}, err
 	}
 	// Key does not exist.
 	if ttl == -2 {
-		m := &roomDataModel{
-			Key:       key,
-			UpdatedAt: writtenAt,
-			SyncedAt:  currentTime,
-			Deleted:   true,
-		}
-		return m, false, nil
+		return redisValue{}, nil
 	}
 
-	m := &roomDataModel{
-		Key:       key,
-		Type:      keyType,
-		Value:     keyValue,
-		Deleted:   false,
-		UpdatedAt: writtenAt,
-		SyncedAt:  currentTime,
-		CreatedAt: currentTime,
-		Version:   0,
+	value := redisValue{
+		Type: keyType, Value: keyValue,
+		SyncedTs: utility.TimestampInMS(currentTime),
 	}
+
 	if ttl > 0 {
-		m.ExpireAt = currentTime.Add(ttl)
+		value.ExpireTs = utility.TimestampInMS(currentTime.Add(ttl))
 	}
-	return m, true, nil
+	return value, nil
 }
 
 func serializeValue(keyType, key string) (string, error) {
@@ -604,14 +550,15 @@ func CleanKeysTask(inactiveDuration time.Duration) error {
 	startTime := time.Now()
 	logger := base.GetTaskLogger()
 	taskName := "clean_keys"
-	count := 1000
+	count := 100
 	inactiveTime := time.Now().Add(-1 * inactiveDuration)
 	metric := base.GetTaskMetricService()
+	dep := base.GetTaskDependency()
 	logTaskStart(taskName, startTime)
-	excludedKeys := utility.NewStringSet()
+	excludedHashTags := utility.NewStringSet()
 	for {
 		time.Sleep(cleanKeysIntervalDuration)
-		models, err := loadAccessedRecordModels(count, inactiveTime, excludedKeys.ToSlice())
+		models, err := loadAccessedRecordModels(count, inactiveTime, excludedHashTags.ToSlice())
 		if err != nil {
 			recordTaskError(taskName, err, "load_accessed_record", nil)
 			return err
@@ -619,29 +566,50 @@ func CleanKeysTask(inactiveDuration time.Duration) error {
 		if len(models) == 0 {
 			break
 		}
-		var deletedModels []*roomAccessedRecordModel
-		for _, model := range models {
-			shouldBeSynced, err := isKeyShouldBeSynced(model.Key)
+		var deletedModels []*roomAccessedRecordModelV2
+		for _, recordModel := range models {
+			hashTag := recordModel.HashTag
+			model, err := loadDataByID(dep.DB, recordModel.HashTag)
 			if err != nil {
-				recordTaskError(taskName, err, "check_should_be_synced", map[string]string{"key": model.Key})
+				recordTaskError(taskName, err, "query_data", map[string]string{"hash_tag": hashTag})
 				return err
 			}
-			if shouldBeSynced {
-				excludedKeys.Add(model.Key)
-				recordTaskError(taskName, err, "should_be_synced", map[string]string{"key": model.Key})
+			canBeCleaned := true
+			cleanedKeys := []string{}
+			for key, value := range model.Value {
+				shouldBeSynced, err := isKeyShouldBeSynced(key, value)
+				if err != nil {
+					recordTaskError(
+						taskName, err, "check_should_be_synced",
+						map[string]string{"key": key, "hash_tag": hashTag})
+					return err
+				}
+				if shouldBeSynced {
+					excludedHashTags.Add(recordModel.HashTag)
+					recordTaskError(
+						taskName, err, "should_be_synced",
+						map[string]string{"key": key, "hash_tag": hashTag})
+					canBeCleaned = false
+					break
+				}
+				cleanedKeys = append(cleanedKeys, key)
+			}
+			if !canBeCleaned {
 				continue
 			}
-
-			if err := cleanInactiveKey(model.Key); err != nil {
-				recordTaskError(taskName, err, "clean_key", map[string]string{"key": model.Key})
+			if err := cleanInactiveKeys(model.HashTag, cleanedKeys...); err != nil {
+				recordTaskError(
+					taskName, err, "clean_key",
+					map[string]string{"keys": strings.Join(cleanedKeys, ","), "hash_tag": hashTag})
 				return err
 			}
 			logger.Info(
-				"clean key success",
+				"clean keys success",
 				log.String("task", taskName),
-				log.String("key", model.Key),
+				log.String("hash_tag", hashTag),
+				log.String("keys", strings.Join(cleanedKeys, ",")),
 			)
-			deletedModels = append(deletedModels, model)
+			deletedModels = append(deletedModels, recordModel)
 		}
 		if err := deleteAccessedRecordModels(deletedModels); err != nil {
 			recordTaskError(taskName, err, "delete_accessed_record", nil)
@@ -650,21 +618,17 @@ func CleanKeysTask(inactiveDuration time.Duration) error {
 		metric.MetricCount(fmt.Sprintf("%s.success.count", taskName), len(deletedModels))
 	}
 	logger.Info(
-		"excluded keys count",
+		"excluded hash_tag count",
 		log.String("task", taskName),
-		log.Int("count", excludedKeys.Len()),
+		log.Int("count", excludedHashTags.Len()),
 	)
-	metric.MetricCount(fmt.Sprintf("%s.exclude_keys.count", taskName), excludedKeys.Len())
+	metric.MetricCount(fmt.Sprintf("%s.exclude_hashtag.count", taskName), excludedHashTags.Len())
 	recordTaskSuccess(taskName, time.Since(startTime))
 	return nil
 }
 
-func isKeyShouldBeSynced(key string) (bool, error) {
-	model, err := loadDataByKey(key)
-	if err != nil {
-		return false, err
-	}
-	isModelInvalid := model == nil || model.IsExpired(time.Now())
+func isKeyShouldBeSynced(key string, value redisValue) (bool, error) {
+	isKeyInvalid := value.IsZero() || value.isExpired(time.Now())
 
 	redisClient := base.GetRedisCluster()
 	keyType, err := redisClient.Type(contextTODO, key).Result()
@@ -673,20 +637,20 @@ func isKeyShouldBeSynced(key string) (bool, error) {
 	}
 
 	logger := base.GetTaskLogger()
-	if keyType == redisKeyNotExist && isModelInvalid {
+	if keyType == redisKeyNotExist && isKeyInvalid {
 		return false, nil
 	}
-	if keyType == redisKeyNotExist || isModelInvalid {
+	if keyType == redisKeyNotExist || isKeyInvalid {
 		logger.Info(
 			"should be synced key",
 			log.String("key_type", keyType),
 			log.String("key", key),
-			log.String("db_model", fmt.Sprint(model)),
+			log.String("db_value", value.String()),
 		)
 		return true, nil
 	}
 
-	value, err := getValueByKeyFromRedis(keyType, key)
+	valueInRedis, err := getValueByKeyFromRedis(keyType, key)
 	if err != nil {
 		// If key does not exist, it means key is changed or expired after type check.
 		if errors.Is(err, redis.Nil) {
@@ -694,13 +658,13 @@ func isKeyShouldBeSynced(key string) (bool, error) {
 				"should be synced key",
 				log.String("key", key),
 				log.String("redis_value", "nil"),
-				log.String("db_model", fmt.Sprint(model)),
+				log.String("db_value", value.String()),
 			)
 			return true, nil
 		}
 		return false, err
 	}
-	isEqual, err := isValueEqual(keyType, value, model.Value)
+	isEqual, err := isValueEqual(keyType, valueInRedis, value)
 	if err != nil {
 		return false, err
 	}
@@ -708,23 +672,27 @@ func isKeyShouldBeSynced(key string) (bool, error) {
 		logger.Info(
 			"should be synced key",
 			log.String("key", key),
-			log.String("key_type", model.Type),
-			log.String("redis_value", fmt.Sprint(value)),
-			log.String("db_value", model.Value),
+			log.String("key_type", keyType),
+			log.String("redis_value", fmt.Sprint(valueInRedis)),
+			log.String("db_value", value.String()),
 		)
 	}
 	return !isEqual, nil
 }
 
-func isValueEqual(keyType string, valueInRedis []string, valueInDB string) (bool, error) {
+func isValueEqual(keyType string, valueInRedis []string, value redisValue) (bool, error) {
 	var equal bool
 	var err error
+	if keyType != value.Type {
+		return false, nil
+	}
 	equalFuncs := map[string]func(s1, s2 []string) bool{
 		hashType: isTwoHashEqual,
 		listType: isTwoListEqual,
 		setType:  isTwoSetEqual,
 		zsetType: isTwoZSetEqual,
 	}
+	valueInDB := value.Value
 	switch keyType {
 	case stringType:
 		equal = valueInRedis[0] == valueInDB
@@ -767,36 +735,27 @@ func isTwoZSetEqual(s1, s2 []string) bool {
 	return isTwoHashEqual(s1, s2)
 }
 
-func cleanInactiveKey(key string) error {
-	redisClient := base.GetRedisCluster()
-	metaKey := getMetaKey(key)
-	_, err := redisClient.TxPipelined(contextTODO, func(piper redis.Pipeliner) error {
-		piper.Del(contextTODO, key)
-		piper.HSet(contextTODO, metaKey, "loaded", "2")
-		return nil
-	})
-	// When metaKey and key not in the same slot, only for test data
-	if err != nil && strings.Contains(err.Error(), "CROSSSLOT Keys") {
-		redisClient.Del(contextTODO, key)
-		redisClient.HSet(contextTODO, metaKey, "loaded", "2")
-		return nil
+func cleanInactiveKeys(hashTag string, keys ...string) error {
+	tag, err := NewHashTag(hashTag, base.GetTaskDependency())
+	if err != nil {
+		return err
 	}
-	return err
+	return tag.CleanKeys(keys...)
 }
 
-func deleteAccessedRecordModels(models []*roomAccessedRecordModel) error {
+func deleteAccessedRecordModels(models []*roomAccessedRecordModelV2) error {
 	clusterModels, err := getClusterModelsFromAccessedRecordModels(models...)
 	if err != nil {
 		return err
 	}
 	for _, clusterModel := range clusterModels {
-		keys := make([]string, len(clusterModel.models))
+		hashTags := make([]string, len(clusterModel.models))
 		for index, model := range clusterModel.models {
-			keys[index] = model.Key
+			hashTags[index] = model.HashTag
 		}
-		_, err := clusterModel.client.Model((*roomAccessedRecordModel)(nil)).
+		_, err := clusterModel.client.Model((*roomAccessedRecordModelV2)(nil)).
 			Table(clusterModel.tableName).
-			Where("key in (?)", pg.In(keys)).Delete()
+			Where("hash_tag in (?)", pg.In(hashTags)).Delete()
 		if err != nil {
 			return err
 		}
