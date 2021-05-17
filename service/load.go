@@ -26,6 +26,7 @@ const (
 
 	HashTagStatusLoaded            = "L"
 	HashTagStatusCleaned           = "C"
+	HashTagStatusNotExisted        = "N"
 	HashTagMetaInfoStatusFieldName = "status"
 )
 
@@ -74,15 +75,15 @@ func (tag HashTag) CleanKeys(keys ...string) error {
 func (tag HashTag) Load(timeout time.Duration) error {
 	status, err := tag.meta.GetLoadStatus()
 	if err != nil {
-		if errors.Is(err, redis.Nil) {
-			if err := tag.meta.SetAsLoaded(); err != nil {
-				return err
-			}
-			return nil
-		}
 		return err
 	}
 	if status == HashTagStatusLoaded {
+		return nil
+	}
+	if status == HashTagStatusNotExisted {
+		if err := tag.meta.SetAsLoaded(); err != nil {
+			return err
+		}
 		return nil
 	}
 	if err := tag.acquireLoadLock(); err != nil {
@@ -165,7 +166,12 @@ func getHashTagMetaKey(hashTag string) string {
 }
 
 func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
-	return meta.dep.Redis.HGet(contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName).Result()
+	result, err := meta.dep.Redis.HGet(contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName).Result()
+	// error is redis.Nil means that either metaKey or metaKey.status field does not exist.
+	if errors.Is(err, redis.Nil) {
+		return HashTagStatusNotExisted, nil
+	}
+	return result, err
 }
 
 func (meta HashTagMetaInfo) SetAsLoaded() error {
@@ -211,8 +217,8 @@ func Load(hashTag string) error {
 }
 
 func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string, value RedisValue) error {
-	expiration := value.ExpireDuration(time.Now())
-	if expiration < 0 {
+	expiration := value.TTL(time.Now())
+	if expiration == 0 {
 		return nil
 	}
 	dataType := value.Type
@@ -220,6 +226,9 @@ func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string
 		return fmt.Errorf("data type %s is not supported", dataType)
 	}
 	if dataType == stringType {
+		if expiration == -1 {
+			expiration = 0
+		}
 		_, err := client.Set(ctx, key, value.Value, expiration).Result()
 		return err
 	}
@@ -247,7 +256,7 @@ func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string
 }
 
 func loadSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration < 0 {
+	if expiration == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -263,7 +272,7 @@ func loadSetToRedis(ctx context.Context, client *redis.ClusterClient, key string
 }
 
 func loadListToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration < 0 {
+	if expiration == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -279,7 +288,7 @@ func loadListToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 }
 
 func loadHashToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration < 0 {
+	if expiration == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -298,7 +307,7 @@ func loadHashToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 }
 
 func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration < 0 {
+	if expiration == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()

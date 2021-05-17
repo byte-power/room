@@ -215,12 +215,21 @@ func isTransactionNeeded(command commands.Commander) bool {
 
 func preProcessCommand(command commands.Commander) error {
 	logger := base.GetServerLogger()
+	hashTags := utility.NewStringSet()
 	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
-		if err := preProcessKey(key); err != nil {
+		hashTag := extractHashTagFromKey(key)
+		if hashTag == "" {
+			return newInvalidKeyError(key)
+		}
+		hashTags.Add(hashTag)
+	}
+
+	for _, hashTag := range hashTags.ToSlice() {
+		if err := preProcessHashTag(hashTag); err != nil {
 			logger.Error(
-				"preprocess key error",
+				"preprocess command error",
 				log.String("command", command.String()),
-				log.String("key", key),
+				log.String("hash_tag", hashTag),
 				log.Error(err),
 			)
 			return err
@@ -229,11 +238,7 @@ func preProcessCommand(command commands.Commander) error {
 	return nil
 }
 
-func preProcessKey(key string) error {
-	hashTag := extractHashTagFromKey(key)
-	if hashTag == "" {
-		return newInvalidKeyError(key)
-	}
+func preProcessHashTag(hashTag string) error {
 	if err := Load(hashTag); err != nil {
 		return newLoadError(err)
 	}
