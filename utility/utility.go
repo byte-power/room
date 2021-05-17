@@ -600,6 +600,13 @@ func TimestampInMS(t time.Time) int64 {
 	return t.UnixNano() / 1000 / 1000
 }
 
+func GetSecondsAndNanoSecondsFromTsInMs(ts int64) (int64, int64) {
+	seconds := ts / 1000
+	ms := ts % 1000
+	ns := ms * 1000 * 1000
+	return seconds, ns
+}
+
 var ErrSizeNotPositive = errors.New("size should be greater than 0")
 
 func ConvertJSONArrayIntoSlices(v string, size int) ([][]interface{}, error) {

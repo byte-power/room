@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"bytepower_room/utility"
 	"context"
 	"errors"
 	"fmt"
@@ -356,14 +357,22 @@ func (v RedisValue) IsExpired(t time.Time) bool {
 	if t.IsZero() {
 		return false
 	}
-	return t.UnixNano()/1000/1000 >= v.ExpireTs
+	return utility.TimestampInMS(t) >= v.ExpireTs
 }
 
-func (v RedisValue) ExpireDuration(t time.Time) time.Duration {
+// key does not have expiration, return time.Duration(-1)
+// key has expiration and has already expired, return time.Duration(0)
+// key has expiration and has not expired yet, return positive time.Duration
+func (v RedisValue) TTL(t time.Time) time.Duration {
 	if v.ExpireTs == 0 {
-		return 0
+		return time.Duration(-1)
 	}
-	return time.Unix(v.ExpireTs/1000, v.ExpireTs%1000*1000*1000).Sub(t)
+	seconds, nanoSeconds := utility.GetSecondsAndNanoSecondsFromTsInMs(v.ExpireTs)
+	duration := time.Unix(seconds, nanoSeconds).Sub(t)
+	if duration < 0 {
+		return time.Duration(0)
+	}
+	return duration
 }
 
 func (v RedisValue) IsZero() bool {
