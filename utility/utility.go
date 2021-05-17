@@ -1,7 +1,7 @@
 package utility
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -13,7 +13,11 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func PanicIfNotNil(err error) {
 	if err == nil {
@@ -156,9 +160,6 @@ func AnyToInt64(value interface{}) int64 {
 			return 1
 		}
 		return 0
-	case json.Number:
-		v, _ := val.Int64()
-		return v
 	}
 	return 0
 }
@@ -208,9 +209,6 @@ func AnyToFloat64(value interface{}) float64 {
 			return 1
 		}
 		return 0
-	case json.Number:
-		v, _ := val.Float64()
-		return v
 	}
 	return 0
 }
@@ -600,4 +598,39 @@ func IsTwoStringMapEqual(m1, m2 map[string]string) bool {
 
 func TimestampInMS(t time.Time) int64 {
 	return t.UnixNano() / 1000 / 1000
+}
+
+var ErrSizeNotPositive = errors.New("size should be greater than 0")
+
+func ConvertJSONArrayIntoSlices(v string, size int) ([][]interface{}, error) {
+	if size <= 0 {
+		return nil, ErrSizeNotPositive
+	}
+	value := []interface{}{}
+	if err := json.Unmarshal([]byte(v), &value); err != nil {
+		return nil, err
+	}
+	return SplitSliceBySize(value, size)
+}
+
+func SplitSliceBySize(slice []interface{}, size int) ([][]interface{}, error) {
+	if size <= 0 {
+		return nil, ErrSizeNotPositive
+	}
+	slices := [][]interface{}{}
+	length := len(slice)
+	chunkCount := length / size
+	if length%size != 0 {
+		chunkCount++
+	}
+	for index := 0; index < chunkCount; index++ {
+		var s []interface{}
+		if (index+1)*size > length {
+			s = slice[index*size:]
+		} else {
+			s = slice[index*size : (index+1)*size]
+		}
+		slices = append(slices, s)
+	}
+	return slices, nil
 }

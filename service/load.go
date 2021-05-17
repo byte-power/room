@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/utility"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 )
 
 var errDataFormatError = errors.New("data format is invalid")
-var errLoadTimeout = errors.New("load key timeout")
 var errLoadKeysLockFailed = errors.New("do not get load lock")
 
 var ErrEmptyHashTag = errors.New("hash tag is empty")
@@ -211,109 +211,125 @@ func Load(hashTag string) error {
 }
 
 func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string, value RedisValue) error {
-	expire := value.ExpireDuration(time.Now())
-	if expire < 0 {
+	expiration := value.ExpireDuration(time.Now())
+	if expiration < 0 {
 		return nil
 	}
-	switch value.Type {
-	case stringType:
-		_, err := client.Set(ctx, key, value.Value, expire).Result()
+	dataType := value.Type
+	if !utility.StringSliceContains(supportedRedisDataTypes, dataType) {
+		return fmt.Errorf("data type %s is not supported", dataType)
+	}
+	if dataType == stringType {
+		_, err := client.Set(ctx, key, value.Value, expiration).Result()
 		return err
-	case setType, hashType, listType, zsetType:
-		var size int
-		if value.Type == hashType || value.Type == zsetType {
-			size = loadAndSaveStepSize * 2
-		} else {
-			size = loadAndSaveStepSize
-		}
-		slices, err := loadDataIntoSlices(value.Value, size)
-		if err != nil {
-			return newParseError(err)
-		}
-		if err := loadDataIntoRedis(ctx, client, key, slices, value.Type, expire); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("data type %s is not supported", value.Type)
+	}
+	var size int
+	if dataType == hashType || value.Type == zsetType {
+		size = loadAndSaveStepSize * 2
+	} else {
+		size = loadAndSaveStepSize
+	}
+	slices, err := utility.ConvertJSONArrayIntoSlices(value.Value, size)
+	if err != nil {
+		return newParseError(err)
+	}
+	switch dataType {
+	case setType:
+		return loadSetToRedis(ctx, client, key, slices, expiration)
+	case listType:
+		return loadListToRedis(ctx, client, key, slices, expiration)
+	case hashType:
+		return loadHashToRedis(ctx, client, key, slices, expiration)
+	case zsetType:
+		return loadZSetToRedis(ctx, client, key, slices, expiration)
 	}
 	return nil
 }
 
-func loadDataIntoRedis(
-	ctx context.Context, client *redis.ClusterClient,
-	key string, slices [][]interface{},
-	dataType string, expire time.Duration) error {
-
+func loadSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
+	if expiration < 0 {
+		return nil
+	}
 	pipeline := client.Pipeline()
+	pipeline.Del(ctx, key)
 	for _, slice := range slices {
-		switch dataType {
-		case setType:
-			pipeline.SAdd(ctx, key, slice...)
-		case listType:
-			pipeline.RPush(ctx, key, slice...)
-		case hashType:
-			if len(slice)%2 != 0 {
-				return errDataFormatError
-			}
-			pipeline.HSet(ctx, key, slice...)
-		case zsetType:
-			if len(slice)%2 != 0 {
-				return errDataFormatError
-			}
-			var zsetValue []*redis.Z
-			for index := 0; index < len(slice)-1; index += 2 {
-				member := slice[index]
-				scoreStr, ok := slice[index+1].(string)
-				if !ok {
-					return errDataFormatError
-				}
-				score, err := strconv.ParseFloat(scoreStr, 64)
-				if err != nil {
-					return errDataFormatError
-				}
-				item := &redis.Z{Member: member, Score: score}
-				zsetValue = append(zsetValue, item)
-			}
-			pipeline.ZAdd(ctx, key, zsetValue...)
+		pipeline.SAdd(ctx, key, slice...)
+	}
+	if expiration > 0 {
+		pipeline.Expire(ctx, key, expiration)
+	}
+	_, err := pipeline.Exec(ctx)
+	return err
+}
+
+func loadListToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
+	if expiration < 0 {
+		return nil
+	}
+	pipeline := client.Pipeline()
+	pipeline.Del(ctx, key)
+	for _, slice := range slices {
+		pipeline.RPush(ctx, key, slice...)
+	}
+	if expiration > 0 {
+		pipeline.Expire(ctx, key, expiration)
+	}
+	_, err := pipeline.Exec(ctx)
+	return err
+}
+
+func loadHashToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
+	if expiration < 0 {
+		return nil
+	}
+	pipeline := client.Pipeline()
+	pipeline.Del(ctx, key)
+	for _, slice := range slices {
+		if len(slice)%2 != 0 {
+			return errDataFormatError
 		}
+		pipeline.HSet(ctx, key, slice...)
 	}
-	if expire > 0 {
-		pipeline.Expire(ctx, key, expire)
+	if expiration > 0 {
+		pipeline.Expire(ctx, key, expiration)
 	}
-	if _, err := pipeline.Exec(ctx); err != nil {
-		return err
+	_, err := pipeline.Exec(ctx)
+	return err
+}
+
+func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
+	if expiration < 0 {
+		return nil
 	}
-	return nil
+	pipeline := client.Pipeline()
+	pipeline.Del(ctx, key)
+	for _, slice := range slices {
+		if len(slice)%2 != 0 {
+			return errDataFormatError
+		}
+		var zsetValue []*redis.Z
+		for index := 0; index < len(slice)-1; index += 2 {
+			member := slice[index]
+			scoreStr, ok := slice[index+1].(string)
+			if !ok {
+				return errDataFormatError
+			}
+			score, err := strconv.ParseFloat(scoreStr, 64)
+			if err != nil {
+				return errDataFormatError
+			}
+			item := &redis.Z{Member: member, Score: score}
+			zsetValue = append(zsetValue, item)
+		}
+		pipeline.ZAdd(ctx, key, zsetValue...)
+	}
+	if expiration > 0 {
+		pipeline.Expire(ctx, key, expiration)
+	}
+	_, err := pipeline.Exec(ctx)
+	return err
 }
 
 func isRetryLoadError(err error) bool {
 	return errors.Is(err, errLoadKeysLockFailed) || errors.Is(err, context.DeadlineExceeded)
-}
-
-func loadDataIntoSlices(v string, size int) ([][]interface{}, error) {
-	value := []interface{}{}
-	if err := json.Unmarshal([]byte(v), &value); err != nil {
-		return [][]interface{}{}, err
-	}
-	slices := splitIntoChunks(value, size)
-	return slices, nil
-}
-
-func splitIntoChunks(slice []interface{}, chunkSize int) [][]interface{} {
-	slices := [][]interface{}{}
-	length := len(slice)
-	chunkCount := length / chunkSize
-	if length%chunkSize != 0 {
-		chunkCount++
-	}
-	for index := 0; index < chunkCount; index++ {
-		var s []interface{}
-		if (index+1)*chunkSize > length {
-			s = slice[index*chunkSize:]
-		} else {
-			s = slice[index*chunkSize : (index+1)*chunkSize]
-		}
-		slices = append(slices, s)
-	}
-	return slices
 }

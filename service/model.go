@@ -19,6 +19,8 @@ const (
 	zsetType   = "zset"
 )
 
+var supportedRedisDataTypes = []string{stringType, listType, hashType, setType, zsetType}
+
 type roomDataModel struct {
 	tableName struct{} `pg:"_"`
 
