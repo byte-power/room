@@ -72,50 +72,59 @@ func (tag HashTag) CleanKeys(keys ...string) error {
 	return err
 }
 
-func (tag HashTag) Load(timeout time.Duration) error {
+func (tag HashTag) Load(timeout time.Duration) (int, error) {
 	status, err := tag.meta.GetLoadStatus()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if status == HashTagStatusLoaded {
-		return nil
+		return 0, nil
 	}
 	if status == HashTagStatusNotExisted {
 		if err := tag.meta.SetAsLoaded(); err != nil {
-			return err
+			return 0, err
 		}
-		return nil
+		return 0, nil
 	}
 	if err := tag.acquireLoadLock(); err != nil {
-		return err
+		return 0, err
 	}
 	defer tag.releaseLoadLock()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := tag.loadKeys(ctx); err != nil {
-		return err
+	startTime := time.Now()
+	count, err := tag.loadKeys(ctx)
+	if err != nil {
+		return 0, err
 	}
-	return tag.meta.SetAsLoaded()
+	recordLoadKeySuccess(tag.dep.Logger, tag.dep.Metric, tag.name, time.Since(startTime), count)
+	err = tag.meta.SetAsLoaded()
+	return count, err
 }
 
-func (tag HashTag) loadKeys(ctx context.Context) error {
+func (tag HashTag) loadKeys(ctx context.Context) (int, error) {
 	startTime := time.Now()
+	count := 0
 	model, err := loadDataByIDWithContext(ctx, tag.dep.DB, tag.name)
 	if err != nil {
 		recordLoadDBError(tag.dep.Logger, tag.name, time.Since(startTime), err)
-		return err
+		return count, err
 	}
 	recordLoadDBSuccess(tag.dep.Logger, tag.name, time.Since(startTime))
 	if model == nil {
 		recordLoadDBRecordNotFound(tag.dep.Logger, tag.dep.Metric, tag.name)
-		return nil
+		return count, nil
 	}
+	startTime = time.Now()
 	for key, value := range model.Value {
 		if err := loadKeyToRedis(ctx, tag.dep.Redis, key, value); err != nil {
-			return err
+			recordLoadIntoRedisError(tag.dep.Logger, tag.dep.Metric, tag.name, time.Since(startTime), count, err)
+			return count, err
 		}
+		count += 1
 	}
-	return nil
+	recordLoadIntoRedisSuccess(tag.dep.Logger, tag.dep.Metric, tag.name, time.Since(startTime), count)
+	return count, nil
 }
 
 func (tag HashTag) lockKey() string {
@@ -200,25 +209,25 @@ func Load(hashTag string) error {
 		if e != nil {
 			return e
 		}
-		err = tag.Load(loadTimeout)
-		if err != nil {
+		count, e := tag.Load(loadTimeout)
+		if e != nil {
+			err = e
 			if isRetryLoadError(err) {
 				time.Sleep(loadRetryInterval)
-				recordLoadKeyRetryError(dep.Logger, dep.Metric, hashTag, err, i+1)
+				recordLoadKeyRetryError(dep.Logger, dep.Metric, hashTag, err, i+1, count)
 				continue
 			}
-			recordLoadKeyError(dep.Logger, dep.Metric, hashTag, err, time.Since(startTime))
+			recordLoadKeyError(dep.Logger, dep.Metric, hashTag, err, time.Since(startTime), count)
 			return err
 		}
-		recordLoadKeySuccess(dep.Logger, dep.Metric, hashTag, time.Since(startTime))
 		return nil
 	}
 	return err
 }
 
 func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string, value RedisValue) error {
-	expiration := value.TTL(time.Now())
-	if expiration == 0 {
+	ttl := value.TTL(time.Now())
+	if ttl == 0 {
 		return nil
 	}
 	dataType := value.Type
@@ -226,8 +235,9 @@ func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string
 		return fmt.Errorf("data type %s is not supported", dataType)
 	}
 	if dataType == stringType {
-		if expiration == -1 {
-			expiration = 0
+		expiration := time.Duration(0)
+		if ttl > 0 {
+			expiration = ttl
 		}
 		_, err := client.Set(ctx, key, value.Value, expiration).Result()
 		return err
@@ -244,19 +254,19 @@ func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string
 	}
 	switch dataType {
 	case setType:
-		return loadSetToRedis(ctx, client, key, slices, expiration)
+		return loadSetToRedis(ctx, client, key, slices, ttl)
 	case listType:
-		return loadListToRedis(ctx, client, key, slices, expiration)
+		return loadListToRedis(ctx, client, key, slices, ttl)
 	case hashType:
-		return loadHashToRedis(ctx, client, key, slices, expiration)
+		return loadHashToRedis(ctx, client, key, slices, ttl)
 	case zsetType:
-		return loadZSetToRedis(ctx, client, key, slices, expiration)
+		return loadZSetToRedis(ctx, client, key, slices, ttl)
 	}
 	return nil
 }
 
-func loadSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration == 0 {
+func loadSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, ttl time.Duration) error {
+	if ttl == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -264,15 +274,15 @@ func loadSetToRedis(ctx context.Context, client *redis.ClusterClient, key string
 	for _, slice := range slices {
 		pipeline.SAdd(ctx, key, slice...)
 	}
-	if expiration > 0 {
-		pipeline.Expire(ctx, key, expiration)
+	if ttl > 0 {
+		pipeline.Expire(ctx, key, ttl)
 	}
 	_, err := pipeline.Exec(ctx)
 	return err
 }
 
-func loadListToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration == 0 {
+func loadListToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, ttl time.Duration) error {
+	if ttl == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -280,15 +290,15 @@ func loadListToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 	for _, slice := range slices {
 		pipeline.RPush(ctx, key, slice...)
 	}
-	if expiration > 0 {
-		pipeline.Expire(ctx, key, expiration)
+	if ttl > 0 {
+		pipeline.Expire(ctx, key, ttl)
 	}
 	_, err := pipeline.Exec(ctx)
 	return err
 }
 
-func loadHashToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration == 0 {
+func loadHashToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, ttl time.Duration) error {
+	if ttl == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -299,15 +309,15 @@ func loadHashToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 		}
 		pipeline.HSet(ctx, key, slice...)
 	}
-	if expiration > 0 {
-		pipeline.Expire(ctx, key, expiration)
+	if ttl > 0 {
+		pipeline.Expire(ctx, key, ttl)
 	}
 	_, err := pipeline.Exec(ctx)
 	return err
 }
 
-func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, expiration time.Duration) error {
-	if expiration == 0 {
+func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key string, slices [][]interface{}, ttl time.Duration) error {
+	if ttl == 0 {
 		return nil
 	}
 	pipeline := client.Pipeline()
@@ -332,8 +342,8 @@ func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 		}
 		pipeline.ZAdd(ctx, key, zsetValue...)
 	}
-	if expiration > 0 {
-		pipeline.Expire(ctx, key, expiration)
+	if ttl > 0 {
+		pipeline.Expire(ctx, key, ttl)
 	}
 	_, err := pipeline.Exec(ctx)
 	return err

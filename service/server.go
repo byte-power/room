@@ -198,13 +198,13 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		)
 	}
 	metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
+	duration := time.Since(serveStartTime)
 	logger.Debug(
 		"end to exec command",
 		log.String("command", command.String()),
 		log.String("result", result.String()),
+		log.String("duration", duration.String()),
 	)
-	duration := time.Since(serveStartTime)
-	logger.Info("execute command", log.String("command", command.String()), log.String("duration", duration.String()))
 	metric.MetricTimeDuration("process.command.duration", duration)
 }
 
@@ -225,22 +225,15 @@ func preProcessCommand(command commands.Commander) error {
 	}
 
 	for _, hashTag := range hashTags.ToSlice() {
-		if err := preProcessHashTag(hashTag); err != nil {
+		if err := Load(hashTag); err != nil {
 			logger.Error(
 				"preprocess command error",
 				log.String("command", command.String()),
 				log.String("hash_tag", hashTag),
 				log.Error(err),
 			)
-			return err
+			return newLoadError(err)
 		}
-	}
-	return nil
-}
-
-func preProcessHashTag(hashTag string) error {
-	if err := Load(hashTag); err != nil {
-		return newLoadError(err)
 	}
 	return nil
 }
