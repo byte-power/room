@@ -131,6 +131,21 @@ func deleteRoomWrittenRecordModel(db *base.DBCluster, key string, writtenAt time
 	return err
 }
 
+func loadWrittenRecordModelByID(db *base.DBCluster, id string) (*roomWrittenRecordModel, error) {
+	model := &roomWrittenRecordModel{Key: id}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
+}
+
 func loadWrittenRecordModels(count int) ([]*roomWrittenRecordModel, error) {
 	db := base.GetWrittenRecordDBCluster()
 	shardingCount := db.GetShardingCount()
@@ -231,6 +246,21 @@ func (model *roomAccessedRecordModelV2) ShardingKey() string {
 
 func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
 	return "room_accessed_record_v2"
+}
+
+func loadAccessedRecordModelByID(db *base.DBCluster, id string) (*roomAccessedRecordModelV2, error) {
+	model := &roomAccessedRecordModelV2{HashTag: id}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
 }
 
 func loadAccessedRecordModels(count int, t time.Time, excludedHashTags []string) ([]*roomAccessedRecordModelV2, error) {
@@ -467,6 +497,9 @@ func isRetryErrorForUpdate(err error) bool {
 }
 
 func _upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) error {
+	if value.IsZero() {
+		return nil
+	}
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, err := db.Model(model)
@@ -492,7 +525,7 @@ func _upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) 
 		}
 		return err
 	}
-	result, err := query.Set("value=jsonb_set(value, ?, ?)", key, value).
+	result, err := query.Set("value=jsonb_set(value, ?, ?)", pg.Array([]string{key}), value).
 		Set("updated_at=?", currentTime).
 		Set("version=?", model.Version+1).
 		WherePK().
