@@ -37,9 +37,9 @@ func testEmptyKeysInRedis(keys ...string) {
 func testEmptyKeysInDatabase(keys ...string) {
 	db := base.GetDBCluster()
 	for _, key := range keys {
-		model := &roomDataModel{Key: key}
+		model := &roomDataModelV2{HashTag: key}
 		query, _ := db.Model(model)
-		query.WherePK().Delete()
+		query.WherePK().ForceDelete()
 	}
 }
 

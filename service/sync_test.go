@@ -122,6 +122,11 @@ func TestBulkUpsertRecordModelsOnConflict(t *testing.T) {
 	}
 	err = bulkUpsertWrittenRecordModels(writtenModels...)
 	assert.Nil(t, err)
+	db := base.GetWrittenRecordDBCluster()
+	for _, model := range writtenModels {
+		m, _ := loadWrittenRecordModelByID(db, model.Key)
+		assert.True(t, currentTime.Equal(m.WrittenAt))
+	}
 
 	for index, model := range accessedModels {
 		model.AccessedAt = currentTime
@@ -129,6 +134,11 @@ func TestBulkUpsertRecordModelsOnConflict(t *testing.T) {
 	}
 	err = bulkUpsertAccessedRecordModelsV2(accessedModels...)
 	assert.Nil(t, err)
+	db = base.GetAccessedRecordDBCluster()
+	for _, model := range accessedModels {
+		m, _ := loadAccessedRecordModelByID(db, model.HashTag)
+		assert.True(t, currentTime.Equal(m.AccessedAt))
+	}
 
 	accessedHashTags := make([]string, 0, len(accessedModels))
 	for _, model := range accessedModels {
