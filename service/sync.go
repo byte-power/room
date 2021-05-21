@@ -347,7 +347,6 @@ func SyncKeysTask() error {
 	metric := base.GetTaskMetricService()
 	count := 100
 	for {
-		time.Sleep(syncKeysIntervalDuration)
 		models, err := loadWrittenRecordModels(count)
 		if err != nil {
 			recordTaskError(taskName, err, "load_written_record", nil)
@@ -359,11 +358,25 @@ func SyncKeysTask() error {
 		updatedCount := 0
 		deletedCount := 0
 		for _, model := range models {
+			time.Sleep(syncKeysIntervalDuration)
 			key := model.Key
-			hashTag := extractHashTagFromKey(key)
-			if hashTag == "" {
-				err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt)
-				if err != nil {
+			hashTag, err := NewHashTag(extractHashTagFromKey(key), dep)
+			if err != nil {
+				if errors.Is(err, ErrEmptyHashTag) {
+					if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+						return err
+					}
+					continue
+				}
+				return err
+			}
+			status, err := hashTag.GetLoadStatus()
+			if err != nil {
+				return err
+			}
+			if status != HashTagStatusLoaded {
+				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
+				if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
 					return err
 				}
 				continue
@@ -373,12 +386,12 @@ func SyncKeysTask() error {
 				return err
 			}
 			if value.IsZero() {
-				if err := deleteRoomData(dep.DB, hashTag, key); err != nil {
+				if err := deleteRoomData(dep.DB, hashTag.Name(), key); err != nil {
 					return err
 				}
 				deletedCount += 1
 			} else {
-				if err := upsertRoomData(dep.DB, hashTag, key, value); err != nil {
+				if err := upsertRoomData(dep.DB, hashTag.Name(), key, value); err != nil {
 					return err
 				}
 				updatedCount += 1

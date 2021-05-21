@@ -72,6 +72,10 @@ func (tag HashTag) CleanKeys(keys ...string) error {
 	return err
 }
 
+func (tag HashTag) GetLoadStatus() (string, error) {
+	return tag.meta.GetLoadStatus()
+}
+
 func (tag HashTag) Load(timeout time.Duration) (int, error) {
 	status, err := tag.meta.GetLoadStatus()
 	if err != nil {
