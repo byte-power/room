@@ -105,274 +105,6 @@ func getClusterModelsFromRoomDataModels(models ...*roomDataModel) ([]clusterRoom
 	return clusterModels, nil
 }
 
-type roomWrittenRecordModel struct {
-	tableName struct{} `pg:"_"`
-
-	Key       string    `pg:"key,pk"`
-	WrittenAt time.Time `pg:"written_at"`
-	CreatedAt time.Time `pg:"created_at"`
-}
-
-func (model *roomWrittenRecordModel) ShardingKey() string {
-	return model.Key
-}
-
-func (model *roomWrittenRecordModel) GetTablePrefix() string {
-	return "room_written_record"
-}
-
-func deleteRoomWrittenRecordModel(db *base.DBCluster, key string, writtenAt time.Time) error {
-	model := &roomWrittenRecordModel{Key: key}
-	query, err := db.Model(model)
-	if err != nil {
-		return err
-	}
-	_, err = query.WherePK().Where("written_at=?", writtenAt).Delete()
-	return err
-}
-
-func loadWrittenRecordModelByID(db *base.DBCluster, id string) (*roomWrittenRecordModel, error) {
-	model := &roomWrittenRecordModel{Key: id}
-	query, err := db.Model(model)
-	if err != nil {
-		return nil, err
-	}
-	if err := query.WherePK().Select(); err != nil {
-		if errors.Is(err, pg.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return model, nil
-}
-
-func loadWrittenRecordModels(count int) ([]*roomWrittenRecordModel, error) {
-	db := base.GetWrittenRecordDBCluster()
-	shardingCount := db.GetShardingCount()
-	tablePrefix := (&roomWrittenRecordModel{}).GetTablePrefix()
-	var models []*roomWrittenRecordModel
-	for index := 0; index < shardingCount; index++ {
-		query, err := db.Models(&models, tablePrefix, index)
-		if err != nil {
-			return nil, err
-		}
-		if err := query.Limit(count).Select(); err != nil {
-			if errors.Is(err, pg.ErrNoRows) {
-				continue
-			}
-			return nil, err
-		}
-		if len(models) > 0 {
-			return models, nil
-		}
-	}
-	return nil, nil
-}
-
-func bulkUpsertWrittenRecordModels(models ...*roomWrittenRecordModel) error {
-	clusterModels, err := getClusterModelsFromWrittenRecordModels(models...)
-	if err != nil {
-		return err
-	}
-	for _, clusterModel := range clusterModels {
-		_, err := clusterModel.client.Model(&clusterModel.models).
-			Table(clusterModel.tableName).
-			OnConflict("(key) DO UPDATE").
-			Set("written_at=EXCLUDED.written_at").
-			Where("room_written_record_model.written_at<EXCLUDED.written_at").
-			Insert()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type clusterWrittenRecordModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomWrittenRecordModel
-}
-
-func getClusterModelsFromWrittenRecordModels(models ...*roomWrittenRecordModel) ([]clusterWrittenRecordModel, error) {
-	db := base.GetWrittenRecordDBCluster()
-	clusterModelsMap := make(map[string]clusterWrittenRecordModel)
-	for _, model := range models {
-		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
-		if err != nil {
-			return nil, err
-		}
-		if origin, ok := clusterModelsMap[tableName]; ok {
-			origin.models = append(origin.models, model)
-			clusterModelsMap[tableName] = origin
-		} else {
-			clusterModelsMap[tableName] = clusterWrittenRecordModel{tableName: tableName, client: client, models: []*roomWrittenRecordModel{model}}
-		}
-	}
-	clusterModels := make([]clusterWrittenRecordModel, 0, len(clusterModelsMap))
-	for _, clusterModel := range clusterModelsMap {
-		clusterModels = append(clusterModels, clusterModel)
-	}
-	return clusterModels, nil
-}
-
-type roomAccessedRecordModel struct {
-	tableName struct{} `pg:"_"`
-
-	Key        string    `pg:"key,pk"`
-	AccessedAt time.Time `pg:"accessed_at"`
-	CreatedAt  time.Time `pg:"created_at"`
-}
-
-func (model *roomAccessedRecordModel) ShardingKey() string {
-	return model.Key
-}
-
-func (model *roomAccessedRecordModel) GetTablePrefix() string {
-	return "room_accessed_record"
-}
-
-type roomAccessedRecordModelV2 struct {
-	tableName struct{} `pg:"_"`
-
-	HashTag    string    `pg:"hash_tag,pk"`
-	AccessedAt time.Time `pg:"accessed_at"`
-	CreatedAt  time.Time `pg:"created_at"`
-}
-
-func (model *roomAccessedRecordModelV2) ShardingKey() string {
-	return model.HashTag
-}
-
-func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
-	return "room_accessed_record_v2"
-}
-
-func loadAccessedRecordModelByID(db *base.DBCluster, id string) (*roomAccessedRecordModelV2, error) {
-	model := &roomAccessedRecordModelV2{HashTag: id}
-	query, err := db.Model(model)
-	if err != nil {
-		return nil, err
-	}
-	if err := query.WherePK().Select(); err != nil {
-		if errors.Is(err, pg.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return model, nil
-}
-
-func loadAccessedRecordModels(count int, t time.Time, excludedHashTags []string) ([]*roomAccessedRecordModelV2, error) {
-	db := base.GetAccessedRecordDBCluster()
-	shardingCount := db.GetShardingCount()
-	tablePrefix := (&roomAccessedRecordModelV2{}).GetTablePrefix()
-	excludedKeysInSharding := make(map[int][]string)
-	for _, hashTag := range excludedHashTags {
-		index := db.GetShardingIndex(hashTag)
-		if hashTags, ok := excludedKeysInSharding[index]; !ok {
-			excludedKeysInSharding[index] = []string{hashTag}
-		} else {
-			excludedKeysInSharding[index] = append(hashTags, hashTag)
-		}
-	}
-	var models []*roomAccessedRecordModelV2
-	for index := 0; index < shardingCount; index++ {
-		query, err := db.Models(&models, tablePrefix, index)
-		if err != nil {
-			return nil, err
-		}
-		if hashTags, ok := excludedKeysInSharding[index]; ok {
-			query = query.Where("hash_tag not in (?)", pg.In(hashTags))
-		}
-		if err := query.Where("accessed_at<?", t).Limit(count).Select(); err != nil {
-			if errors.Is(err, pg.ErrNoRows) {
-				continue
-			}
-			return nil, err
-		}
-		if len(models) > 0 {
-			return models, nil
-		}
-	}
-	return nil, nil
-}
-
-func bulkUpsertAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) error {
-	clusterModels, err := getClusterModelsFromAccessedRecordModelsV2(models...)
-	if err != nil {
-		return err
-	}
-	for _, clusterModel := range clusterModels {
-		_, err := clusterModel.client.Model(&clusterModel.models).
-			Table(clusterModel.tableName).
-			OnConflict("(hash_tag) DO UPDATE").
-			Set("accessed_at=EXCLUDED.accessed_at").
-			Where("room_accessed_record_model_v2.accessed_at<EXCLUDED.accessed_at").
-			Insert()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type clusterAccessedRecordModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomAccessedRecordModel
-}
-
-func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
-	db := base.GetAccessedRecordDBCluster()
-	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
-	for _, model := range models {
-		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
-		if err != nil {
-			return nil, err
-		}
-		if origin, ok := clusterModelsMap[tableName]; ok {
-			origin.models = append(origin.models, model)
-			clusterModelsMap[tableName] = origin
-		} else {
-			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
-		}
-	}
-	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
-	for _, clusterModel := range clusterModelsMap {
-		clusterModels = append(clusterModels, clusterModel)
-	}
-	return clusterModels, nil
-}
-
-type clusterAccessedRecordModelV2 struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomAccessedRecordModelV2
-}
-
-func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
-	db := base.GetAccessedRecordDBCluster()
-	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
-	for _, model := range models {
-		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
-		if err != nil {
-			return nil, err
-		}
-		if origin, ok := clusterModelsMap[tableName]; ok {
-			origin.models = append(origin.models, model)
-			clusterModelsMap[tableName] = origin
-		} else {
-			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
-		}
-	}
-	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
-	for _, clusterModel := range clusterModelsMap {
-		clusterModels = append(clusterModels, clusterModel)
-	}
-	return clusterModels, nil
-}
-
 type RedisValue struct {
 	Type     string `json:"type"`
 	Value    string `json:"value"`
@@ -553,4 +285,272 @@ func deleteRoomData(db *base.DBCluster, hashTag, key string) error {
 		WherePK().
 		Update()
 	return err
+}
+
+type roomWrittenRecordModel struct {
+	tableName struct{} `pg:"_"`
+
+	Key       string    `pg:"key,pk"`
+	WrittenAt time.Time `pg:"written_at"`
+	CreatedAt time.Time `pg:"created_at"`
+}
+
+func (model *roomWrittenRecordModel) ShardingKey() string {
+	return model.Key
+}
+
+func (model *roomWrittenRecordModel) GetTablePrefix() string {
+	return "room_written_record"
+}
+
+func deleteRoomWrittenRecordModel(db *base.DBCluster, key string, writtenAt time.Time) error {
+	model := &roomWrittenRecordModel{Key: key}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	_, err = query.WherePK().Where("written_at=?", writtenAt).Delete()
+	return err
+}
+
+func loadWrittenRecordModelByID(db *base.DBCluster, id string) (*roomWrittenRecordModel, error) {
+	model := &roomWrittenRecordModel{Key: id}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
+}
+
+func loadWrittenRecordModels(count int) ([]*roomWrittenRecordModel, error) {
+	db := base.GetWrittenRecordDBCluster()
+	shardingCount := db.GetShardingCount()
+	tablePrefix := (&roomWrittenRecordModel{}).GetTablePrefix()
+	var models []*roomWrittenRecordModel
+	for index := 0; index < shardingCount; index++ {
+		query, err := db.Models(&models, tablePrefix, index)
+		if err != nil {
+			return nil, err
+		}
+		if err := query.Limit(count).Select(); err != nil {
+			if errors.Is(err, pg.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+	}
+	return nil, nil
+}
+
+func bulkUpsertWrittenRecordModels(models ...*roomWrittenRecordModel) error {
+	clusterModels, err := getClusterModelsFromWrittenRecordModels(models...)
+	if err != nil {
+		return err
+	}
+	for _, clusterModel := range clusterModels {
+		_, err := clusterModel.client.Model(&clusterModel.models).
+			Table(clusterModel.tableName).
+			OnConflict("(key) DO UPDATE").
+			Set("written_at=EXCLUDED.written_at").
+			Where("room_written_record_model.written_at<EXCLUDED.written_at").
+			Insert()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type clusterWrittenRecordModel struct {
+	tableName string
+	client    *pg.DB
+	models    []*roomWrittenRecordModel
+}
+
+func getClusterModelsFromWrittenRecordModels(models ...*roomWrittenRecordModel) ([]clusterWrittenRecordModel, error) {
+	db := base.GetWrittenRecordDBCluster()
+	clusterModelsMap := make(map[string]clusterWrittenRecordModel)
+	for _, model := range models {
+		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
+		if err != nil {
+			return nil, err
+		}
+		if origin, ok := clusterModelsMap[tableName]; ok {
+			origin.models = append(origin.models, model)
+			clusterModelsMap[tableName] = origin
+		} else {
+			clusterModelsMap[tableName] = clusterWrittenRecordModel{tableName: tableName, client: client, models: []*roomWrittenRecordModel{model}}
+		}
+	}
+	clusterModels := make([]clusterWrittenRecordModel, 0, len(clusterModelsMap))
+	for _, clusterModel := range clusterModelsMap {
+		clusterModels = append(clusterModels, clusterModel)
+	}
+	return clusterModels, nil
+}
+
+type roomAccessedRecordModel struct {
+	tableName struct{} `pg:"_"`
+
+	Key        string    `pg:"key,pk"`
+	AccessedAt time.Time `pg:"accessed_at"`
+	CreatedAt  time.Time `pg:"created_at"`
+}
+
+func (model *roomAccessedRecordModel) ShardingKey() string {
+	return model.Key
+}
+
+func (model *roomAccessedRecordModel) GetTablePrefix() string {
+	return "room_accessed_record"
+}
+
+type clusterAccessedRecordModel struct {
+	tableName string
+	client    *pg.DB
+	models    []*roomAccessedRecordModel
+}
+
+type roomAccessedRecordModelV2 struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag    string    `pg:"hash_tag,pk"`
+	AccessedAt time.Time `pg:"accessed_at"`
+	CreatedAt  time.Time `pg:"created_at"`
+}
+
+func (model *roomAccessedRecordModelV2) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
+	return "room_accessed_record_v2"
+}
+
+func loadAccessedRecordModelByID(db *base.DBCluster, id string) (*roomAccessedRecordModelV2, error) {
+	model := &roomAccessedRecordModelV2{HashTag: id}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
+}
+
+func loadAccessedRecordModels(count int, t time.Time, excludedHashTags []string) ([]*roomAccessedRecordModelV2, error) {
+	db := base.GetAccessedRecordDBCluster()
+	shardingCount := db.GetShardingCount()
+	tablePrefix := (&roomAccessedRecordModelV2{}).GetTablePrefix()
+	excludedKeysInSharding := make(map[int][]string)
+	for _, hashTag := range excludedHashTags {
+		index := db.GetShardingIndex(hashTag)
+		if hashTags, ok := excludedKeysInSharding[index]; !ok {
+			excludedKeysInSharding[index] = []string{hashTag}
+		} else {
+			excludedKeysInSharding[index] = append(hashTags, hashTag)
+		}
+	}
+	var models []*roomAccessedRecordModelV2
+	for index := 0; index < shardingCount; index++ {
+		query, err := db.Models(&models, tablePrefix, index)
+		if err != nil {
+			return nil, err
+		}
+		if hashTags, ok := excludedKeysInSharding[index]; ok {
+			query = query.Where("hash_tag not in (?)", pg.In(hashTags))
+		}
+		if err := query.Where("accessed_at<?", t).Limit(count).Select(); err != nil {
+			if errors.Is(err, pg.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+	}
+	return nil, nil
+}
+
+func bulkUpsertAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) error {
+	clusterModels, err := getClusterModelsFromAccessedRecordModelsV2(models...)
+	if err != nil {
+		return err
+	}
+	for _, clusterModel := range clusterModels {
+		_, err := clusterModel.client.Model(&clusterModel.models).
+			Table(clusterModel.tableName).
+			OnConflict("(hash_tag) DO UPDATE").
+			Set("accessed_at=EXCLUDED.accessed_at").
+			Where("room_accessed_record_model_v2.accessed_at<EXCLUDED.accessed_at").
+			Insert()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
+	db := base.GetAccessedRecordDBCluster()
+	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
+	for _, model := range models {
+		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
+		if err != nil {
+			return nil, err
+		}
+		if origin, ok := clusterModelsMap[tableName]; ok {
+			origin.models = append(origin.models, model)
+			clusterModelsMap[tableName] = origin
+		} else {
+			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
+		}
+	}
+	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
+	for _, clusterModel := range clusterModelsMap {
+		clusterModels = append(clusterModels, clusterModel)
+	}
+	return clusterModels, nil
+}
+
+type clusterAccessedRecordModelV2 struct {
+	tableName string
+	client    *pg.DB
+	models    []*roomAccessedRecordModelV2
+}
+
+func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
+	db := base.GetAccessedRecordDBCluster()
+	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
+	for _, model := range models {
+		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
+		if err != nil {
+			return nil, err
+		}
+		if origin, ok := clusterModelsMap[tableName]; ok {
+			origin.models = append(origin.models, model)
+			clusterModelsMap[tableName] = origin
+		} else {
+			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
+		}
+	}
+	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
+	for _, clusterModel := range clusterModelsMap {
+		clusterModels = append(clusterModels, clusterModel)
+	}
+	return clusterModels, nil
 }
