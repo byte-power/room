@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/utility"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -449,4 +450,182 @@ func TestSerializeNonStringValue(t *testing.T) {
 			assert.True(t, math.Abs(m[member]-score) < 0.01)
 		}
 	}
+}
+
+func TestGetValueFromRedis(t *testing.T) {
+	//get not exist key
+	key := "{a}not_exist"
+	value, err := getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, "", value.Type)
+	assert.Equal(t, "", value.Value)
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Equal(t, int64(0), value.SyncedTs)
+
+	// get a string key
+	key = "{b}string"
+	stringValue := "abc"
+	client := base.GetRedisCluster()
+	defer client.Del(context.TODO(), key)
+	client.Set(context.TODO(), key, stringValue, 0)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, stringType, value.Type)
+	assert.Equal(t, stringValue, value.Value)
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a string key with expiration
+	key = "{b}string2"
+	stringValue = "abcd"
+	defer client.Del(context.TODO(), key)
+	client.Set(context.TODO(), key, stringValue, 10*time.Second)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, stringType, value.Type)
+	assert.Equal(t, stringValue, value.Value)
+	assert.Greater(t, value.ExpireTs, int64(0))
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a list key
+	key = "{b}list"
+	listValue := []interface{}{"a", "b", "c", "d"}
+	defer client.Del(context.TODO(), key)
+	client.RPush(context.TODO(), key, listValue...)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, listType, value.Type)
+
+	v := make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, listValue, v)
+
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a set key
+	key = "{b}set"
+	setValue := []interface{}{"a", "b", "c", "d"}
+	defer client.Del(context.TODO(), key)
+	client.SAdd(context.TODO(), key, setValue...)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, setType, value.Type)
+
+	v = make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, len(setValue), len(v))
+	for _, item := range v {
+		assert.True(t, utility.StringSliceContains(utility.AnyArrayToStringArray(setValue), item.(string)))
+	}
+
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a hash key
+	key = "{b}hash"
+	hashValue := map[string]interface{}{"a": "b", "c": "d", "e": "f"}
+	defer client.Del(context.TODO(), key)
+	client.HSet(context.TODO(), key, hashValue)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, hashType, value.Type)
+
+	v = make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, len(hashValue)*2, len(v))
+	for i := 0; i < len(v)-1; i += 2 {
+		hk := v[i].(string)
+		hv := v[i+1].(string)
+		assert.Equal(t, hashValue[hk], hv)
+	}
+
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a zset key, with expiration
+	key = "{b}zset"
+	zsetValue := map[string]redis.Z{
+		"a": {Member: "a", Score: 1.1},
+		"b": {Member: "b", Score: 2.2},
+		"c": {Member: "c", Score: 3.3},
+	}
+	defer client.Del(context.TODO(), key)
+	for _, z := range zsetValue {
+		client.ZAdd(context.TODO(), key, &z)
+	}
+	client.Expire(context.TODO(), key, 10*time.Second)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, zsetType, value.Type)
+
+	v = make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, len(zsetValue)*2, len(v))
+
+	for i := 0; i < len(v)-1; i += 2 {
+		member := v[i].(string)
+		score, err := strconv.ParseFloat(v[i+1].(string), 64)
+		assert.Nil(t, err)
+		assert.True(t, math.Abs(zsetValue[member].Score-score) < 0.01)
+	}
+
+	assert.Greater(t, value.ExpireTs, int64(0))
+	assert.Greater(t, value.SyncedTs, int64(0))
+}
+
+func TestIsValueEqual(t *testing.T) {
+	equal, err := isValueEqual(
+		stringType,
+		[]string{"abc"},
+		RedisValue{Type: stringType, Value: "abc"})
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	equal, err = isValueEqual(
+		stringType,
+		[]string{"abc"},
+		RedisValue{Type: stringType, Value: "abcd"})
+	assert.Nil(t, nil)
+	assert.False(t, equal)
+
+	listValue := []string{"a", "b", "x", "y", "z"}
+	v, _ := json.Marshal(listValue)
+	value := RedisValue{
+		Type:  listType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(listType, listValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	setValue := []string{"a", "b", "x", "y", "z", "1", "2", "3"}
+	v, _ = json.Marshal(setValue)
+	value = RedisValue{
+		Type:  setType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(setType, setValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	hashValue := []string{"1", "2", "3", "4", "a", "b", "b", "a"}
+	v, _ = json.Marshal(hashValue)
+	value = RedisValue{
+		Type:  hashType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(hashType, hashValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	zsetValue := []string{"a", "1.2", "b", "1.3", "d", "2.34"}
+	v, _ = json.Marshal(zsetValue)
+	value = RedisValue{
+		Type:  zsetType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(zsetType, zsetValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
 }
