@@ -131,8 +131,12 @@ func (tag HashTag) loadKeys(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+func getHashTagLockKey(hashTag string) string {
+	return fmt.Sprintf("{%s}:_l", hashTag)
+}
+
 func (tag HashTag) lockKey() string {
-	return fmt.Sprintf("{%s}:_l", tag.name)
+	return getHashTagLockKey(tag.name)
 }
 
 const loadLockDuration = 5 * time.Second

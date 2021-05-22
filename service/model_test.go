@@ -244,7 +244,7 @@ func TestDeleteRoomData(t *testing.T) {
 	hashTag := "abc"
 	currentTs := utility.TimestampInMS(time.Now())
 	db := base.GetDBCluster()
-	defer testEmptyKeysInDatabase(hashTag)
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 	value := map[string]RedisValue{
 		"{abc}a":  {Type: "string", Value: "v", SyncedTs: currentTs},
 		"a{abc}b": {Type: "string", Value: "v", SyncedTs: currentTs},
@@ -286,7 +286,7 @@ func TestUpsertRoomData(t *testing.T) {
 	hashTag := "abc"
 	currentTs := utility.TimestampInMS(time.Now())
 	db := base.GetDBCluster()
-	defer testEmptyKeysInDatabase(hashTag)
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
 	// upsert key in a not exist hash_tag record
 	key := "{abc}ab"
@@ -331,7 +331,7 @@ func TestUpsertRoomData(t *testing.T) {
 
 	// upsert conflict
 	hashTag = "abcd"
-	defer testEmptyKeysInDatabase(hashTag)
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 	count := 10
 	values := make(map[string]RedisValue, count)
 	for i := 0; i < count; i++ {

@@ -4,6 +4,7 @@ import (
 	"bytepower_room/base"
 	"bytepower_room/utility"
 	"context"
+	"math"
 	"strconv"
 
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,18 +31,17 @@ func TestMain(m *testing.M) {
 
 func testEmptyKeysInRedis(keys ...string) {
 	for _, key := range keys {
-		metaKey := getMetaKey(key)
+		hashTag := extractHashTagFromKey(key)
+		metaKey := getHashTagMetaKey(hashTag)
 		base.GetRedisCluster().Del(contextTODO, key, metaKey)
 	}
 }
 
-func testEmptyKeysInDatabase(keys ...string) {
+func testEmptyRoomDataRecordInDatabase(hashTag string) {
 	db := base.GetDBCluster()
-	for _, key := range keys {
-		model := &roomDataModelV2{HashTag: key}
-		query, _ := db.Model(model)
-		query.WherePK().ForceDelete()
-	}
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, _ := db.Model(model)
+	query.WherePK().ForceDelete()
 }
 
 type testInsertRoomDataInput struct {
@@ -63,261 +64,264 @@ func (input testInsertRoomDataInput) check() error {
 	return nil
 }
 
-func testInsertRoomData(input testInsertRoomDataInput) (*roomDataModel, error) {
-	if err := input.check(); err != nil {
-		return nil, err
-	}
-	currentTime := time.Now()
-	model := &roomDataModel{
-		Key:       input.key,
-		Type:      input.dataType,
-		Value:     *input.value,
-		Deleted:   false,
-		UpdatedAt: currentTime,
-		SyncedAt:  currentTime,
-		CreatedAt: currentTime,
-		Version:   1,
-	}
-	if !input.expireAt.IsZero() {
-		model.ExpireAt = input.expireAt
-	}
-	dbCluster := base.GetDBCluster()
-	query, err := dbCluster.Model(model)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := query.Returning("*").Insert(); err != nil {
-		return nil, err
-	}
-	return model, nil
-}
-
-func testSetMetaKeyCleaned(key string) {
+func testSetMetaKeyCleaned(hashTag string) {
 	client := base.GetRedisCluster()
-	metaKey := getMetaKey(key)
-	client.HSet(context.TODO(), metaKey, "loaded", "2")
+	metaKey := getHashTagMetaKey(hashTag)
+	client.HSet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName, HashTagStatusCleaned)
 }
 
-// func TestLoadKeyNotExist(t *testing.T) {
-// 	key := "{a}:does_not_exist"
-// 	defer testEmptyKeysInRedis(key)
-// 	err := loadKey(key)
-// 	assert.Nil(t, err)
+func TestLoadKeyNotExist(t *testing.T) {
+	hashTag := "a"
+	key := "{a}:does_not_exist"
+	defer testEmptyKeysInRedis(key)
+	err := Load(hashTag)
+	assert.Nil(t, err)
 
-// 	client := base.GetRedisCluster()
-// 	_, err = client.Get(testContextTODO, key).Result()
-// 	assert.Equal(t, redis.Nil, err)
+	client := base.GetRedisCluster()
+	_, err = client.Get(testContextTODO, key).Result()
+	assert.Equal(t, redis.Nil, err)
 
-// 	loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, "1", loaded)
+	loaded, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	assert.Nil(t, err)
+	assert.Equal(t, HashTagStatusLoaded, loaded)
 
-// 	_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 	assert.Equal(t, redis.Nil, err)
-// }
+	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	assert.Equal(t, redis.Nil, err)
+}
 
-// func TestLoadKeyStringWithExpire(t *testing.T) {
-// 	key := "{a}:string:expire"
-// 	value := "hello world"
-// 	defer testEmptyKeysInRedis(key)
-// 	defer testEmptyKeysInDatabase(key)
-// 	// Insert data
-// 	input := testInsertRoomDataInput{key: key, dataType: stringType, value: &value, expireAt: time.Now().Add(100 * time.Second)}
-// 	testInsertRoomData(input)
-// 	testSetMetaKeyCleaned(key)
+func testInsertRoomData(hashTag string, value map[string]RedisValue) *roomDataModelV2 {
+	db := base.GetDBCluster()
+	model := &roomDataModelV2{HashTag: hashTag, Value: value}
+	query, _ := db.Model(model)
+	query.Returning("*").Insert()
+	return model
+}
 
-// 	// load data
-// 	err := loadKey(key)
-// 	assert.Nil(t, err)
+func testMergeMaps(m1, m2 map[string]RedisValue) map[string]RedisValue {
+	m := make(map[string]RedisValue)
+	for key, value := range m1 {
+		m[key] = value
+	}
+	for key, value := range m2 {
+		m[key] = value
+	}
+	return m
+}
 
-// 	client := base.GetRedisCluster()
-// 	v, err := client.Get(testContextTODO, key).Result()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, value, v)
+func TestLoadKeyString(t *testing.T) {
+	hashTag := "a"
+	currentTime := time.Now()
+	currentTs := utility.TimestampInMS(currentTime)
+	expireTimeValid := currentTime.Add(100 * time.Second)
+	expireTsValid := utility.TimestampInMS(expireTimeValid)
+	expireTimeInvalid := currentTime.Add(-100 * time.Second)
+	expireTsInvalid := utility.TimestampInMS(expireTimeInvalid)
+	validValue := map[string]RedisValue{
+		"{a}:string:expire1":  {Type: stringType, Value: "value1", SyncedTs: currentTs, ExpireTs: expireTsValid},
+		"{a}:string:expire2":  {Type: stringType, Value: "value2", SyncedTs: currentTs, ExpireTs: expireTsValid},
+		"{a}:string:noexpire": {Type: stringType, Value: "value_noexpire", SyncedTs: currentTs, ExpireTs: 0},
+	}
+	expireValue := map[string]RedisValue{
+		"{a}:string:expire3": {Type: stringType, Value: "value3", SyncedTs: currentTs, ExpireTs: expireTsInvalid},
+		"{a}:string:expire4": {Type: stringType, Value: "value4", SyncedTs: currentTs, ExpireTs: expireTsInvalid},
+	}
+	value := testMergeMaps(validValue, expireValue)
 
-// 	duration, err := client.TTL(testContextTODO, key).Result()
-// 	assert.Nil(t, err)
-// 	assert.Greater(t, int64(duration), int64(0))
+	for key := range value {
+		defer testEmptyKeysInRedis(key)
+	}
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
+	// Insert data
+	testInsertRoomData(hashTag, value)
+	testSetMetaKeyCleaned(hashTag)
 
-// 	loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, "1", loaded)
+	// load data
+	err := Load(hashTag)
+	assert.Nil(t, err)
 
-// 	_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 	assert.Equal(t, redis.Nil, err)
-// }
+	client := base.GetRedisCluster()
+	for key, value := range validValue {
+		v, err := client.Get(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, value.Value, v)
 
-// func TestLoadKeyString(t *testing.T) {
-// 	key := "{a}:string"
-// 	value := "hello world"
-// 	defer testEmptyKeysInRedis(key)
-// 	defer testEmptyKeysInDatabase(key)
-// 	// Insert data
-// 	input := testInsertRoomDataInput{key: key, dataType: stringType, value: &value}
-// 	testInsertRoomData(input)
-// 	testSetMetaKeyCleaned(key)
+		d, err := client.TTL(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		if value.ExpireTs > 0 {
+			assert.Greater(t, int64(d), int64(0))
+		} else {
+			assert.Equal(t, int64(-1), int64(d))
+		}
+	}
 
-// 	// load data
-// 	err := loadKey(key)
-// 	assert.Nil(t, err)
+	for key, _ := range expireValue {
+		_, err := client.Get(testContextTODO, key).Result()
+		assert.Equal(t, redis.Nil, err)
+	}
 
-// 	client := base.GetRedisCluster()
-// 	v, err := client.Get(testContextTODO, key).Result()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, value, v)
+	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	assert.Nil(t, err)
+	assert.Equal(t, HashTagStatusLoaded, status)
 
-// 	duration, err := client.TTL(testContextTODO, key).Result()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, time.Duration(-1), duration)
+	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	assert.Equal(t, redis.Nil, err)
+}
 
-// 	loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 	assert.Nil(t, err)
-// 	assert.Equal(t, "1", loaded)
+func generateListValue(count int) string {
+	items := make([]string, count)
+	for i := 0; i < count; i++ {
+		items[i] = utility.GenerateUUID(10)
+	}
+	value, _ := json.Marshal(items)
+	return string(value)
+}
 
-// 	_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 	assert.Equal(t, redis.Nil, err)
-// }
+func TestLoadKeyList(t *testing.T) {
+	hashTag := "a"
+	currentTs := utility.TimestampInMS(time.Now())
+	testItems := []struct {
+		key   string
+		count int
+	}{
+		{
+			key:   "{a}:list1",
+			count: 50,
+		}, {
+			key:   "{a}:list2",
+			count: 99,
+		}, {
+			key:   "{a}:list3",
+			count: 100,
+		}, {
+			key:   "{a}:list4",
+			count: 200,
+		}, {
+			key:   "{a}:list5",
+			count: 230,
+		}, {
+			key:   "{a}:list6",
+			count: 1299,
+		},
+	}
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
-// func generateListValue(count int) string {
-// 	items := make([]string, count)
-// 	for i := 0; i < count; i++ {
-// 		items[i] = utility.GenerateUUID(10)
-// 	}
-// 	value, _ := json.Marshal(items)
-// 	return string(value)
-// }
+	value := make(map[string]RedisValue, 0)
 
-// func TestLoadKeyList(t *testing.T) {
-// 	testItems := []struct {
-// 		key   string
-// 		count int
-// 	}{
-// 		{
-// 			key:   "{a}:list1",
-// 			count: 50,
-// 		}, {
-// 			key:   "{a}:list2",
-// 			count: 99,
-// 		}, {
-// 			key:   "{a}:list3",
-// 			count: 100,
-// 		}, {
-// 			key:   "{a}:list4",
-// 			count: 200,
-// 		}, {
-// 			key:   "{a}:list5",
-// 			count: 230,
-// 		}, {
-// 			key:   "{a}:list6",
-// 			count: 1299,
-// 		},
-// 	}
+	for _, item := range testItems {
+		k := item.key
+		defer testEmptyKeysInRedis(k)
+		v := generateListValue(item.count)
+		value[k] = RedisValue{Type: listType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+	}
 
-// 	for _, item := range testItems {
-// 		key := item.key
-// 		defer testEmptyKeysInRedis(key)
-// 		defer testEmptyKeysInDatabase(key)
-// 		value := generateListValue(item.count)
-// 		// Insert data
-// 		input := testInsertRoomDataInput{key: key, dataType: listType, value: &value}
-// 		testInsertRoomData(input)
-// 		testSetMetaKeyCleaned(key)
+	testInsertRoomData(hashTag, value)
+	testSetMetaKeyCleaned(hashTag)
 
-// 		// load data
-// 		err := loadKey(key)
-// 		assert.Nil(t, err)
+	err := Load(hashTag)
+	assert.Nil(t, err)
 
-// 		client := base.GetRedisCluster()
-// 		b, err := client.LRange(testContextTODO, key, 0, -1).Result()
-// 		assert.Nil(t, err)
-// 		v, _ := json.Marshal(b)
-// 		assert.Equal(t, value, string(v))
+	client := base.GetRedisCluster()
+	for _, item := range testItems {
+		key := item.key
+		b, err := client.LRange(testContextTODO, key, 0, -1).Result()
+		assert.Nil(t, err)
+		v, _ := json.Marshal(b)
+		assert.Equal(t, value[key].Value, string(v))
 
-// 		duration, err := client.TTL(testContextTODO, key).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, time.Duration(-1), duration)
+		duration, err := client.TTL(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, time.Duration(-1), duration)
+	}
 
-// 		loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, "1", loaded)
+	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	assert.Nil(t, err)
+	assert.Equal(t, HashTagStatusLoaded, status)
 
-// 		_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 		assert.Equal(t, redis.Nil, err)
-// 	}
-// }
+	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	assert.Equal(t, redis.Nil, err)
+}
 
-// func generateHashValue(count int) (string, map[string]string) {
-// 	hash := make(map[string]string)
-// 	items := make([]string, count*2)
-// 	for i := 0; i < count*2-1; i += 2 {
-// 		items[i] = utility.GenerateUUID(10)
-// 		items[i+1] = utility.GenerateUUID(10)
-// 		hash[items[i]] = items[i+1]
-// 	}
-// 	value, _ := json.Marshal(items)
-// 	return string(value), hash
-// }
+func generateHashValue(count int) (string, map[string]string) {
+	hash := make(map[string]string)
+	items := make([]string, count*2)
+	for i := 0; i < count*2-1; i += 2 {
+		items[i] = utility.GenerateUUID(10)
+		items[i+1] = utility.GenerateUUID(10)
+		hash[items[i]] = items[i+1]
+	}
+	value, _ := json.Marshal(items)
+	return string(value), hash
+}
 
-// func TestLoadKeyHash(t *testing.T) {
-// 	testItems := []struct {
-// 		key   string
-// 		count int
-// 	}{
-// 		{
-// 			key:   "{a}:hash1",
-// 			count: 50,
-// 		}, {
-// 			key:   "{a}:hash2",
-// 			count: 99,
-// 		}, {
-// 			key:   "{a}:hash3",
-// 			count: 100,
-// 		}, {
-// 			key:   "{a}:hash4",
-// 			count: 200,
-// 		}, {
-// 			key:   "{a}:hash5",
-// 			count: 230,
-// 		}, {
-// 			key:   "{a}:hash6",
-// 			count: 1299,
-// 		},
-// 	}
+func TestLoadKeyHash(t *testing.T) {
+	hashTag := "a"
+	currentTs := utility.TimestampInMS(time.Now())
+	testItems := []struct {
+		key   string
+		count int
+	}{
+		{
+			key:   "{a}:hash1",
+			count: 50,
+		}, {
+			key:   "{a}:hash2",
+			count: 99,
+		}, {
+			key:   "{a}:hash3",
+			count: 100,
+		}, {
+			key:   "{a}:hash4",
+			count: 200,
+		}, {
+			key:   "{a}:hash5",
+			count: 230,
+		}, {
+			key:   "{a}:hash6",
+			count: 1299,
+		},
+	}
 
-// 	for _, item := range testItems {
-// 		key := item.key
-// 		defer testEmptyKeysInRedis(key)
-// 		defer testEmptyKeysInDatabase(key)
-// 		value, hash := generateHashValue(item.count)
-// 		// Insert data
-// 		input := testInsertRoomDataInput{key: key, dataType: hashType, value: &value}
-// 		testInsertRoomData(input)
-// 		testSetMetaKeyCleaned(key)
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
-// 		// load data
-// 		err := loadKey(key)
-// 		assert.Nil(t, err)
+	value := make(map[string]RedisValue, 0)
+	hashes := make(map[string]map[string]string)
 
-// 		client := base.GetRedisCluster()
-// 		m, err := client.HGetAll(testContextTODO, key).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, len(hash), len(m))
-// 		for key, value := range hash {
-// 			assert.Equal(t, value, m[key])
-// 		}
+	for _, item := range testItems {
+		k := item.key
+		defer testEmptyKeysInRedis(k)
+		v, h := generateHashValue(item.count)
+		hashes[k] = h
+		value[k] = RedisValue{Type: hashType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+	}
 
-// 		duration, err := client.TTL(testContextTODO, key).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, time.Duration(-1), duration)
+	testInsertRoomData(hashTag, value)
+	testSetMetaKeyCleaned(hashTag)
 
-// 		loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, "1", loaded)
+	err := Load(hashTag)
+	assert.Nil(t, err)
 
-// 		_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 		assert.Equal(t, redis.Nil, err)
-// 	}
-// }
+	client := base.GetRedisCluster()
+	for _, item := range testItems {
+		key := item.key
+		hash := hashes[key]
+		m, err := client.HGetAll(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, len(hash), len(m))
+		for key, value := range hash {
+			assert.Equal(t, value, m[key])
+		}
+
+		duration, err := client.TTL(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, time.Duration(-1), duration)
+	}
+	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	assert.Nil(t, err)
+	assert.Equal(t, HashTagStatusLoaded, status)
+
+	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	assert.Equal(t, redis.Nil, err)
+}
 
 func generateSetValue(count int) (string, []string) {
 	items := make([]string, count)
@@ -328,66 +332,75 @@ func generateSetValue(count int) (string, []string) {
 	return string(value), items
 }
 
-// func TestLoadKeySet(t *testing.T) {
-// 	testItems := []struct {
-// 		key   string
-// 		count int
-// 	}{
-// 		{
-// 			key:   "{a}:set1",
-// 			count: 50,
-// 		}, {
-// 			key:   "{a}:set2",
-// 			count: 99,
-// 		}, {
-// 			key:   "{a}:set3",
-// 			count: 100,
-// 		}, {
-// 			key:   "{a}:set4",
-// 			count: 200,
-// 		}, {
-// 			key:   "{a}:set5",
-// 			count: 230,
-// 		}, {
-// 			key:   "{a}:set6",
-// 			count: 1299,
-// 		},
-// 	}
+func TestLoadKeySet(t *testing.T) {
+	hashTag := "a"
+	currentTs := utility.TimestampInMS(time.Now())
+	testItems := []struct {
+		key   string
+		count int
+	}{
+		{
+			key:   "{a}:set1",
+			count: 50,
+		}, {
+			key:   "{a}:set2",
+			count: 99,
+		}, {
+			key:   "{a}:set3",
+			count: 100,
+		}, {
+			key:   "{a}:set4",
+			count: 200,
+		}, {
+			key:   "{a}:set5",
+			count: 230,
+		}, {
+			key:   "{a}:set6",
+			count: 1299,
+		},
+	}
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
-// 	for _, item := range testItems {
-// 		key := item.key
-// 		defer testEmptyKeysInRedis(key)
-// 		defer testEmptyKeysInDatabase(key)
-// 		value, set := generateSetValue(item.count)
-// 		// Insert data
-// 		input := testInsertRoomDataInput{key: key, dataType: setType, value: &value}
-// 		testInsertRoomData(input)
-// 		testSetMetaKeyCleaned(key)
+	value := make(map[string]RedisValue, 0)
+	sets := make(map[string][]string, 0)
 
-// 		// load data
-// 		err := loadKey(key)
-// 		assert.Nil(t, err)
+	for _, item := range testItems {
+		k := item.key
+		defer testEmptyKeysInRedis(k)
+		v, s := generateSetValue(item.count)
+		sets[k] = s
+		value[k] = RedisValue{Type: setType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+	}
 
-// 		client := base.GetRedisCluster()
-// 		m, err := client.SMembers(testContextTODO, key).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, len(set), len(m))
-// 		for _, value := range set {
-// 			assert.True(t, utility.StringSliceContains(m, value))
-// 		}
+	testInsertRoomData(hashTag, value)
+	testSetMetaKeyCleaned(hashTag)
 
-// 		duration, err := client.TTL(testContextTODO, key).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, time.Duration(-1), duration)
+	err := Load(hashTag)
+	assert.Nil(t, err)
 
-// 		loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, "1", loaded)
+	client := base.GetRedisCluster()
 
-// 		_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 		assert.Equal(t, redis.Nil, err)
-// 	}
-// }
+	for _, item := range testItems {
+		key := item.key
+		set := sets[key]
+		m, err := client.SMembers(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, len(set), len(m))
+		for _, value := range set {
+			assert.True(t, utility.StringSliceContains(m, value))
+		}
+
+		duration, err := client.TTL(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, time.Duration(-1), duration)
+	}
+	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	assert.Nil(t, err)
+	assert.Equal(t, HashTagStatusLoaded, status)
+
+	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	assert.Equal(t, redis.Nil, err)
+}
 
 func generateZSetValue(count int) (string, map[string]float64) {
 	items := make([]string, count*2)
@@ -408,123 +421,77 @@ func generateRandFloat(min, max float64) float64 {
 	return min + rand.Float64()*(max-min)
 }
 
-// func TestLoadKeyZSet(t *testing.T) {
-// 	testItems := []struct {
-// 		key   string
-// 		count int
-// 	}{
-// 		{
-// 			key:   "{a}:zset1",
-// 			count: 50,
-// 		}, {
-// 			key:   "{a}:zset2",
-// 			count: 99,
-// 		}, {
-// 			key:   "{a}:zset3",
-// 			count: 100,
-// 		}, {
-// 			key:   "{a}:zset4",
-// 			count: 200,
-// 		}, {
-// 			key:   "{a}:zset5",
-// 			count: 230,
-// 		}, {
-// 			key:   "{a}:zset6",
-// 			count: 1299,
-// 		},
-// 	}
+func TestLoadKeyZSet(t *testing.T) {
+	hashTag := "a"
+	currentTs := utility.TimestampInMS(time.Now())
+	testItems := []struct {
+		key   string
+		count int
+	}{
+		{
+			key:   "{a}:zset1",
+			count: 50,
+		}, {
+			key:   "{a}:zset2",
+			count: 99,
+		}, {
+			key:   "{a}:zset3",
+			count: 100,
+		}, {
+			key:   "{a}:zset4",
+			count: 200,
+		}, {
+			key:   "{a}:zset5",
+			count: 230,
+		}, {
+			key:   "{a}:zset6",
+			count: 1299,
+		},
+	}
+	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
-// 	for _, item := range testItems {
-// 		key := item.key
-// 		defer testEmptyKeysInRedis(key)
-// 		defer testEmptyKeysInDatabase(key)
-// 		value, zset := generateZSetValue(item.count)
-// 		// Insert data
-// 		input := testInsertRoomDataInput{key: key, dataType: zsetType, value: &value}
-// 		testInsertRoomData(input)
-// 		testSetMetaKeyCleaned(key)
+	value := make(map[string]RedisValue, 0)
+	zsets := make(map[string]map[string]float64, 0)
 
-// 		// load data
-// 		err := loadKey(key)
-// 		assert.Nil(t, err)
+	for _, item := range testItems {
+		k := item.key
+		defer testEmptyKeysInRedis(k)
+		v, s := generateZSetValue(item.count)
+		zsets[k] = s
+		value[k] = RedisValue{Type: zsetType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+	}
 
-// 		client := base.GetRedisCluster()
-// 		zset2, err := client.ZRangeWithScores(testContextTODO, key, 0, -1).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, len(zset), len(zset2))
-// 		for _, value := range zset2 {
-// 			member, ok := value.Member.(string)
-// 			assert.True(t, ok)
-// 			assert.True(t, math.Abs(zset[member]-value.Score) < 0.001)
-// 		}
+	testInsertRoomData(hashTag, value)
+	testSetMetaKeyCleaned(hashTag)
 
-// 		duration, err := client.TTL(testContextTODO, key).Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, time.Duration(-1), duration)
+	err := Load(hashTag)
+	assert.Nil(t, err)
 
-// 		loaded, err := client.HGet(testContextTODO, getMetaKey(key), "loaded").Result()
-// 		assert.Nil(t, err)
-// 		assert.Equal(t, "1", loaded)
+	client := base.GetRedisCluster()
 
-// 		_, err = client.Get(testContextTODO, getLockKey(key)).Result()
-// 		assert.Equal(t, redis.Nil, err)
-// 	}
-// }
+	for _, item := range testItems {
+		key := item.key
+		zset := zsets[key]
+		zset2, err := client.ZRangeWithScores(testContextTODO, key, 0, -1).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, len(zset), len(zset2))
+		for _, value := range zset2 {
+			member, ok := value.Member.(string)
+			assert.True(t, ok)
+			assert.True(t, math.Abs(zset[member]-value.Score) < 0.001)
+		}
 
-// func TestIsKeyNeedLoaded(t *testing.T) {
-// 	client := base.GetRedisCluster()
-// 	key := "{a}:need_loaded"
-// 	metaKey := getMetaKey(key)
-// 	// neither key nor meta key exist
-// 	testEmptyKeysInRedis(key, metaKey)
-// 	needLoaded, err := isKeyNeedLoad(key)
-// 	assert.False(t, needLoaded)
-// 	assert.Nil(t, err)
-// 	loadedStatus, _ := client.HGet(context.TODO(), metaKey, "loaded").Result()
-// 	assert.Equal(t, "1", loadedStatus)
-// 	testEmptyKeysInRedis(key, metaKey)
+		duration, err := client.TTL(testContextTODO, key).Result()
+		assert.Nil(t, err)
+		assert.Equal(t, time.Duration(-1), duration)
+	}
+	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	assert.Nil(t, err)
+	assert.Equal(t, HashTagStatusLoaded, status)
 
-// 	// key exists, meta key does not exist
-// 	testEmptyKeysInRedis(key, metaKey)
-// 	client.Set(testContextTODO, key, "value", 0)
-// 	needLoaded, err = isKeyNeedLoad(key)
-// 	assert.False(t, needLoaded)
-// 	assert.Nil(t, err)
-// 	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
-// 	assert.Equal(t, "1", loadedStatus)
-// 	testEmptyKeysInRedis(key, metaKey)
-
-// 	// key does not exist, meta key exists
-// 	testEmptyKeysInRedis(key, metaKey)
-// 	client.HSet(testContextTODO, metaKey, "loaded", "1")
-// 	needLoaded, err = isKeyNeedLoad(key)
-// 	assert.False(t, needLoaded)
-// 	assert.Nil(t, err)
-// 	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
-// 	assert.Equal(t, "1", loadedStatus)
-// 	testEmptyKeysInRedis(key, metaKey)
-
-// 	// both key and meta key exist
-// 	testEmptyKeysInRedis(key, metaKey)
-// 	client.Set(testContextTODO, key, "value", 0)
-// 	client.HSet(testContextTODO, metaKey, "loaded", "1")
-// 	needLoaded, err = isKeyNeedLoad(key)
-// 	assert.False(t, needLoaded)
-// 	assert.Nil(t, err)
-// 	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
-// 	assert.Equal(t, "1", loadedStatus)
-// 	testEmptyKeysInRedis(key, metaKey)
-
-// 	// metaKey exist, but loaded filed != "1"
-// 	testEmptyKeysInRedis(key, metaKey)
-// 	client.HSet(testContextTODO, metaKey, "loaded", "2")
-// 	needLoaded, err = isKeyNeedLoad(key)
-// 	assert.True(t, needLoaded)
-// 	assert.Nil(t, err)
-// 	loadedStatus, _ = client.HGet(context.TODO(), metaKey, "loaded").Result()
-// 	assert.Equal(t, "2", loadedStatus)
-// 	testEmptyKeysInRedis(key, metaKey)
-// }
+	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	assert.Equal(t, redis.Nil, err)
+}
 
 func TestExtractHashTagFromKey(t *testing.T) {
 	cases := []struct {
