@@ -364,10 +364,25 @@ func SyncKeysTask(upsertTryTimes int) error {
 			if err != nil {
 				if errors.Is(err, ErrEmptyHashTag) {
 					if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+						recordTaskError(
+							taskName, err, "delete_written_record",
+							map[string]string{
+								"hash_tag":   hashTag.Name(),
+								"key":        key,
+								"written_at": model.WrittenAt.String(),
+							},
+						)
 						return err
 					}
 					continue
 				}
+				recordTaskError(
+					taskName, err, "new_hash_tag",
+					map[string]string{
+						"hash_tag": hashTag.Name(),
+						"key":      key,
+					},
+				)
 				return err
 			}
 			status, err := hashTag.GetLoadStatus()
@@ -377,26 +392,64 @@ func SyncKeysTask(upsertTryTimes int) error {
 			if status != HashTagStatusLoaded {
 				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
 				if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+					recordTaskError(
+						taskName, err, "delete_written_record",
+						map[string]string{
+							"hash_tag":   hashTag.Name(),
+							"key":        key,
+							"written_at": model.WrittenAt.String(),
+						},
+					)
 					return err
 				}
 				continue
 			}
 			value, err := getValueFromRedis(key)
 			if err != nil {
+				recordTaskError(
+					taskName, err, "get_value_from_redis",
+					map[string]string{
+						"hash_tag": hashTag.Name(),
+						"key":      key,
+					},
+				)
 				return err
 			}
 			if value.IsZero() {
 				if err := deleteRoomData(dep.DB, hashTag.Name(), key); err != nil {
+					recordTaskError(
+						taskName, err, "delete_room_data_key",
+						map[string]string{
+							"hash_key": hashTag.Name(),
+							"key":      key,
+						},
+					)
 					return err
 				}
 				deletedCount += 1
 			} else {
 				if err := upsertRoomData(dep.DB, hashTag.Name(), key, value, upsertTryTimes); err != nil {
+					recordTaskError(
+						taskName, err, "upsert_room_data_key",
+						map[string]string{
+							"hash_key": hashTag.Name(),
+							"key":      key,
+							"value":    value.String(),
+						},
+					)
 					return err
 				}
 				updatedCount += 1
 			}
 			if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+				recordTaskError(
+					taskName, err, "delete_written_record",
+					map[string]string{
+						"hash_tag":   hashTag.Name(),
+						"key":        key,
+						"written_at": model.WrittenAt.String(),
+					},
+				)
 				return err
 			}
 		}
