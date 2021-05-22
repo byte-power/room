@@ -167,7 +167,7 @@ func TestLoadKeyString(t *testing.T) {
 	assert.Equal(t, redis.Nil, err)
 }
 
-func generateListValue(count int) string {
+func testGenerateListValue(count int) string {
 	items := make([]string, count)
 	for i := 0; i < count; i++ {
 		items[i] = utility.GenerateUUID(10)
@@ -210,7 +210,7 @@ func TestLoadKeyList(t *testing.T) {
 	for _, item := range testItems {
 		k := item.key
 		defer testEmptyKeysInRedis(k)
-		v := generateListValue(item.count)
+		v := testGenerateListValue(item.count)
 		value[k] = RedisValue{Type: listType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
 	}
 
@@ -241,7 +241,7 @@ func TestLoadKeyList(t *testing.T) {
 	assert.Equal(t, redis.Nil, err)
 }
 
-func generateHashValue(count int) (string, map[string]string) {
+func testGenerateHashValue(count int) (string, map[string]string) {
 	hash := make(map[string]string)
 	items := make([]string, count*2)
 	for i := 0; i < count*2-1; i += 2 {
@@ -289,7 +289,7 @@ func TestLoadKeyHash(t *testing.T) {
 	for _, item := range testItems {
 		k := item.key
 		defer testEmptyKeysInRedis(k)
-		v, h := generateHashValue(item.count)
+		v, h := testGenerateHashValue(item.count)
 		hashes[k] = h
 		value[k] = RedisValue{Type: hashType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
 	}
@@ -323,7 +323,7 @@ func TestLoadKeyHash(t *testing.T) {
 	assert.Equal(t, redis.Nil, err)
 }
 
-func generateSetValue(count int) (string, []string) {
+func testGenerateSetValue(count int) (string, []string) {
 	items := make([]string, count)
 	for i := 0; i < count; i++ {
 		items[i] = utility.GenerateUUID(10)
@@ -367,7 +367,7 @@ func TestLoadKeySet(t *testing.T) {
 	for _, item := range testItems {
 		k := item.key
 		defer testEmptyKeysInRedis(k)
-		v, s := generateSetValue(item.count)
+		v, s := testGenerateSetValue(item.count)
 		sets[k] = s
 		value[k] = RedisValue{Type: setType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
 	}
@@ -402,12 +402,12 @@ func TestLoadKeySet(t *testing.T) {
 	assert.Equal(t, redis.Nil, err)
 }
 
-func generateZSetValue(count int) (string, map[string]float64) {
+func testGenerateZSetValue(count int) (string, map[string]float64) {
 	items := make([]string, count*2)
 	zset := make(map[string]float64)
 	for i := 0; i < count*2-1; i += 2 {
 		item := utility.GenerateUUID(10)
-		score := generateRandFloat(0, 100)
+		score := testGenerateRandFloat(0, 100)
 		items[i] = item
 		items[i+1] = fmt.Sprintf("%g", score)
 		zset[item] = score
@@ -416,7 +416,7 @@ func generateZSetValue(count int) (string, map[string]float64) {
 	return string(value), zset
 }
 
-func generateRandFloat(min, max float64) float64 {
+func testGenerateRandFloat(min, max float64) float64 {
 	rand.Seed(time.Now().UnixNano())
 	return min + rand.Float64()*(max-min)
 }
@@ -456,7 +456,7 @@ func TestLoadKeyZSet(t *testing.T) {
 	for _, item := range testItems {
 		k := item.key
 		defer testEmptyKeysInRedis(k)
-		v, s := generateZSetValue(item.count)
+		v, s := testGenerateZSetValue(item.count)
 		zsets[k] = s
 		value[k] = RedisValue{Type: zsetType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
 	}

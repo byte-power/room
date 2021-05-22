@@ -256,7 +256,7 @@ func TestDeleteModels(t *testing.T) {
 // 	testEmptyKeysInRedis(keys...)
 // }
 
-func generateListValueForRedis(count int) []interface{} {
+func testGenerateListValueForRedis(count int) []interface{} {
 	items := make([]interface{}, count)
 	for i := 0; i < count; i++ {
 		items[i] = utility.GenerateUUID(10)
@@ -264,7 +264,7 @@ func generateListValueForRedis(count int) []interface{} {
 	return items
 }
 
-func generateHashValueForRedis(count int) map[string]interface{} {
+func testGenerateHashValueForRedis(count int) map[string]interface{} {
 	hash := make(map[string]interface{})
 	for i := 0; i < count; i++ {
 		key := utility.GenerateUUID(10)
@@ -274,16 +274,16 @@ func generateHashValueForRedis(count int) map[string]interface{} {
 	return hash
 }
 
-func generateSetValueForRedis(count int) []interface{} {
-	return generateListValueForRedis(count)
+func testGenerateSetValueForRedis(count int) []interface{} {
+	return testGenerateListValueForRedis(count)
 }
 
-func generateZSetValueForRedis(count int) ([]*redis.Z, map[string]float64) {
+func testGenerateZSetValueForRedis(count int) ([]*redis.Z, map[string]float64) {
 	zset := make([]*redis.Z, count)
 	m := make(map[string]float64)
 	for i := 0; i < count; i++ {
 		member := utility.GenerateUUID(10)
-		score := generateRandFloat(0, 100)
+		score := testGenerateRandFloat(0, 100)
 		z := &redis.Z{Member: member, Score: score}
 		zset[i] = z
 		m[member] = score
@@ -322,7 +322,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testListItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values := generateListValueForRedis(item.count)
+		values := testGenerateListValueForRedis(item.count)
 		redisClient.RPush(testContextTODO, key, values...).Result()
 		result, err := serializeNonStringValue(key, listType)
 		assert.Nil(t, err)
@@ -360,7 +360,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testHashItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values := generateHashValueForRedis(item.count)
+		values := testGenerateHashValueForRedis(item.count)
 		redisClient.HSet(testContextTODO, key, values).Result()
 		result, err := serializeNonStringValue(key, hashType)
 		assert.Nil(t, err)
@@ -400,7 +400,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testSetItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values := generateSetValueForRedis(item.count)
+		values := testGenerateSetValueForRedis(item.count)
 		redisClient.SAdd(testContextTODO, key, values...).Result()
 		result, err := serializeNonStringValue(key, setType)
 		assert.Nil(t, err)
@@ -438,7 +438,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testZSetItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values, m := generateZSetValueForRedis(item.count)
+		values, m := testGenerateZSetValueForRedis(item.count)
 		redisClient.ZAdd(testContextTODO, key, values...).Result()
 		result, err := serializeNonStringValue(key, zsetType)
 		assert.Nil(t, err)
