@@ -36,7 +36,7 @@ func main() {
 	syncKeyTaskConfig := base.GetServerConfig().SyncService.SyncKeyTask
 	syncKeyTask := "sync_keys"
 	if !syncKeyTaskConfig.Off {
-		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask).EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
+		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask, syncKeyTaskConfig.UpSertTryTimes).EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}

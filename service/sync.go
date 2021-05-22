@@ -338,7 +338,7 @@ const syncKeysIntervalDuration = 10 * time.Millisecond
 // 1. Get key and written time from record database
 // 2. Sync to room database
 // 3. Remove records from record database
-func SyncKeysTask() error {
+func SyncKeysTask(upsertTryTimes int) error {
 	startTime := time.Now()
 	logger := base.GetTaskLogger()
 	taskName := "sync_keys"
@@ -391,7 +391,7 @@ func SyncKeysTask() error {
 				}
 				deletedCount += 1
 			} else {
-				if err := upsertRoomData(dep.DB, hashTag.Name(), key, value); err != nil {
+				if err := upsertRoomData(dep.DB, hashTag.Name(), key, value, upsertTryTimes); err != nil {
 					return err
 				}
 				updatedCount += 1
