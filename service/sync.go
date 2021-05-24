@@ -391,14 +391,10 @@ func SyncKeysTask(upsertTryTimes int) error {
 			}
 			if status != HashTagStatusLoaded {
 				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
-				if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+				if err := Load(hashTag.Name()); err != nil {
 					recordTaskError(
-						taskName, err, "delete_written_record",
-						map[string]string{
-							"hash_tag":   hashTag.Name(),
-							"key":        key,
-							"written_at": model.WrittenAt.String(),
-						},
+						taskName, err, "load_hash_tag",
+						map[string]string{"hash_tag": hashTag.Name()},
 					)
 					return err
 				}
