@@ -32,7 +32,7 @@ func main() {
 		return
 	}
 	fmt.Printf("start to run at %s, configPath=%s, dryRun=%t\n", startTime, *configPath, *dryRun)
-	if err := base.InitServices(*configPath); err != nil {
+	if err := base.InitSyncService(*configPath); err != nil {
 		fmt.Printf("init service error:%s\n", err.Error())
 		return
 	}
@@ -46,9 +46,6 @@ func main() {
 			fmt.Printf("scan error:%s\n", err.Error())
 			return
 		}
-		if c == 0 {
-			break
-		}
 		cursor = c
 		count, err := processKeys(*dryRun, keys...)
 		if err != nil {
@@ -56,6 +53,9 @@ func main() {
 			return
 		}
 		totalProcessedCount += count
+		if cursor == 0 {
+			break
+		}
 	}
 	fmt.Printf("finish process, count:%d, duraiton=%s\n", totalProcessedCount, time.Since(startTime).String())
 }
@@ -76,7 +76,7 @@ func processKeys(dryRun bool, keys ...string) (int, error) {
 			return 0, fmt.Errorf("hasValidMetaKey: %s, %w", key, err)
 		}
 		if !isMetaValid {
-			fmt.Printf("skip key:%s, do not have meta key", key)
+			fmt.Printf("skip key:%s, do not have meta key\n", key)
 			continue
 		}
 		//process key
@@ -91,6 +91,7 @@ func processKeys(dryRun bool, keys ...string) (int, error) {
 				return 0, fmt.Errorf("insertWrittenRecordByKey: %s, %w", key, err)
 			}
 		}
+		fmt.Printf("process key:%s\n", key)
 		processedCount += 1
 	}
 	return processedCount, nil
@@ -177,7 +178,7 @@ func insertAccessedRecordByKey(key string) error {
 	driftSeconds := rand.Int63n(MAX_SECONDS_DRIFT)
 	accessedTime := baseTime.Add(time.Duration(-driftSeconds) * time.Second)
 	model := &roomAccessedRecordModelV2{HashTag: hashTag, AccessedAt: accessedTime, CreatedAt: accessedTime}
-	db := base.GetDBCluster()
+	db := base.GetAccessedRecordDBCluster()
 	query, err := db.Model(model)
 	if err != nil {
 		return err
@@ -213,7 +214,7 @@ func insertWrittenRecordByKey(key string) error {
 	driftSeconds := rand.Int63n(MAX_SECONDS_DRIFT)
 	writtenTime := baseTime.Add(time.Duration(-driftSeconds) * time.Second)
 	model := &roomWrittenRecordModel{Key: key, WrittenAt: writtenTime, CreatedAt: writtenTime}
-	db := base.GetDBCluster()
+	db := base.GetWrittenRecordDBCluster()
 	query, err := db.Model(model)
 	if err != nil {
 		return err
