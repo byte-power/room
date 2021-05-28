@@ -222,3 +222,64 @@ func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []red
 	}
 	return nil
 }
+
+type Dependency struct {
+	Redis            *redis.ClusterClient
+	DB               *DBCluster
+	AccessedRecordDB *DBCluster
+	WrittenRecordDB  *DBCluster
+	Logger           *log.Logger
+	Metric           *MetricClient
+	Event            *EventService
+}
+
+var (
+	ErrDepRedisNull  = errors.New("redis service is null")
+	ErrDepDBNull     = errors.New("db service is null")
+	ErrDepLoggerNull = errors.New("logger is null")
+	ErrDepMetricNull = errors.New("metric service is null")
+	ErrDepEventNull  = errors.New("event service is null")
+)
+
+func (dep Dependency) Check() error {
+	if dep.Redis == nil {
+		return ErrDepRedisNull
+	}
+	if dep.DB == nil {
+		return ErrDepDBNull
+	}
+	if dep.Logger == nil {
+		return ErrDepLoggerNull
+	}
+	if dep.Metric == nil {
+		return ErrDepMetricNull
+	}
+	if dep.Event == nil {
+		return ErrDepEventNull
+	}
+	return nil
+}
+
+func GetServerDependency() Dependency {
+	return Dependency{
+		Redis:            GetRedisCluster(),
+		DB:               GetDBCluster(),
+		AccessedRecordDB: GetAccessedRecordDBCluster(),
+		WrittenRecordDB:  GetWrittenRecordDBCluster(),
+		Logger:           GetServerLogger(),
+		Metric:           GetMetricService(),
+		Event:            GetEventService(),
+	}
+}
+
+func GetTaskDependency() Dependency {
+	return Dependency{
+		Redis:            GetRedisCluster(),
+		DB:               GetDBCluster(),
+		AccessedRecordDB: GetAccessedRecordDBCluster(),
+		WrittenRecordDB:  GetWrittenRecordDBCluster(),
+		Logger:           GetTaskLogger(),
+		Metric:           GetTaskMetricService(),
+		Event:            GetEventService(),
+	}
+}

@@ -427,11 +427,15 @@ func (config SyncRecordTaskConfig) check() error {
 type SyncKeyTaskConfig struct {
 	IntervalMinutes int  `yaml:"interval_minutes"`
 	Off             bool `yaml:"off"`
+	UpSertTryTimes  int  `yaml:"upsert_try_times"`
 }
 
 func (config SyncKeyTaskConfig) check() error {
 	if config.IntervalMinutes <= 0 {
 		return fmt.Errorf("sync_key_task.interval_minutes is %d, it should be greater than 0", config.IntervalMinutes)
+	}
+	if config.UpSertTryTimes <= 0 {
+		return fmt.Errorf("sync_key_task.upsert_try_times is %d, it should be greater than 0", config.UpSertTryTimes)
 	}
 	return nil
 }

@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/gogf/greuse"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/tidwall/redcon"
@@ -199,13 +198,13 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		)
 	}
 	metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
+	duration := time.Since(serveStartTime)
 	logger.Debug(
 		"end to exec command",
 		log.String("command", command.String()),
 		log.String("result", result.String()),
+		log.String("duration", duration.String()),
 	)
-	duration := time.Since(serveStartTime)
-	logger.Info("execute command", log.String("command", command.String()), log.String("duration", duration.String()))
 	metric.MetricTimeDuration("process.command.duration", duration)
 }
 
@@ -216,26 +215,25 @@ func isTransactionNeeded(command commands.Commander) bool {
 
 func preProcessCommand(command commands.Commander) error {
 	logger := base.GetServerLogger()
+	hashTags := utility.NewStringSet()
 	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
-		if err := preProcessKey(key); err != nil {
+		hashTag := extractHashTagFromKey(key)
+		if hashTag == "" {
+			return newInvalidKeyError(key)
+		}
+		hashTags.Add(hashTag)
+	}
+
+	for _, hashTag := range hashTags.ToSlice() {
+		if err := Load(hashTag); err != nil {
 			logger.Error(
-				"preprocess key error",
+				"preprocess command error",
 				log.String("command", command.String()),
-				log.String("key", key),
+				log.String("hash_tag", hashTag),
 				log.Error(err),
 			)
-			return err
+			return newLoadError(err)
 		}
-	}
-	return nil
-}
-
-func preProcessKey(key string) error {
-	if !isKeyValid(key) {
-		return newInvalidKeyError(key)
-	}
-	if err := loadKey(key); err != nil {
-		return newLoadError(err)
 	}
 	return nil
 }
@@ -301,22 +299,16 @@ func isKeyValid(key string) bool {
 	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex+1 < rightBraceIndex)
 }
 
-func isKeyNeedLoad(key string) (bool, error) {
-	redisClient := base.GetRedisCluster()
-	metaKey := getMetaKey(key)
-	loadStatus, err := redisClient.HGet(context.TODO(), metaKey, "loaded").Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return false, newInternalError(err)
+func extractHashTagFromKey(key string) string {
+	leftBraceIndex := strings.Index(key, "{")
+	if leftBraceIndex == -1 {
+		return ""
 	}
-	// err is redis.Nil means either metaKey does not exist or metaKey's `loaded` field does not exist.
-	// for current implementation, there is only one filed `loaded` in metaKey, so that's the same.
-	if errors.Is(err, redis.Nil) {
-		if err := setLoadedMeta(key); err != nil {
-			return false, newInternalError(err)
-		}
-		return false, nil
+	rightBraceIndex := strings.Index(key[leftBraceIndex:], "}")
+	if rightBraceIndex > 1 {
+		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
 	}
-	return loadStatus != "1", nil
+	return ""
 }
 
 func getMetaKey(key string) string {

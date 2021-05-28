@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/utility"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -23,12 +24,12 @@ func testEmptyWrittenRecordsInDB(keys ...string) {
 	}
 }
 
-func testEmptyAccessedRecordsInDB(keys ...string) {
+func testEmptyAccessedRecordsInDB(hashTags ...string) {
 	db := base.GetAccessedRecordDBCluster()
-	for _, key := range keys {
-		model := &roomAccessedRecordModel{Key: key}
+	for _, hashTag := range hashTags {
+		model := &roomAccessedRecordModelV2{HashTag: hashTag}
 		query, _ := db.Model(model)
-		query.WherePK().Delete()
+		query.WherePK().ForceDelete()
 	}
 }
 
@@ -58,20 +59,18 @@ func TestDownloadFilesFromS3(t *testing.T) {
 
 func TestProcessAccessFile(t *testing.T) {
 	testdataFile := "../cmd/testdata.txt"
-	accessedKeys := []string{
-		"{a}34", "{a}35", "{a}36",
-		"{a}37", "{a}38", "{a}39",
-		"{a}40",
+	accessedHashTags := []string{
+		"a", "b",
 	}
-	writtenKeys := []string{"{a}36", "{a}38", "{a}40"}
+	writtenKeys := []string{"{a}36", "{a}38", "{a}40", "{b}20"}
 	content, err := ioutil.ReadFile(testdataFile)
 	assert.Nil(t, err)
 	accessedMap, writtenMap, err := processAccessFile(content)
 	assert.Nil(t, nil)
-	assert.Equal(t, 7, len(accessedMap))
-	assert.Equal(t, 3, len(writtenMap))
-	for _, key := range accessedKeys {
-		_, ok := accessedMap[key]
+	assert.Equal(t, 2, len(accessedMap))
+	assert.Equal(t, 4, len(writtenMap))
+	for _, hashTag := range accessedHashTags {
+		_, ok := accessedMap[hashTag]
 		assert.True(t, ok)
 	}
 	for _, key := range writtenKeys {
@@ -89,14 +88,14 @@ func TestBulkUpsertRecordModels(t *testing.T) {
 	accessedModels := accessedMapToModels(accessedMap)
 	err = bulkUpsertWrittenRecordModels(writtenModels...)
 	assert.Nil(t, err)
-	err = bulkUpsertAccessedRecordModels(accessedModels...)
+	err = bulkUpsertAccessedRecordModelsV2(accessedModels...)
 	assert.Nil(t, err)
 
-	accessedKeys := make([]string, 0, len(accessedModels))
+	accessedHashTags := make([]string, 0, len(accessedModels))
 	for _, model := range accessedModels {
-		accessedKeys = append(accessedKeys, model.Key)
+		accessedHashTags = append(accessedHashTags, model.HashTag)
 	}
-	testEmptyAccessedRecordsInDB(accessedKeys...)
+	testEmptyAccessedRecordsInDB(accessedHashTags...)
 
 	writtenKeys := make([]string, 0, len(writtenModels))
 	for _, model := range writtenModels {
@@ -114,7 +113,7 @@ func TestBulkUpsertRecordModelsOnConflict(t *testing.T) {
 	accessedModels := accessedMapToModels(accessedMap)
 	err = bulkUpsertWrittenRecordModels(writtenModels...)
 	assert.Nil(t, err)
-	err = bulkUpsertAccessedRecordModels(accessedModels...)
+	err = bulkUpsertAccessedRecordModelsV2(accessedModels...)
 	assert.Nil(t, err)
 
 	currentTime := time.Now()
@@ -124,19 +123,29 @@ func TestBulkUpsertRecordModelsOnConflict(t *testing.T) {
 	}
 	err = bulkUpsertWrittenRecordModels(writtenModels...)
 	assert.Nil(t, err)
+	db := base.GetWrittenRecordDBCluster()
+	for _, model := range writtenModels {
+		m, _ := loadWrittenRecordModelByID(db, model.Key)
+		assert.True(t, currentTime.Equal(m.WrittenAt))
+	}
 
 	for index, model := range accessedModels {
 		model.AccessedAt = currentTime
 		accessedModels[index] = model
 	}
-	err = bulkUpsertAccessedRecordModels(accessedModels...)
+	err = bulkUpsertAccessedRecordModelsV2(accessedModels...)
 	assert.Nil(t, err)
-
-	accessedKeys := make([]string, 0, len(accessedModels))
+	db = base.GetAccessedRecordDBCluster()
 	for _, model := range accessedModels {
-		accessedKeys = append(accessedKeys, model.Key)
+		m, _ := loadAccessedRecordModelByID(db, model.HashTag)
+		assert.True(t, currentTime.Equal(m.AccessedAt))
 	}
-	testEmptyAccessedRecordsInDB(accessedKeys...)
+
+	accessedHashTags := make([]string, 0, len(accessedModels))
+	for _, model := range accessedModels {
+		accessedHashTags = append(accessedHashTags, model.HashTag)
+	}
+	testEmptyAccessedRecordsInDB(accessedHashTags...)
 
 	writtenKeys := make([]string, 0, len(writtenModels))
 	for _, model := range writtenModels {
@@ -154,7 +163,7 @@ func TestLoadRecordModels(t *testing.T) {
 	accessedModels := accessedMapToModels(accessedMap)
 	err = bulkUpsertWrittenRecordModels(writtenModels...)
 	assert.Nil(t, err)
-	err = bulkUpsertAccessedRecordModels(accessedModels...)
+	err = bulkUpsertAccessedRecordModelsV2(accessedModels...)
 	assert.Nil(t, err)
 
 	count := 0
@@ -183,7 +192,7 @@ func TestLoadRecordModels(t *testing.T) {
 		count += len(models)
 		keys := make([]string, len(models))
 		for index, model := range models {
-			keys[index] = model.Key
+			keys[index] = model.HashTag
 		}
 		testEmptyAccessedRecordsInDB(keys...)
 	}
@@ -199,7 +208,7 @@ func TestDeleteModels(t *testing.T) {
 	accessedModels := accessedMapToModels(accessedMap)
 	err = bulkUpsertWrittenRecordModels(writtenModels...)
 	assert.Nil(t, err)
-	err = bulkUpsertAccessedRecordModels(accessedModels...)
+	err = bulkUpsertAccessedRecordModelsV2(accessedModels...)
 	assert.Nil(t, err)
 
 	err = deleteWrittenRecordModels(writtenModels)
@@ -209,45 +218,45 @@ func TestDeleteModels(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestSyncWrittenModels(t *testing.T) {
-	redisClient := base.GetRedisCluster()
-	currentTime := time.Now()
+// func TestSyncWrittenModels(t *testing.T) {
+// 	redisClient := base.GetRedisCluster()
+// 	currentTime := time.Now()
 
-	keys := []string{"{a}abc", "{a}abcd"}
-	for _, key := range keys {
-		redisClient.Set(testContextTODO, key, key, 0)
-	}
-	notExistedKeys := []string{"{b}xxx", "{d}xxx"}
-	for _, key := range notExistedKeys {
-		db := base.GetDBCluster()
-		model := &roomDataModel{
-			Key:       key,
-			Type:      "string",
-			Value:     key,
-			Deleted:   false,
-			UpdatedAt: currentTime,
-			SyncedAt:  currentTime,
-			CreatedAt: currentTime,
-			Version:   0,
-		}
-		query, _ := db.Model(model)
-		query.Insert()
-	}
-	models := make([]*roomWrittenRecordModel, len(keys)+len(notExistedKeys))
-	for index, key := range append(keys, notExistedKeys...) {
-		models[index] = &roomWrittenRecordModel{
-			Key:       key,
-			CreatedAt: currentTime,
-			WrittenAt: currentTime}
-	}
-	_, _, err := syncWrittenModels(models)
-	assert.Nil(t, err)
-	testEmptyKeysInDatabase(keys...)
-	testEmptyKeysInDatabase(notExistedKeys...)
-	testEmptyKeysInRedis(keys...)
-}
+// 	keys := []string{"{a}abc", "{a}abcd"}
+// 	for _, key := range keys {
+// 		redisClient.Set(testContextTODO, key, key, 0)
+// 	}
+// 	notExistedKeys := []string{"{b}xxx", "{d}xxx"}
+// 	for _, key := range notExistedKeys {
+// 		db := base.GetDBCluster()
+// 		model := &roomDataModel{
+// 			Key:       key,
+// 			Type:      "string",
+// 			Value:     key,
+// 			Deleted:   false,
+// 			UpdatedAt: currentTime,
+// 			SyncedAt:  currentTime,
+// 			CreatedAt: currentTime,
+// 			Version:   0,
+// 		}
+// 		query, _ := db.Model(model)
+// 		query.Insert()
+// 	}
+// 	models := make([]*roomWrittenRecordModel, len(keys)+len(notExistedKeys))
+// 	for index, key := range append(keys, notExistedKeys...) {
+// 		models[index] = &roomWrittenRecordModel{
+// 			Key:       key,
+// 			CreatedAt: currentTime,
+// 			WrittenAt: currentTime}
+// 	}
+// 	_, _, err := syncWrittenModels(models)
+// 	assert.Nil(t, err)
+// 	testEmptyKeysInDatabase(keys...)
+// 	testEmptyKeysInDatabase(notExistedKeys...)
+// 	testEmptyKeysInRedis(keys...)
+// }
 
-func generateListValueForRedis(count int) []interface{} {
+func testGenerateListValueForRedis(count int) []interface{} {
 	items := make([]interface{}, count)
 	for i := 0; i < count; i++ {
 		items[i] = utility.GenerateUUID(10)
@@ -255,7 +264,7 @@ func generateListValueForRedis(count int) []interface{} {
 	return items
 }
 
-func generateHashValueForRedis(count int) map[string]interface{} {
+func testGenerateHashValueForRedis(count int) map[string]interface{} {
 	hash := make(map[string]interface{})
 	for i := 0; i < count; i++ {
 		key := utility.GenerateUUID(10)
@@ -265,16 +274,16 @@ func generateHashValueForRedis(count int) map[string]interface{} {
 	return hash
 }
 
-func generateSetValueForRedis(count int) []interface{} {
-	return generateListValueForRedis(count)
+func testGenerateSetValueForRedis(count int) []interface{} {
+	return testGenerateListValueForRedis(count)
 }
 
-func generateZSetValueForRedis(count int) ([]*redis.Z, map[string]float64) {
+func testGenerateZSetValueForRedis(count int) ([]*redis.Z, map[string]float64) {
 	zset := make([]*redis.Z, count)
 	m := make(map[string]float64)
 	for i := 0; i < count; i++ {
 		member := utility.GenerateUUID(10)
-		score := generateRandFloat(0, 100)
+		score := testGenerateRandFloat(0, 100)
 		z := &redis.Z{Member: member, Score: score}
 		zset[i] = z
 		m[member] = score
@@ -313,7 +322,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testListItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values := generateListValueForRedis(item.count)
+		values := testGenerateListValueForRedis(item.count)
 		redisClient.RPush(testContextTODO, key, values...).Result()
 		result, err := serializeNonStringValue(key, listType)
 		assert.Nil(t, err)
@@ -351,7 +360,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testHashItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values := generateHashValueForRedis(item.count)
+		values := testGenerateHashValueForRedis(item.count)
 		redisClient.HSet(testContextTODO, key, values).Result()
 		result, err := serializeNonStringValue(key, hashType)
 		assert.Nil(t, err)
@@ -391,7 +400,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testSetItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values := generateSetValueForRedis(item.count)
+		values := testGenerateSetValueForRedis(item.count)
 		redisClient.SAdd(testContextTODO, key, values...).Result()
 		result, err := serializeNonStringValue(key, setType)
 		assert.Nil(t, err)
@@ -429,7 +438,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 	for _, item := range testZSetItems {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
-		values, m := generateZSetValueForRedis(item.count)
+		values, m := testGenerateZSetValueForRedis(item.count)
 		redisClient.ZAdd(testContextTODO, key, values...).Result()
 		result, err := serializeNonStringValue(key, zsetType)
 		assert.Nil(t, err)
@@ -441,4 +450,182 @@ func TestSerializeNonStringValue(t *testing.T) {
 			assert.True(t, math.Abs(m[member]-score) < 0.01)
 		}
 	}
+}
+
+func TestGetValueFromRedis(t *testing.T) {
+	//get not exist key
+	key := "{a}not_exist"
+	value, err := getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, "", value.Type)
+	assert.Equal(t, "", value.Value)
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Equal(t, int64(0), value.SyncedTs)
+
+	// get a string key
+	key = "{b}string"
+	stringValue := "abc"
+	client := base.GetRedisCluster()
+	defer client.Del(context.TODO(), key)
+	client.Set(context.TODO(), key, stringValue, 0)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, stringType, value.Type)
+	assert.Equal(t, stringValue, value.Value)
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a string key with expiration
+	key = "{b}string2"
+	stringValue = "abcd"
+	defer client.Del(context.TODO(), key)
+	client.Set(context.TODO(), key, stringValue, 10*time.Second)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, stringType, value.Type)
+	assert.Equal(t, stringValue, value.Value)
+	assert.Greater(t, value.ExpireTs, int64(0))
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a list key
+	key = "{b}list"
+	listValue := []interface{}{"a", "b", "c", "d"}
+	defer client.Del(context.TODO(), key)
+	client.RPush(context.TODO(), key, listValue...)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, listType, value.Type)
+
+	v := make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, listValue, v)
+
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a set key
+	key = "{b}set"
+	setValue := []interface{}{"a", "b", "c", "d"}
+	defer client.Del(context.TODO(), key)
+	client.SAdd(context.TODO(), key, setValue...)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, setType, value.Type)
+
+	v = make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, len(setValue), len(v))
+	for _, item := range v {
+		assert.True(t, utility.StringSliceContains(utility.AnyArrayToStringArray(setValue), item.(string)))
+	}
+
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a hash key
+	key = "{b}hash"
+	hashValue := map[string]interface{}{"a": "b", "c": "d", "e": "f"}
+	defer client.Del(context.TODO(), key)
+	client.HSet(context.TODO(), key, hashValue)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, hashType, value.Type)
+
+	v = make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, len(hashValue)*2, len(v))
+	for i := 0; i < len(v)-1; i += 2 {
+		hk := v[i].(string)
+		hv := v[i+1].(string)
+		assert.Equal(t, hashValue[hk], hv)
+	}
+
+	assert.Equal(t, int64(0), value.ExpireTs)
+	assert.Greater(t, value.SyncedTs, int64(0))
+
+	// get a zset key, with expiration
+	key = "{b}zset"
+	zsetValue := map[string]redis.Z{
+		"a": {Member: "a", Score: 1.1},
+		"b": {Member: "b", Score: 2.2},
+		"c": {Member: "c", Score: 3.3},
+	}
+	defer client.Del(context.TODO(), key)
+	for _, z := range zsetValue {
+		client.ZAdd(context.TODO(), key, &z)
+	}
+	client.Expire(context.TODO(), key, 10*time.Second)
+	value, err = getValueFromRedis(key)
+	assert.Nil(t, err)
+	assert.Equal(t, zsetType, value.Type)
+
+	v = make([]interface{}, 0)
+	json.Unmarshal([]byte(value.Value), &v)
+	assert.Equal(t, len(zsetValue)*2, len(v))
+
+	for i := 0; i < len(v)-1; i += 2 {
+		member := v[i].(string)
+		score, err := strconv.ParseFloat(v[i+1].(string), 64)
+		assert.Nil(t, err)
+		assert.True(t, math.Abs(zsetValue[member].Score-score) < 0.01)
+	}
+
+	assert.Greater(t, value.ExpireTs, int64(0))
+	assert.Greater(t, value.SyncedTs, int64(0))
+}
+
+func TestIsValueEqual(t *testing.T) {
+	equal, err := isValueEqual(
+		stringType,
+		[]string{"abc"},
+		RedisValue{Type: stringType, Value: "abc"})
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	equal, err = isValueEqual(
+		stringType,
+		[]string{"abc"},
+		RedisValue{Type: stringType, Value: "abcd"})
+	assert.Nil(t, nil)
+	assert.False(t, equal)
+
+	listValue := []string{"a", "b", "x", "y", "z"}
+	v, _ := json.Marshal(listValue)
+	value := RedisValue{
+		Type:  listType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(listType, listValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	setValue := []string{"a", "b", "x", "y", "z", "1", "2", "3"}
+	v, _ = json.Marshal(setValue)
+	value = RedisValue{
+		Type:  setType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(setType, setValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	hashValue := []string{"1", "2", "3", "4", "a", "b", "b", "a"}
+	v, _ = json.Marshal(hashValue)
+	value = RedisValue{
+		Type:  hashType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(hashType, hashValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
+
+	zsetValue := []string{"a", "1.2", "b", "1.3", "d", "2.34"}
+	v, _ = json.Marshal(zsetValue)
+	value = RedisValue{
+		Type:  zsetType,
+		Value: string(v),
+	}
+	equal, err = isValueEqual(zsetType, zsetValue, value)
+	assert.Nil(t, err)
+	assert.True(t, equal)
 }

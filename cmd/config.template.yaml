@@ -50,7 +50,7 @@ event_service:
 load_key:
   retry_times: 5
   retry_interval: "2ms"
-  load_timeout: "100ms"
+  load_timeout: "2000ms"
     
 # 用于同步数据的后端数据库
 db_cluster:
@@ -189,6 +189,7 @@ sync:
     off: false
   sync_key_task:
     interval_minutes: 5
+    upsert_try_times: 3
     off: false
   clean_key_task:
     interval_minutes: 10

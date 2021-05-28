@@ -3,7 +3,10 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"bytepower_room/utility"
+	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-pg/pg/v10"
@@ -16,6 +19,8 @@ const (
 	setType    = "set"
 	zsetType   = "zset"
 )
+
+var supportedRedisDataTypes = []string{stringType, listType, hashType, setType, zsetType}
 
 type roomDataModel struct {
 	tableName struct{} `pg:"_"`
@@ -100,6 +105,187 @@ func getClusterModelsFromRoomDataModels(models ...*roomDataModel) ([]clusterRoom
 	return clusterModels, nil
 }
 
+type RedisValue struct {
+	Type     string `json:"type"`
+	Value    string `json:"value"`
+	SyncedTs int64  `json:"synced_ts"`
+	ExpireTs int64  `json:"expire_ts"`
+}
+
+func (v RedisValue) IsExpired(t time.Time) bool {
+	if v.ExpireTs == 0 {
+		return false
+	}
+	if t.IsZero() {
+		return false
+	}
+	return utility.TimestampInMS(t) >= v.ExpireTs
+}
+
+// key does not have expiration, return time.Duration(-1)
+// key has expiration and has already expired, return time.Duration(0)
+// key has expiration and has not expired yet, return positive time.Duration
+func (v RedisValue) TTL(t time.Time) time.Duration {
+	if v.ExpireTs == 0 {
+		return time.Duration(-1)
+	}
+	seconds, nanoSeconds := utility.GetSecondsAndNanoSecondsFromTsInMs(v.ExpireTs)
+	duration := time.Unix(seconds, nanoSeconds).Sub(t)
+	if duration < 0 {
+		return time.Duration(0)
+	}
+	return duration
+}
+
+func (v RedisValue) IsZero() bool {
+	return v.Type == ""
+}
+
+func (v RedisValue) String() string {
+	return fmt.Sprintf(
+		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
+		v.Type, v.Value, v.SyncedTs, v.ExpireTs)
+}
+
+type roomDataModelV2 struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag   string                `pg:"hash_tag,pk"`
+	Value     map[string]RedisValue `pg:"value"`
+	DeletedAt time.Time             `pg:"deleted_at"`
+	CreatedAt time.Time             `pg:"created_at"`
+	UpdatedAt time.Time             `pg:"updated_at"`
+	Version   int                   `pg:"version"`
+}
+
+func (model *roomDataModelV2) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomDataModelV2) GetTablePrefix() string {
+	return "room_data_v2"
+}
+
+type loadResult struct {
+	model *roomDataModelV2
+	err   error
+}
+
+func loadDataByIDWithContext(ctx context.Context, db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
+	loadResultCh := make(chan loadResult)
+	go func(ch chan loadResult) {
+		model, err := loadDataByID(db, hashTag)
+		ch <- loadResult{model: model, err: err}
+	}(loadResultCh)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-loadResultCh:
+		return r.model, r.err
+	}
+}
+
+func loadDataByID(db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Where("deleted_at is NULL").Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
+}
+
+var errNoRowsUpdated = errors.New("no rows is updated")
+
+func upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue, tryTimes int) error {
+	var err error
+	for i := 0; i < tryTimes; i++ {
+		if err = _upsertRoomData(db, hashTag, key, value); err != nil {
+			if !isRetryErrorForUpdate(err) {
+				return err
+			}
+			continue
+		}
+		break
+	}
+	return err
+}
+
+func isRetryErrorForUpdate(err error) bool {
+	if errors.Is(err, errNoRowsUpdated) {
+		return true
+	}
+	var pgErr pg.Error
+	if errors.As(err, &pgErr) && pgErr.IntegrityViolation() {
+		return true
+	}
+	return false
+}
+
+func _upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) error {
+	if value.IsZero() {
+		return nil
+	}
+	currentTime := time.Now()
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	err = query.WherePK().Select()
+	if err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			model = &roomDataModelV2{
+				HashTag:   hashTag,
+				Value:     map[string]RedisValue{key: value},
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
+				Version:   0,
+			}
+			query, err = db.Model(model)
+			if err != nil {
+				return err
+			}
+			_, err = query.Insert()
+			return err
+		}
+		return err
+	}
+	result, err := query.Set("value=jsonb_set(value, ?, ?)", pg.Array([]string{key}), value).
+		Set("updated_at=?", currentTime).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
+
+func deleteRoomData(db *base.DBCluster, hashTag, key string) error {
+	currentTime := time.Now()
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	_, err = query.Set("value=value-?", key).
+		Set("updated_at=?", currentTime).
+		Set("version=version+1").
+		WherePK().
+		Update()
+	return err
+}
+
 type roomWrittenRecordModel struct {
 	tableName struct{} `pg:"_"`
 
@@ -114,6 +300,31 @@ func (model *roomWrittenRecordModel) ShardingKey() string {
 
 func (model *roomWrittenRecordModel) GetTablePrefix() string {
 	return "room_written_record"
+}
+
+func deleteRoomWrittenRecordModel(db *base.DBCluster, key string, writtenAt time.Time) error {
+	model := &roomWrittenRecordModel{Key: key}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	_, err = query.WherePK().Where("written_at=?", writtenAt).Delete()
+	return err
+}
+
+func loadWrittenRecordModelByID(db *base.DBCluster, id string) (*roomWrittenRecordModel, error) {
+	model := &roomWrittenRecordModel{Key: id}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
 }
 
 func loadWrittenRecordModels(count int) ([]*roomWrittenRecordModel, error) {
@@ -202,27 +413,64 @@ func (model *roomAccessedRecordModel) GetTablePrefix() string {
 	return "room_accessed_record"
 }
 
-func loadAccessedRecordModels(count int, t time.Time, excludedKeys []string) ([]*roomAccessedRecordModel, error) {
+type clusterAccessedRecordModel struct {
+	tableName string
+	client    *pg.DB
+	models    []*roomAccessedRecordModel
+}
+
+type roomAccessedRecordModelV2 struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag    string    `pg:"hash_tag,pk"`
+	AccessedAt time.Time `pg:"accessed_at"`
+	CreatedAt  time.Time `pg:"created_at"`
+}
+
+func (model *roomAccessedRecordModelV2) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
+	return "room_accessed_record_v2"
+}
+
+func loadAccessedRecordModelByID(db *base.DBCluster, id string) (*roomAccessedRecordModelV2, error) {
+	model := &roomAccessedRecordModelV2{HashTag: id}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	if err := query.WherePK().Select(); err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
+}
+
+func loadAccessedRecordModels(count int, t time.Time, excludedHashTags []string) ([]*roomAccessedRecordModelV2, error) {
 	db := base.GetAccessedRecordDBCluster()
 	shardingCount := db.GetShardingCount()
-	tablePrefix := (&roomAccessedRecordModel{}).GetTablePrefix()
+	tablePrefix := (&roomAccessedRecordModelV2{}).GetTablePrefix()
 	excludedKeysInSharding := make(map[int][]string)
-	for _, key := range excludedKeys {
-		index := db.GetShardingIndex(key)
-		if keys, ok := excludedKeysInSharding[index]; !ok {
-			excludedKeysInSharding[index] = []string{key}
+	for _, hashTag := range excludedHashTags {
+		index := db.GetShardingIndex(hashTag)
+		if hashTags, ok := excludedKeysInSharding[index]; !ok {
+			excludedKeysInSharding[index] = []string{hashTag}
 		} else {
-			excludedKeysInSharding[index] = append(keys, key)
+			excludedKeysInSharding[index] = append(hashTags, hashTag)
 		}
 	}
-	var models []*roomAccessedRecordModel
+	var models []*roomAccessedRecordModelV2
 	for index := 0; index < shardingCount; index++ {
 		query, err := db.Models(&models, tablePrefix, index)
 		if err != nil {
 			return nil, err
 		}
-		if keys, ok := excludedKeysInSharding[index]; ok {
-			query = query.Where("key not in (?)", pg.In(keys))
+		if hashTags, ok := excludedKeysInSharding[index]; ok {
+			query = query.Where("hash_tag not in (?)", pg.In(hashTags))
 		}
 		if err := query.Where("accessed_at<?", t).Limit(count).Select(); err != nil {
 			if errors.Is(err, pg.ErrNoRows) {
@@ -237,17 +485,17 @@ func loadAccessedRecordModels(count int, t time.Time, excludedKeys []string) ([]
 	return nil, nil
 }
 
-func bulkUpsertAccessedRecordModels(models ...*roomAccessedRecordModel) error {
-	clusterModels, err := getClusterModelsFromAccessedRecordModels(models...)
+func bulkUpsertAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) error {
+	clusterModels, err := getClusterModelsFromAccessedRecordModelsV2(models...)
 	if err != nil {
 		return err
 	}
 	for _, clusterModel := range clusterModels {
 		_, err := clusterModel.client.Model(&clusterModel.models).
 			Table(clusterModel.tableName).
-			OnConflict("(key) DO UPDATE").
+			OnConflict("(hash_tag) DO UPDATE").
 			Set("accessed_at=EXCLUDED.accessed_at").
-			Where("room_accessed_record_model.accessed_at<EXCLUDED.accessed_at").
+			Where("room_accessed_record_model_v2.accessed_at<EXCLUDED.accessed_at").
 			Insert()
 		if err != nil {
 			return err
@@ -256,15 +504,9 @@ func bulkUpsertAccessedRecordModels(models ...*roomAccessedRecordModel) error {
 	return nil
 }
 
-type clusterAccessedRecordModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomAccessedRecordModel
-}
-
-func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModel) ([]clusterAccessedRecordModel, error) {
+func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
 	db := base.GetAccessedRecordDBCluster()
-	clusterModelsMap := make(map[string]clusterAccessedRecordModel)
+	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
 	for _, model := range models {
 		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
 		if err != nil {
@@ -274,10 +516,38 @@ func getClusterModelsFromAccessedRecordModels(models ...*roomAccessedRecordModel
 			origin.models = append(origin.models, model)
 			clusterModelsMap[tableName] = origin
 		} else {
-			clusterModelsMap[tableName] = clusterAccessedRecordModel{tableName: tableName, client: client, models: []*roomAccessedRecordModel{model}}
+			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
 		}
 	}
-	clusterModels := make([]clusterAccessedRecordModel, 0, len(clusterModelsMap))
+	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
+	for _, clusterModel := range clusterModelsMap {
+		clusterModels = append(clusterModels, clusterModel)
+	}
+	return clusterModels, nil
+}
+
+type clusterAccessedRecordModelV2 struct {
+	tableName string
+	client    *pg.DB
+	models    []*roomAccessedRecordModelV2
+}
+
+func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordModelV2) ([]clusterAccessedRecordModelV2, error) {
+	db := base.GetAccessedRecordDBCluster()
+	clusterModelsMap := make(map[string]clusterAccessedRecordModelV2)
+	for _, model := range models {
+		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
+		if err != nil {
+			return nil, err
+		}
+		if origin, ok := clusterModelsMap[tableName]; ok {
+			origin.models = append(origin.models, model)
+			clusterModelsMap[tableName] = origin
+		} else {
+			clusterModelsMap[tableName] = clusterAccessedRecordModelV2{tableName: tableName, client: client, models: []*roomAccessedRecordModelV2{model}}
+		}
+	}
+	clusterModels := make([]clusterAccessedRecordModelV2, 0, len(clusterModelsMap))
 	for _, clusterModel := range clusterModelsMap {
 		clusterModels = append(clusterModels, clusterModel)
 	}
