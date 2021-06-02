@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"context"
 	"errors"
@@ -24,10 +25,13 @@ func newParseError(err error) error {
 const (
 	loadAndSaveStepSize = 100
 
-	HashTagStatusLoaded            = "L"
-	HashTagStatusCleaned           = "C"
-	HashTagStatusNotExisted        = "N"
-	HashTagMetaInfoStatusFieldName = "status"
+	HashTagStatusLoaded                = "L"
+	HashTagStatusCleaned               = "C"
+	HashTagStatusNotExisted            = "N"
+	HashTagMetaInfoStatusFieldName     = "status"
+	HashTagMetaInfoAccessTimeFieldName = "at"
+	HashTagMetaInfoWriteTimeFieldName  = "wt"
+	HashTagMetaInfoVersionFieldName    = "v"
 )
 
 type HashTag struct {
@@ -76,6 +80,13 @@ func (tag HashTag) GetLoadStatus() (string, error) {
 	return tag.meta.GetLoadStatus()
 }
 
+func (tag HashTag) SetAsLoadedWithAccessTimeAndMode(accessTime time.Time, accessMode commands.AccessMode) error {
+	if accessTime.IsZero() {
+		return errors.New("access time is empty")
+	}
+	return tag.meta.SetAsLoaded(accessTime, accessMode)
+}
+
 func (tag HashTag) Load(timeout time.Duration) (int, error) {
 	status, err := tag.meta.GetLoadStatus()
 	if err != nil {
@@ -85,9 +96,6 @@ func (tag HashTag) Load(timeout time.Duration) (int, error) {
 		return 0, nil
 	}
 	if status == HashTagStatusNotExisted {
-		if err := tag.meta.SetAsLoaded(); err != nil {
-			return 0, err
-		}
 		return 0, nil
 	}
 	if err := tag.acquireLoadLock(); err != nil {
@@ -102,8 +110,7 @@ func (tag HashTag) Load(timeout time.Duration) (int, error) {
 		return 0, err
 	}
 	recordLoadKeySuccess(tag.dep.Logger, tag.dep.Metric, tag.name, time.Since(startTime), count)
-	err = tag.meta.SetAsLoaded()
-	return count, err
+	return count, nil
 }
 
 func (tag HashTag) loadKeys(ctx context.Context) (int, error) {
@@ -182,6 +189,7 @@ func getHashTagMetaKey(hashTag string) string {
 	return fmt.Sprintf("{%s}:_m", hashTag)
 }
 
+//TODO: need update
 func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
 	result, err := meta.dep.Redis.HGet(contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName).Result()
 	// error is redis.Nil means that either metaKey or metaKey.status field does not exist.
@@ -191,10 +199,19 @@ func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
 	return result, err
 }
 
-func (meta HashTagMetaInfo) SetAsLoaded() error {
-	_, err := meta.dep.Redis.HSet(
-		contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName,
-		HashTagStatusLoaded).Result()
+func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode commands.AccessMode) error {
+	values := map[string]interface{}{
+		HashTagMetaInfoStatusFieldName:     HashTagStatusLoaded,
+		HashTagMetaInfoAccessTimeFieldName: utility.TimestampInMS(accessTime),
+	}
+	if accessMode == commands.WriteAccessMode {
+		values[HashTagMetaInfoWriteTimeFieldName] = utility.TimestampInMS(accessTime)
+	}
+	_, err := meta.dep.Redis.TxPipelined(contextTODO, func(pipeliner redis.Pipeliner) error {
+		pipeliner.HSet(contextTODO, meta.metaKey, values)
+		pipeliner.HIncrBy(contextTODO, meta.metaKey, HashTagMetaInfoVersionFieldName, 1)
+		return nil
+	})
 	return err
 }
 
@@ -205,33 +222,32 @@ func (meta HashTagMetaInfo) SetAsCleaned() error {
 	return err
 }
 
-func Load(hashTag string) error {
-	if hashTag == "" {
+func Load(tagName string, accessTime time.Time, accessMode commands.AccessMode) error {
+	if tagName == "" {
 		return nil
+	}
+	dep := base.GetServerDependency()
+	hashTag, err := NewHashTag(tagName, dep)
+	if err != nil {
+		return err
 	}
 	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
-	dep := base.GetServerDependency()
-	var err error
 	for i := 0; i < loadRetryTimes; i++ {
 		startTime := time.Now()
-		tag, e := NewHashTag(hashTag, dep)
-		if e != nil {
-			return e
-		}
-		count, e := tag.Load(loadTimeout)
+		count, e := hashTag.Load(loadTimeout)
 		if e != nil {
 			err = e
 			if isRetryLoadError(err) {
 				time.Sleep(loadRetryInterval)
-				recordLoadKeyRetryError(dep.Logger, dep.Metric, hashTag, err, i+1, count)
+				recordLoadKeyRetryError(dep.Logger, dep.Metric, tagName, err, i+1, count)
 				continue
 			}
-			recordLoadKeyError(dep.Logger, dep.Metric, hashTag, err, time.Since(startTime), count)
+			recordLoadKeyError(dep.Logger, dep.Metric, tagName, err, time.Since(startTime), count)
 			return err
 		}
-		return nil
+		return hashTag.SetAsLoadedWithAccessTimeAndMode(accessTime, accessMode)
 	}
 	return err
 }

@@ -392,7 +392,8 @@ func SyncKeysTask(upsertTryTimes int) error {
 			}
 			if status != HashTagStatusLoaded {
 				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
-				if err := Load(hashTag.Name()); err != nil {
+				//TODO: need to update
+				if err := Load(hashTag.Name(), time.Now(), commands.ReadAccessMode); err != nil {
 					recordTaskError(
 						taskName, err, "load_hash_tag",
 						map[string]string{"hash_tag": hashTag.Name()},

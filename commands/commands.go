@@ -186,11 +186,19 @@ func convertErrorToRESPData(err error) RESPData {
 	return RESPData{DataType: ErrorRespType, Value: err}
 }
 
+type AccessMode string
+
+const (
+	ReadAccessMode  AccessMode = "read"
+	WriteAccessMode AccessMode = "write"
+)
+
 type Commander interface {
 	Name() string
 	ReadKeys() []string
 	WriteKeys() []string
 	CheckAndGetHashTag() (string, error)
+	HashTagAccessMode() AccessMode
 	Cmd() redis.Cmder
 	Args() []string
 	String() string
@@ -234,6 +242,13 @@ func (command *commonCommand) CheckAndGetHashTag() (string, error) {
 		hashTag = tag
 	}
 	return hashTag, nil
+}
+
+func (command *commonCommand) HashTagAccessMode() AccessMode {
+	if len(command.WriteKeys()) > 0 {
+		return WriteAccessMode
+	}
+	return ReadAccessMode
 }
 
 func (command *commonCommand) init(args []string) {

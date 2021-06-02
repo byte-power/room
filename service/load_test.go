@@ -73,9 +73,10 @@ func testSetMetaKeyCleaned(hashTag string) {
 
 func TestLoadKeyNotExist(t *testing.T) {
 	hashTag := "a"
+	currentTime := time.Now()
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, commands.ReadAccessMode)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -137,7 +138,7 @@ func TestLoadKeyString(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	// load data
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, commands.ReadAccessMode)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -179,7 +180,8 @@ func testGenerateListValue(count int) string {
 
 func TestLoadKeyList(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
+	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -218,7 +220,7 @@ func TestLoadKeyList(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, commands.ReadAccessMode)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -256,7 +258,8 @@ func testGenerateHashValue(count int) (string, map[string]string) {
 
 func TestLoadKeyHash(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
+	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -298,7 +301,7 @@ func TestLoadKeyHash(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, commands.ReadAccessMode)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -335,7 +338,8 @@ func testGenerateSetValue(count int) (string, []string) {
 
 func TestLoadKeySet(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
+	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -376,7 +380,7 @@ func TestLoadKeySet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, commands.ReadAccessMode)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -424,7 +428,8 @@ func testGenerateRandFloat(min, max float64) float64 {
 
 func TestLoadKeyZSet(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
+	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -465,7 +470,7 @@ func TestLoadKeyZSet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, commands.ReadAccessMode)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()

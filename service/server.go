@@ -146,8 +146,9 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
+	processTime := time.Now()
 	// Pre Porcess related keys
-	if err = preProcessCommand(command); err != nil {
+	if err = preProcessCommand(command, processTime); err != nil {
 		metric.MetricIncrease("error.pre_process")
 		logger.Error(
 			"preprocess command error",
@@ -213,15 +214,15 @@ func isTransactionNeeded(command commands.Commander) bool {
 	return utility.StringSliceContains(transactionCommands, command.Name())
 }
 
-func preProcessCommand(command commands.Commander) error {
+func preProcessCommand(command commands.Commander, accessTime time.Time) error {
 	logger := base.GetServerLogger()
 	hashTag, err := command.CheckAndGetHashTag()
 	if err != nil {
 		return err
 	}
-	if err := Load(hashTag); err != nil {
+	if err := Load(hashTag, accessTime, command.HashTagAccessMode()); err != nil {
 		logger.Error(
-			"preprocess command error",
+			"load hash_tag error",
 			log.String("command", command.String()),
 			log.String("hash_tag", hashTag),
 			log.Error(err),
