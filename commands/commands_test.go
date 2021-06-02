@@ -3108,3 +3108,31 @@ func testNewZSetKey(input interface{}) {
 	client := base.GetRedisCluster()
 	client.ZAdd(context.TODO(), key, zSlice...)
 }
+
+func TestExtractHashTagFromKey(t *testing.T) {
+	cases := []struct {
+		key     string
+		hashTag string
+	}{
+		{"a", ""},
+		{"", ""},
+		{"a}{", ""},
+		{"{}a", ""},
+		{"{a}", "a"},
+		{"{ab}", "ab"},
+		{"{a}b", "a"},
+		{"{ab}c", "ab"},
+		{"{ab}c{d}", "ab"},
+		{"x{ab}c{d}", "ab"},
+		{"a{b}", "b"},
+		{"a{bc}", "bc"},
+		{"a{bc}d", "bc"},
+		{"}{ab}cab", "ab"},
+		{"{}{abc}xy", ""},
+		{"{{abc}}xy", "{abc"},
+	}
+	for _, c := range cases {
+		hashTag := ExtractHashTagFromKey(c.key)
+		assert.Equal(t, c.hashTag, hashTag)
+	}
+}

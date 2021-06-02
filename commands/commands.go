@@ -190,6 +190,7 @@ type Commander interface {
 	Name() string
 	ReadKeys() []string
 	WriteKeys() []string
+	CheckAndGetHashTag() (string, error)
 	Cmd() redis.Cmder
 	Args() []string
 	String() string
@@ -218,6 +219,21 @@ func (command *commonCommand) ReadKeys() []string {
 
 func (command *commonCommand) WriteKeys() []string {
 	return []string{}
+}
+
+func (command *commonCommand) CheckAndGetHashTag() (string, error) {
+	var hashTag string
+	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
+		tag := ExtractHashTagFromKey(key)
+		if tag == "" {
+			return "", errCommandKeyNoHashTag
+		}
+		if tag != hashTag {
+			return "", errCommnandKeysMultipleHashTags
+		}
+		hashTag = tag
+	}
+	return hashTag, nil
 }
 
 func (command *commonCommand) init(args []string) {
@@ -254,6 +270,18 @@ func ExecuteCommand(command Commander) RESPData {
 	}
 
 	return convertCmdResultToRESPData(cmd)
+}
+
+func ExtractHashTagFromKey(key string) string {
+	leftBraceIndex := strings.Index(key, "{")
+	if leftBraceIndex == -1 {
+		return ""
+	}
+	rightBraceIndex := strings.Index(key[leftBraceIndex:], "}")
+	if rightBraceIndex > 1 {
+		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
+	}
+	return ""
 }
 
 func convertCmdResultToRESPData(cmd redis.Cmder) RESPData {

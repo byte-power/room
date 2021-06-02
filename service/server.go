@@ -215,25 +215,18 @@ func isTransactionNeeded(command commands.Commander) bool {
 
 func preProcessCommand(command commands.Commander) error {
 	logger := base.GetServerLogger()
-	hashTags := utility.NewStringSet()
-	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
-		hashTag := extractHashTagFromKey(key)
-		if hashTag == "" {
-			return newInvalidKeyError(key)
-		}
-		hashTags.Add(hashTag)
+	hashTag, err := command.CheckAndGetHashTag()
+	if err != nil {
+		return err
 	}
-
-	for _, hashTag := range hashTags.ToSlice() {
-		if err := Load(hashTag); err != nil {
-			logger.Error(
-				"preprocess command error",
-				log.String("command", command.String()),
-				log.String("hash_tag", hashTag),
-				log.Error(err),
-			)
-			return newLoadError(err)
-		}
+	if err := Load(hashTag); err != nil {
+		logger.Error(
+			"preprocess command error",
+			log.String("command", command.String()),
+			log.String("hash_tag", hashTag),
+			log.Error(err),
+		)
+		return newLoadError(err)
 	}
 	return nil
 }
@@ -297,18 +290,6 @@ func isKeyValid(key string) bool {
 	leftBraceIndex := strings.Index(key, "{")
 	rightBraceIndex := strings.Index(key, "}")
 	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex+1 < rightBraceIndex)
-}
-
-func extractHashTagFromKey(key string) string {
-	leftBraceIndex := strings.Index(key, "{")
-	if leftBraceIndex == -1 {
-		return ""
-	}
-	rightBraceIndex := strings.Index(key[leftBraceIndex:], "}")
-	if rightBraceIndex > 1 {
-		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
-	}
-	return ""
 }
 
 func getMetaKey(key string) string {

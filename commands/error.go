@@ -22,10 +22,12 @@ func newUnknownCommand(command string, args []string) error {
 }
 
 var (
-	errSyntaxError    = errors.New("ERR syntax error")
-	errEmptyCommand   = errors.New("ERR empty command")
-	errInvalidInteger = errors.New("ERR value is not an integer or out of range")
-	errInvalidFloat   = errors.New("ERR value is not a valid float")
-	errInvalidOffset  = errors.New("ERR offset is out of range")
-	errInvalidIndex   = errors.New("ERR index out of range")
+	errSyntaxError                  = errors.New("ERR syntax error")
+	errEmptyCommand                 = errors.New("ERR empty command")
+	errInvalidInteger               = errors.New("ERR value is not an integer or out of range")
+	errInvalidFloat                 = errors.New("ERR value is not a valid float")
+	errInvalidOffset                = errors.New("ERR offset is out of range")
+	errInvalidIndex                 = errors.New("ERR index out of range")
+	errCommnandKeysMultipleHashTags = errors.New("ERR keys not have the same hash tag")
+	errCommandKeyNoHashTag          = errors.New("ERR key have no hash tag")
 )

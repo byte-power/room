@@ -206,6 +206,9 @@ func (meta HashTagMetaInfo) SetAsCleaned() error {
 }
 
 func Load(hashTag string) error {
+	if hashTag == "" {
+		return nil
+	}
 	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()

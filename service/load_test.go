@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"context"
 	"math"
@@ -31,7 +32,7 @@ func TestMain(m *testing.M) {
 
 func testEmptyKeysInRedis(keys ...string) {
 	for _, key := range keys {
-		hashTag := extractHashTagFromKey(key)
+		hashTag := commands.ExtractHashTagFromKey(key)
 		metaKey := getHashTagMetaKey(hashTag)
 		base.GetRedisCluster().Del(contextTODO, key, metaKey)
 	}
@@ -491,34 +492,6 @@ func TestLoadKeyZSet(t *testing.T) {
 
 	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
-}
-
-func TestExtractHashTagFromKey(t *testing.T) {
-	cases := []struct {
-		key     string
-		hashTag string
-	}{
-		{"a", ""},
-		{"", ""},
-		{"a}{", ""},
-		{"{}a", ""},
-		{"{a}", "a"},
-		{"{ab}", "ab"},
-		{"{a}b", "a"},
-		{"{ab}c", "ab"},
-		{"{ab}c{d}", "ab"},
-		{"x{ab}c{d}", "ab"},
-		{"a{b}", "b"},
-		{"a{bc}", "bc"},
-		{"a{bc}d", "bc"},
-		{"}{ab}cab", "ab"},
-		{"{}{abc}xy", ""},
-		{"{{abc}}xy", "{abc"},
-	}
-	for _, c := range cases {
-		hashTag := extractHashTagFromKey(c.key)
-		assert.Equal(t, c.hashTag, hashTag)
-	}
 }
 
 func TestHashTagLockRequireAndRelease(t *testing.T) {

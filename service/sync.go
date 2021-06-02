@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"bytes"
 	"context"
@@ -303,7 +304,7 @@ func processAccessFile(content []byte) (map[string]time.Time, map[string]time.Ti
 		if event.AccessMode == base.KeyAccessModeWrite {
 			writtenMap[event.Key] = getLaterTime(writtenMap[event.Key], event.AccessTime)
 		}
-		hashTag := extractHashTagFromKey(event.Key)
+		hashTag := commands.ExtractHashTagFromKey(event.Key)
 		if hashTag != "" {
 			accessedMap[hashTag] = getLaterTime(accessedMap[hashTag], event.AccessTime)
 		}
@@ -360,7 +361,7 @@ func SyncKeysTask(upsertTryTimes int) error {
 		for _, model := range models {
 			time.Sleep(syncKeysIntervalDuration)
 			key := model.Key
-			hashTag, err := NewHashTag(extractHashTagFromKey(key), dep)
+			hashTag, err := NewHashTag(commands.ExtractHashTagFromKey(key), dep)
 			if err != nil {
 				if errors.Is(err, ErrEmptyHashTag) {
 					if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
