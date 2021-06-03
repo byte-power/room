@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytepower_room/base"
-	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"context"
 	"errors"
@@ -80,7 +79,7 @@ func (tag HashTag) GetLoadStatus() (string, error) {
 	return tag.meta.GetLoadStatus()
 }
 
-func (tag HashTag) SetAsLoadedWithAccessTimeAndMode(accessTime time.Time, accessMode commands.AccessMode) error {
+func (tag HashTag) SetAsLoadedWithAccessTimeAndMode(accessTime time.Time, accessMode base.HashTagAccessMode) error {
 	if accessTime.IsZero() {
 		return errors.New("access time is empty")
 	}
@@ -189,7 +188,6 @@ func getHashTagMetaKey(hashTag string) string {
 	return fmt.Sprintf("{%s}:_m", hashTag)
 }
 
-//TODO: need update
 func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
 	result, err := meta.dep.Redis.HGet(contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName).Result()
 	// error is redis.Nil means that either metaKey or metaKey.status field does not exist.
@@ -199,12 +197,12 @@ func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
 	return result, err
 }
 
-func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode commands.AccessMode) error {
+func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode base.HashTagAccessMode) error {
 	values := map[string]interface{}{
 		HashTagMetaInfoStatusFieldName:     HashTagStatusLoaded,
 		HashTagMetaInfoAccessTimeFieldName: utility.TimestampInMS(accessTime),
 	}
-	if accessMode == commands.WriteAccessMode {
+	if accessMode == base.HashTagAccessModeRead {
 		values[HashTagMetaInfoWriteTimeFieldName] = utility.TimestampInMS(accessTime)
 	}
 	_, err := meta.dep.Redis.TxPipelined(contextTODO, func(pipeliner redis.Pipeliner) error {
@@ -222,7 +220,7 @@ func (meta HashTagMetaInfo) SetAsCleaned() error {
 	return err
 }
 
-func Load(tagName string, accessTime time.Time, accessMode commands.AccessMode) error {
+func Load(tagName string, accessTime time.Time, accessMode base.HashTagAccessMode) error {
 	if tagName == "" {
 		return nil
 	}

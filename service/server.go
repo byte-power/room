@@ -146,9 +146,8 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
-	processTime := time.Now()
 	// Pre Porcess related keys
-	if err = preProcessCommand(command, processTime); err != nil {
+	if err = preProcessCommand(command, serveStartTime); err != nil {
 		metric.MetricIncrease("error.pre_process")
 		logger.Error(
 			"preprocess command error",
@@ -190,7 +189,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 	}
 	writeDataToConnection(conn, result)
 	startTime := time.Now()
-	if err := sendCommandEvents(command); err != nil {
+	if err := sendCommandEvents(command, serveStartTime); err != nil {
 		metric.MetricIncrease("error.send_event")
 		logger.Error(
 			"send event error",
@@ -216,7 +215,7 @@ func isTransactionNeeded(command commands.Commander) bool {
 
 func preProcessCommand(command commands.Commander, accessTime time.Time) error {
 	logger := base.GetServerLogger()
-	hashTag, err := command.CheckAndGetHashTag()
+	hashTag, err := command.HashTag()
 	if err != nil {
 		return err
 	}
@@ -297,17 +296,18 @@ func getMetaKey(key string) string {
 	return key + ":_meta"
 }
 
-func sendCommandEvents(command commands.Commander) error {
+func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 	eventService := base.GetEventService()
-	for _, key := range command.ReadKeys() {
-		if err := eventService.SendReadEvent(key, time.Now()); err != nil {
-			return err
-		}
+	hashTag, err := command.HashTag()
+	if err != nil {
+		return err
 	}
-	for _, key := range command.WriteKeys() {
-		if err := eventService.SendWriteEvent(key, time.Now()); err != nil {
-			return err
-		}
+	if hashTag == "" {
+		return nil
+	}
+	keys := append(command.ReadKeys(), command.WriteKeys()...)
+	if err := eventService.SendEvent(hashTag, command.HashTagAccessMode(), keys, accessTime); err != nil {
+		return err
 	}
 	return nil
 }

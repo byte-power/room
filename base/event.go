@@ -17,20 +17,20 @@ var (
 	ErrEventAccessTimeEmpty = errors.New("access_time is empty")
 )
 
-type KeyAccessMode string
+type HashTagAccessMode string
 
 const (
-	KeyAccessModeRead  KeyAccessMode = "read"
-	KeyAccessModeWrite KeyAccessMode = "write"
+	HashTagAccessModeRead  HashTagAccessMode = "read"
+	HashTagAccessModeWrite HashTagAccessMode = "write"
 )
 
 type Event struct {
-	Key        string        `json:"key"`
-	AccessMode KeyAccessMode `json:"access_mode"`
-	AccessTime time.Time     `json:"access_time"`
+	Key        string            `json:"key"`
+	AccessMode HashTagAccessMode `json:"access_mode"`
+	AccessTime time.Time         `json:"access_time"`
 }
 
-func NewEvent(key string, accessMode KeyAccessMode, accessTime time.Time) (Event, error) {
+func NewEvent(key string, accessMode HashTagAccessMode, accessTime time.Time) (Event, error) {
 	if key == "" {
 		return Event{}, ErrEventKeyEmpty
 	}
@@ -157,15 +157,19 @@ func (service *EventService) startWorkers() {
 }
 
 func (service *EventService) SendWriteEvent(key string, accessTime time.Time) error {
-	event, err := NewEvent(key, KeyAccessModeWrite, accessTime)
+	event, err := NewEvent(key, HashTagAccessModeWrite, accessTime)
 	if err != nil {
 		return err
 	}
 	return service.send(event)
 }
 
+func (service *EventService) SendEvent(hashTag string, accessMode HashTagAccessMode, keys []string, accessTime time.Time) error {
+	return nil
+}
+
 func (service *EventService) SendReadEvent(key string, accessTime time.Time) error {
-	event, err := NewEvent(key, KeyAccessModeRead, accessTime)
+	event, err := NewEvent(key, HashTagAccessModeRead, accessTime)
 	if err != nil {
 		return err
 	}
@@ -247,7 +251,7 @@ func (worker *eventServiceWorker) start() {
 }
 
 func (worker *eventServiceWorker) addEvent(event Event) {
-	if event.AccessMode == KeyAccessModeWrite {
+	if event.AccessMode == HashTagAccessModeWrite {
 		worker.writtenEventMutex.Lock()
 		defer worker.writtenEventMutex.Unlock()
 		if worker.writtenEvents[event.Key].Before(event.AccessTime) {
@@ -309,7 +313,7 @@ func (worker *eventServiceWorker) collectEvents() []Event {
 	worker.readEventMutex.Lock()
 	readEvents := make([]Event, 0, len(worker.readEvents))
 	for key, accessTime := range worker.readEvents {
-		event := Event{Key: key, AccessMode: KeyAccessModeRead, AccessTime: accessTime}
+		event := Event{Key: key, AccessMode: HashTagAccessModeRead, AccessTime: accessTime}
 		delete(worker.readEvents, key)
 		readEvents = append(readEvents, event)
 	}
@@ -318,7 +322,7 @@ func (worker *eventServiceWorker) collectEvents() []Event {
 	worker.writtenEventMutex.Lock()
 	writtenEvents := make([]Event, 0, len(worker.writtenEvents))
 	for key, accessTime := range worker.writtenEvents {
-		event := Event{Key: key, AccessMode: KeyAccessModeWrite, AccessTime: accessTime}
+		event := Event{Key: key, AccessMode: HashTagAccessModeWrite, AccessTime: accessTime}
 		delete(worker.writtenEvents, key)
 		writtenEvents = append(writtenEvents, event)
 	}

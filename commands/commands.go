@@ -186,27 +186,22 @@ func convertErrorToRESPData(err error) RESPData {
 	return RESPData{DataType: ErrorRespType, Value: err}
 }
 
-type AccessMode string
-
-const (
-	ReadAccessMode  AccessMode = "read"
-	WriteAccessMode AccessMode = "write"
-)
-
 type Commander interface {
 	Name() string
 	ReadKeys() []string
 	WriteKeys() []string
-	CheckAndGetHashTag() (string, error)
-	HashTagAccessMode() AccessMode
+	HashTag() (string, error)
+	HashTagAccessMode() base.HashTagAccessMode
 	Cmd() redis.Cmder
 	Args() []string
 	String() string
 }
 
 type commonCommand struct {
-	name string
-	args []string
+	name           string
+	hashTag        string
+	hashTagChecked bool
+	args           []string
 }
 
 func (command *commonCommand) Name() string {
@@ -229,26 +224,29 @@ func (command *commonCommand) WriteKeys() []string {
 	return []string{}
 }
 
-func (command *commonCommand) CheckAndGetHashTag() (string, error) {
-	var hashTag string
+func (command *commonCommand) HashTag() (string, error) {
+	if command.hashTagChecked {
+		return command.hashTag, nil
+	}
 	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
 		tag := ExtractHashTagFromKey(key)
 		if tag == "" {
 			return "", errCommandKeyNoHashTag
 		}
-		if tag != hashTag {
+		if tag != command.hashTag {
 			return "", errCommnandKeysMultipleHashTags
 		}
-		hashTag = tag
+		command.hashTag = tag
 	}
-	return hashTag, nil
+	command.hashTagChecked = true
+	return command.hashTag, nil
 }
 
-func (command *commonCommand) HashTagAccessMode() AccessMode {
+func (command *commonCommand) HashTagAccessMode() base.HashTagAccessMode {
 	if len(command.WriteKeys()) > 0 {
-		return WriteAccessMode
+		return base.HashTagAccessModeRead
 	}
-	return ReadAccessMode
+	return base.HashTagAccessModeWrite
 }
 
 func (command *commonCommand) init(args []string) {
