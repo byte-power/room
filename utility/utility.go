@@ -522,6 +522,14 @@ func (set *StringSet) Add(item string) {
 	set.m[item] = true
 }
 
+func (set *StringSet) AddItems(items ...string) {
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
+	for _, item := range items {
+		set.m[item] = true
+	}
+}
+
 func (set *StringSet) Remove(item string) {
 	set.mutex.Lock()
 	defer set.mutex.Unlock()
@@ -536,6 +544,8 @@ func (set *StringSet) Contains(item string) bool {
 
 func (set *StringSet) ToSlice() []string {
 	items := make([]string, 0, len(set.m))
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
 	for item := range set.m {
 		items = append(items, item)
 	}

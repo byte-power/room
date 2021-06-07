@@ -302,9 +302,9 @@ func processAccessFile(content []byte) (map[string]time.Time, map[string]time.Ti
 			return nil, nil, err
 		}
 		if event.AccessMode == base.HashTagAccessModeWrite {
-			writtenMap[event.Key] = getLaterTime(writtenMap[event.Key], event.AccessTime)
+			writtenMap[event.HashTag] = getLaterTime(writtenMap[event.HashTag], event.AccessTime)
 		}
-		hashTag := commands.ExtractHashTagFromKey(event.Key)
+		hashTag := commands.ExtractHashTagFromKey(event.HashTag)
 		if hashTag != "" {
 			accessedMap[hashTag] = getLaterTime(accessedMap[hashTag], event.AccessTime)
 		}
@@ -327,8 +327,8 @@ func processAccessEvent(eventBytes []byte) (*base.Event, error) {
 	if event.AccessMode == "" {
 		return nil, base.ErrEventAccessModeEmpty
 	}
-	if event.Key == "" {
-		return nil, base.ErrEventKeyEmpty
+	if event.HashTag == "" {
+		return nil, base.ErrEventHashKeyEmpty
 	}
 	return event, nil
 }

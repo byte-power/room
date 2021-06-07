@@ -306,7 +306,7 @@ func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 		return nil
 	}
 	keys := append(command.ReadKeys(), command.WriteKeys()...)
-	if err := eventService.SendEvent(hashTag, command.HashTagAccessMode(), keys, accessTime); err != nil {
+	if err := eventService.SendEvent(hashTag, keys, command.HashTagAccessMode(), accessTime); err != nil {
 		return err
 	}
 	return nil

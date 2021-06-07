@@ -63,7 +63,7 @@ func InitServices(configPath string) error {
 	}
 	dbCluster = databaseCluster
 
-	event, err := NewEventService(config.EventService, loggers["server"])
+	event, err := NewEventService(config.EventService, loggers["server"], metricService)
 	if err != nil {
 		return nil
 	}
