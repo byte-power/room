@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"fmt"
 	"time"
 )
 
@@ -95,4 +96,33 @@ func recordLoadIntoRedisSuccess(logger *log.Logger, metric *base.MetricClient, h
 	)
 	metric.MetricIncrease(metricLoadKeyIntoRedisSuccess)
 	metric.MetricTimeDuration(metricLoadKeyIntoRedisSuccessDuration, duration)
+}
+
+func recordTaskError2(logger *log.Logger, metric *base.MetricClient, taskName string, err error, reason string, ctxInfo map[string]string) {
+	recordTaskErrorLog2(logger, taskName, err, reason, ctxInfo)
+	recordTaskErrorMetric2(metric, taskName, reason)
+}
+
+func recordTaskErrorLog2(logger *log.Logger, taskName string, err error, reason string, ctxInfo map[string]string) {
+	logPairs := make([]log.LogPair, 0)
+	logPairs = append(logPairs, log.String("task", taskName))
+	if reason != "" {
+		logPairs = append(logPairs, log.String("reason", reason))
+	}
+	for key, value := range ctxInfo {
+		logPairs = append(logPairs, log.String(key, value))
+	}
+	if err != nil {
+		logPairs = append(logPairs, log.Error(err))
+	}
+	logger.Error("task error", logPairs...)
+}
+
+func recordTaskErrorMetric2(metric *base.MetricClient, taskName string, reasons ...string) {
+	metricName := fmt.Sprintf("%s.error", taskName)
+	metric.MetricIncrease(metricName)
+	for _, reason := range reasons {
+		errorMetricName := fmt.Sprintf("%s.%s", metricName, reason)
+		metric.MetricIncrease(errorMetricName)
+	}
 }
