@@ -2,8 +2,14 @@ package service
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/base/log"
 	"errors"
+	"fmt"
+	"io/ioutil"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -12,10 +18,10 @@ const (
 	HTTPContentTypeJSON   = "application/json"
 )
 
-func SyncEvents() {
+func ReportEvents() {
 	logger := base.GetTaskLogger()
 	metric := base.GetTaskMetricService()
-	taskName := "sync_events"
+	taskName := "report_events"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", postEventsHandler)
 	server := &http.Server{
@@ -30,6 +36,16 @@ func SyncEvents() {
 			recordTaskError2(logger, metric, taskName, err, "listen_serve", nil)
 		}
 	}()
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	sig := <-signalCh
+	logger.Info("signal received, closing report events service...", log.String("signal", sig.String()))
+	if err := server.Close(); err != nil {
+		logger.Error("close report events service error", log.Error(err))
+	} else {
+		logger.Info("close report events service success")
+	}
 }
 
 func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
@@ -39,6 +55,34 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		writer.Write([]byte("{}"))
 		return
 	}
+	body, err := ioutil.ReadAll(request.Body)
+	if err != nil {
+		writer.Header().Set(HTTPHeaderContentType, HTTPContentTypeJSON)
+		writer.WriteHeader(http.StatusInternalServerError)
+		writer.Write(generateErrorResp(err))
+		return
+	}
+	events := make([]base.Event, 0)
+	if err := json.Unmarshal(body, &events); err != nil {
+		writer.Header().Set(HTTPHeaderContentType, HTTPContentTypeJSON)
+		writer.WriteHeader(http.StatusInternalServerError)
+		writer.Write(generateErrorResp(err))
+		return
+	}
+	for _, event := range events {
+		fmt.Println(event.String())
+	}
+	writer.Header().Set(HTTPHeaderContentType, HTTPContentTypeJSON)
+	writer.WriteHeader(http.StatusOK)
+	writer.Write([]byte("{}"))
+}
+
+func generateErrorResp(err error) []byte {
+	response := map[string]string{
+		"error": err.Error(),
+	}
+	result, _ := json.Marshal(response)
+	return result
 }
 
 func SyncHashTagKeys() {
