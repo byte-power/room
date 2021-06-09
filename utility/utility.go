@@ -558,6 +558,19 @@ func (set *StringSet) Len() int {
 	return len(set.m)
 }
 
+func (set *StringSet) MarshalJSON() ([]byte, error) {
+	return json.Marshal(set.ToSlice())
+}
+
+func (set *StringSet) UnmarshalJSON(data []byte) error {
+	slice := make([]string, 0)
+	if err := json.Unmarshal(data, &slice); err != nil {
+		return err
+	}
+	*set = *NewStringSet(slice...)
+	return nil
+}
+
 func IsTwoStringSliceEqual(s1, s2 []string) bool {
 	if len(s1) != len(s2) {
 		return false
