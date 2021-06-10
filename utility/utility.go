@@ -664,3 +664,21 @@ func SplitSliceBySize(slice []interface{}, size int) ([][]interface{}, error) {
 	}
 	return slices, nil
 }
+
+func GetLatestTime(times ...time.Time) time.Time {
+	latestTime := time.Time{}
+	for _, t := range times {
+		if t.After(latestTime) {
+			latestTime = t
+		}
+	}
+	return latestTime
+}
+
+func MergeStringSliceAndRemoveDuplicateItems(slices ...[]string) []string {
+	set := NewStringSet([]string{}...)
+	for _, slice := range slices {
+		set.AddItems(slice...)
+	}
+	return set.ToSlice()
+}
