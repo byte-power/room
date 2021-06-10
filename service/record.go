@@ -14,6 +14,8 @@ const (
 	metricLoadKeyFromDBNotFoundError = "error.loadkey.db.not_found"
 	metricLoadKeyIntoRedisError      = "error.loadkey.redis"
 
+	metricAddEventToDBRetryError = "error.add_event_to_db.retry"
+
 	metricLoadKeySuccess                  = "loadkey.success"
 	metricLoadKeySuccessDuration          = "loadkey.duration"
 	metricLoadKeyFromDBSuccess            = "loadkey.db.success"
