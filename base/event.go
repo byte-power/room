@@ -13,9 +13,10 @@ import (
 )
 
 var (
-	ErrEventHashKeyEmpty    = errors.New("hash_tag is empty")
-	ErrEventAccessModeEmpty = errors.New("access_mode is empty")
-	ErrEventAccessTimeEmpty = errors.New("access_time is empty")
+	ErrEventHashKeyEmpty    = errors.New("event hash_tag is empty")
+	ErrEventAccessModeEmpty = errors.New("event access_mode is empty")
+	ErrEventAccessTimeEmpty = errors.New("event access_time is empty")
+	ErrEventNoKeys          = errors.New("event contains no keys")
 
 	errDrainEventTimeout = errors.New("drain event timeout")
 )
@@ -41,21 +42,32 @@ type Event struct {
 }
 
 func NewEvent(hashTag string, keys []string, accessMode HashTagAccessMode, accessTime time.Time) (Event, error) {
-	if hashTag == "" {
-		return Event{}, ErrEventHashKeyEmpty
-	}
-	if accessMode == "" {
-		return Event{}, ErrEventAccessModeEmpty
-	}
-	if accessTime.IsZero() {
-		return Event{}, ErrEventAccessTimeEmpty
-	}
-	return Event{
+	event := Event{
 		HashTag:    hashTag,
 		Keys:       utility.NewStringSet(keys...),
 		AccessMode: accessMode,
 		AccessTime: accessTime,
-	}, nil
+	}
+	if err := event.Check(); err != nil {
+		return Event{}, err
+	}
+	return event, nil
+}
+
+func (event Event) Check() error {
+	if event.HashTag == "" {
+		return ErrEventHashKeyEmpty
+	}
+	if event.AccessMode == "" {
+		return ErrEventAccessModeEmpty
+	}
+	if event.AccessTime.IsZero() {
+		return ErrEventAccessTimeEmpty
+	}
+	if event.Keys.Len() == 0 {
+		return ErrEventNoKeys
+	}
+	return nil
 }
 
 func (event Event) String() string {
