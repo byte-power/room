@@ -553,3 +553,106 @@ func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordMod
 	}
 	return clusterModels, nil
 }
+
+type HashTagKeysStatus string
+
+const (
+	HashTagKeysStatusNeedSynced HashTagKeysStatus = "need_synced"
+	HashTagKeysStatusSynced     HashTagKeysStatus = "synced"
+	HashTagKeysStatusCleaned    HashTagKeysStatus = "cleaned"
+)
+
+type roomHashTagKeys struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag    string            `pg:"hash_tag,pk"`
+	Keys       []string          `pg:"keys"`
+	AccessedAt time.Time         `pg:"accessed_at"`
+	WrittenAt  time.Time         `pg:"written_at"`
+	SyncedAt   time.Time         `pg:"synced_at"`
+	CreatedAt  time.Time         `pg:"created_at"`
+	UpdatedAt  time.Time         `pg:"updated_at"`
+	Status     HashTagKeysStatus `pg:"status"`
+	Version    int64             `pg:"version"`
+}
+
+func (model *roomHashTagKeys) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomHashTagKeys) GetTablePrefix() string {
+	return "room_keys"
+}
+
+func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.Event) error {
+	currentTime := time.Now()
+	model := &roomHashTagKeys{HashTag: event.HashTag}
+	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
+	if err != nil {
+		return err
+	}
+	//TODO: add timeout
+	err = db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := tx.Model(model).Table(tableName).WherePK().For("UPDATE").Select()
+		if err != nil && !errors.Is(err, pg.ErrNoRows) {
+			return err
+		}
+		// Insert new row
+		if err != nil && errors.Is(err, pg.ErrNoRows) {
+			model = &roomHashTagKeys{
+				HashTag:    event.HashTag,
+				Keys:       event.Keys.ToSlice(),
+				AccessedAt: event.AccessTime,
+				CreatedAt:  currentTime,
+				UpdatedAt:  currentTime,
+				Status:     HashTagKeysStatusNeedSynced,
+				Version:    0,
+			}
+			if event.AccessMode == base.HashTagAccessModeWrite {
+				model.WrittenAt = event.AccessTime
+			}
+			_, err = tx.Model(model).Table(tableName).Insert()
+			return err
+		}
+		// update
+		model.HashTag = event.HashTag
+		originKeys := model.Keys
+		model.Keys = utility.MergeStringSliceAndRemoveDuplicateItems(originKeys, event.Keys.ToSlice())
+		model.AccessedAt = utility.GetLatestTime(model.AccessedAt, event.AccessTime)
+		model.UpdatedAt = currentTime
+		originVersion := model.Version
+		model.Version = originVersion + 1
+		if event.AccessMode == base.HashTagAccessModeWrite {
+			model.WrittenAt = utility.GetLatestTime(model.WrittenAt, event.AccessTime)
+		}
+		if (len(originKeys) != len(model.Keys)) || event.AccessMode == base.HashTagAccessModeWrite {
+			model.Status = HashTagKeysStatusNeedSynced
+		} else {
+			model.Status = HashTagKeysStatusSynced
+		}
+		result, err := tx.Model(model).Table(tableName).WherePK().Where("version=?", originVersion).Update()
+		if err != nil {
+			return err
+		}
+		// This seems will not happen since use lock in `select for update`
+		if result.RowsAffected() != 1 {
+			return errNoRowsUpdated
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return base.NewDBTxError(err)
+	}
+	return nil
+}
+
+// find keys to sync
+// select * from table where status = "syncing";
+// update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
+
+// find keys to clean
+// select * from table where status != "cleaned" and accessed_at < ?;
+// update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"
