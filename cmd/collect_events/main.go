@@ -17,5 +17,5 @@ func main() {
 	if err := base.InitSyncService(*configPath); err != nil {
 		panic(err)
 	}
-	service.ReportEvents()
+	service.CollectEvents()
 }
