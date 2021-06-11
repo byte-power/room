@@ -28,13 +28,14 @@ func CollectEvents() {
 	logger := base.GetTaskLogger()
 	metric := base.GetTaskMetricService()
 	mux := http.NewServeMux()
+	config := base.GetServerConfig().CollectEventService
 	mux.HandleFunc("/events", postEventsHandler)
 	server := &http.Server{
-		Addr:         "127.0.0.1:8089",
+		Addr:         config.Service.URL,
 		Handler:      mux,
-		ReadTimeout:  2000 * time.Millisecond,
-		WriteTimeout: 2000 * time.Millisecond,
-		IdleTimeout:  120 * time.Minute,
+		ReadTimeout:  time.Duration(config.Service.ReadTimeoutMS) * time.Millisecond,
+		WriteTimeout: time.Duration(config.Service.WriteTimeoutMS) * time.Millisecond,
+		IdleTimeout:  time.Duration(config.Service.IdleTimeoutMS) * time.Millisecond,
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -56,6 +57,7 @@ func CollectEvents() {
 const failedReasonWriteToClient = "write_to_client"
 
 func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
+	config := base.GetServerConfig().CollectEventService.AddEvent
 	dep := base.GetTaskDependency()
 	if request.Method != http.MethodPost {
 		err := fmt.Errorf("method %s is not allowed", request.Method)
@@ -96,9 +98,9 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		}
 		return
 	}
-	retryTimes := 3
-	retryInterval := 10 * time.Millisecond
-	timeout := 2 * time.Second
+	retryTimes := config.RetryTimes
+	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
+	timeout := time.Duration(config.DBTimeoutMS) * time.Millisecond
 	for _, event := range events {
 		if err := event.Check(); err != nil {
 			if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {

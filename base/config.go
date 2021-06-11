@@ -16,15 +16,16 @@ import (
 )
 
 type Config struct {
-	Name         string                            `yaml:"name"`
-	Server       RoomServerConfig                  `yaml:"room_server"`
-	RedisCluster RedisClusterConfig                `yaml:"redis_cluster"`
-	DBCluster    DBClusterConfig                   `yaml:"db_cluster"`
-	EventService EventServiceConfig                `yaml:"event_service"`
-	Metric       MetricConfig                      `yaml:"metric"`
-	Log          map[string]map[string]interface{} `yaml:"log"`
-	LoadKey      LoadKeyConfig                     `yaml:"load_key"`
-	SyncService  SyncServiceConfig                 `yaml:"sync"`
+	Name                string                            `yaml:"name"`
+	Server              RoomServerConfig                  `yaml:"room_server"`
+	RedisCluster        RedisClusterConfig                `yaml:"redis_cluster"`
+	DBCluster           DBClusterConfig                   `yaml:"db_cluster"`
+	EventService        EventServiceConfig                `yaml:"event_service"`
+	Metric              MetricConfig                      `yaml:"metric"`
+	Log                 map[string]map[string]interface{} `yaml:"log"`
+	LoadKey             LoadKeyConfig                     `yaml:"load_key"`
+	SyncService         SyncServiceConfig                 `yaml:"sync"`
+	CollectEventService CollectEventConfig                `yaml:"collect_event"`
 }
 
 func (config Config) check() error {
@@ -50,6 +51,9 @@ func (config Config) check() error {
 		return fmt.Errorf("config.%w", err)
 	}
 	if err := config.SyncService.check(); err != nil {
+		return fmt.Errorf("config.%w", err)
+	}
+	if err := config.CollectEventService.check(); err != nil {
 		return fmt.Errorf("config.%w", err)
 	}
 	return nil
@@ -453,6 +457,63 @@ func (config CleanKeyTaskConfig) check() error {
 	}
 	if config.RawInactiveDuration == "" {
 		return errors.New("clean_key_task.inactive_duration should not be empty")
+	}
+	return nil
+}
+
+type CollectEventConfig struct {
+	Service  CollectEventServiceConfig  `yaml:"service"`
+	AddEvent CollectEventAddEventConfig `yaml:"add_event"`
+}
+
+func (config CollectEventConfig) check() error {
+	if err := config.Service.check(); err != nil {
+		return fmt.Errorf("collect_event.%w", err)
+	}
+	if err := config.AddEvent.check(); err != nil {
+		return fmt.Errorf("collect_event.%w", err)
+	}
+	return nil
+}
+
+type CollectEventServiceConfig struct {
+	URL            string `yaml:"url"`
+	ReadTimeoutMS  int    `yaml:"read_timeout_ms"`
+	WriteTimeoutMS int    `yaml:"write_timeout_ms"`
+	IdleTimeoutMS  int    `yaml:"idle_timeout_ms"`
+}
+
+func (config CollectEventServiceConfig) check() error {
+	if config.URL == "" {
+		return errors.New("service.url should not be empty")
+	}
+	if config.ReadTimeoutMS <= 0 {
+		return fmt.Errorf("service.read_timeout_ms is %d, it should be greater than 0", config.ReadTimeoutMS)
+	}
+	if config.WriteTimeoutMS <= 0 {
+		return fmt.Errorf("service.write_timeout_ms is %d, it should be greater than 0", config.WriteTimeoutMS)
+	}
+	if config.IdleTimeoutMS <= 0 {
+		return fmt.Errorf("service.idle_timeout_ms is %d, it should be greater than 0", config.IdleTimeoutMS)
+	}
+	return nil
+}
+
+type CollectEventAddEventConfig struct {
+	RetryTimes      int `yaml:"retry_times"`
+	RetryIntervalMS int `yaml:"retry_interval_ms"`
+	DBTimeoutMS     int `yaml:"db_timeout_ms"`
+}
+
+func (config CollectEventAddEventConfig) check() error {
+	if config.RetryTimes <= 0 {
+		return fmt.Errorf("add_event.retry_times is %d, it should be greater than 0", config.RetryTimes)
+	}
+	if config.RetryIntervalMS <= 0 {
+		return fmt.Errorf("add_event.retry_interval_ms is %d, it should be greater than 0", config.RetryIntervalMS)
+	}
+	if config.DBTimeoutMS <= 0 {
+		return fmt.Errorf("add_event.db_timeout_ms is %d, it should be greater than 0", config.DBTimeoutMS)
 	}
 	return nil
 }

@@ -99,6 +99,18 @@ db_cluster:
 
         start_index: 2
         end_index: 4
+
+collect_event:
+  service:
+    url: "http://127.0.0.1:8090"
+    read_timeout_ms: 1000
+    write_timeout_ms: 1000
+    idle_timeout_ms: 1000
+  add_event:
+    retry_times: 3
+    retry_interval_ms: 20
+    db_timeout_ms: 2000
+
 sync:
   metric:
     prefix: "bytepower_room.task"
