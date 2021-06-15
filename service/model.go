@@ -725,7 +725,7 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 	return nil
 }
 
-func loadHashTagKeysByStatus(db *base.DBCluster, status HashTagKeysStatus, count int) ([]*roomHashTagKeys, error) {
+func loadNeedToSyncHashTagKeysModels(db *base.DBCluster, count int) ([]*roomHashTagKeys, error) {
 	shardingCount := db.GetShardingCount()
 	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
 	var models []*roomHashTagKeys
@@ -734,7 +734,7 @@ func loadHashTagKeysByStatus(db *base.DBCluster, status HashTagKeysStatus, count
 		if err != nil {
 			return nil, err
 		}
-		if err := query.Where("status=?", status).Limit(count).Select(); err != nil {
+		if err := query.Where("status=?", HashTagKeysStatusNeedSynced).Limit(count).Select(); err != nil {
 			if errors.Is(err, pg.ErrNoRows) {
 				continue
 			}
@@ -746,11 +746,3 @@ func loadHashTagKeysByStatus(db *base.DBCluster, status HashTagKeysStatus, count
 	}
 	return nil, nil
 }
-
-// find keys to sync
-// select * from table where status = "syncing";
-// update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-
-// find keys to clean
-// select * from table where status != "cleaned" and accessed_at < ?;
-// update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"

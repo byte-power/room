@@ -24,7 +24,7 @@ func SyncKeys() {
 		}
 	}()
 	for {
-		models, loadErr := loadHashTagKeysByStatus(dep.DB, HashTagKeysStatusNeedSynced, count)
+		models, loadErr := loadNeedToSyncHashTagKeysModels(dep.DB, count)
 		if loadErr != nil {
 			recordTaskError2(dep.Logger, dep.Metric, SyncKeysTaskName, loadErr, "load_hash_tag_keys", nil)
 			err = loadErr
