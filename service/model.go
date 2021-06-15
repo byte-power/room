@@ -271,6 +271,61 @@ func _upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) 
 	return nil
 }
 
+func upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]RedisValue, tryTimes int) error {
+	var err error
+	for i := 0; i < tryTimes; i++ {
+		if err = _upsertRoomDataValue(db, hashTag, value); err != nil {
+			if !isRetryErrorForUpdate(err) {
+				return err
+			}
+			continue
+		}
+		break
+	}
+	return err
+}
+
+func _upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]RedisValue) error {
+	currentTime := time.Now()
+	model := &roomDataModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	err = query.WherePK().Select()
+	if err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			model = &roomDataModelV2{
+				HashTag:   hashTag,
+				Value:     value,
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
+				Version:   0,
+			}
+			query, err = db.Model(model)
+			if err != nil {
+				return err
+			}
+			_, err = query.Insert()
+			return err
+		}
+		return err
+	}
+	result, err := query.Set("value=?", value).
+		Set("updated_at=?", currentTime).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
+
 func deleteRoomData(db *base.DBCluster, hashTag, key string) error {
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
@@ -584,6 +639,27 @@ func (model *roomHashTagKeys) GetTablePrefix() string {
 	return "room_keys"
 }
 
+func (model *roomHashTagKeys) SetStatusAsSynced(db *base.DBCluster, t time.Time) error {
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	result, err := query.Set("status=?", HashTagKeysStatusSynced).
+		Set("synced_at=?", t).
+		Set("updated_at=?", t).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
+
 func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.Event) error {
 	currentTime := time.Now()
 	model := &roomHashTagKeys{HashTag: event.HashTag}
@@ -636,17 +712,39 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 		}
 		// This seems will not happen since use lock in `select for update`
 		if result.RowsAffected() != 1 {
-			return errNoRowsUpdated
+			return base.NewDBTxError(errNoRowsUpdated)
 		}
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return err
+		if errors.Is(err, pg.ErrTxDone) {
+			return base.NewDBTxError(err)
 		}
-		return base.NewDBTxError(err)
+		return err
 	}
 	return nil
+}
+
+func loadHashTagKeysByStatus(db *base.DBCluster, status HashTagKeysStatus, count int) ([]*roomHashTagKeys, error) {
+	shardingCount := db.GetShardingCount()
+	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
+	var models []*roomHashTagKeys
+	for index := 0; index < shardingCount; index++ {
+		query, err := db.Models(&models, tablePrefix, index)
+		if err != nil {
+			return nil, err
+		}
+		if err := query.Where("status=?", status).Limit(count).Select(); err != nil {
+			if errors.Is(err, pg.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+	}
+	return nil, nil
 }
 
 // find keys to sync
