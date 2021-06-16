@@ -244,9 +244,9 @@ func (command *commonCommand) HashTag() (string, error) {
 
 func (command *commonCommand) HashTagAccessMode() base.HashTagAccessMode {
 	if len(command.WriteKeys()) > 0 {
-		return base.HashTagAccessModeRead
+		return base.HashTagAccessModeWrite
 	}
-	return base.HashTagAccessModeWrite
+	return base.HashTagAccessModeRead
 }
 
 func (command *commonCommand) init(args []string) {
