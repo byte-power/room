@@ -16,6 +16,7 @@ var dbCluster *DBCluster
 var writtenRecordDBCluster *DBCluster
 var accessedRecordDBCluster *DBCluster
 var eventService *EventService
+var hashTagEventService *HashTagEventService
 var metricService *MetricClient
 var taskMetricService *MetricClient
 var loggers map[string]*log.Logger
@@ -63,11 +64,17 @@ func InitServices(configPath string) error {
 	}
 	dbCluster = databaseCluster
 
-	event, err := NewEventService(config.EventService, loggers["server"], metricService)
+	event, err := NewEventService(config.EventService, loggers["server"])
 	if err != nil {
-		return nil
+		return err
 	}
 	eventService = event
+
+	hashTagEventSrv, err := NewHashTagEventService(config.HashTagEventService, loggers["server"], metricService)
+	if err != nil {
+		return err
+	}
+	hashTagEventService = hashTagEventSrv
 	d, err := time.ParseDuration(serverConfig.LoadKey.RawRetryInterval)
 	if err != nil {
 		return err
@@ -142,6 +149,10 @@ func GetEventService() *EventService {
 	return eventService
 }
 
+func GetHashTagEventService() *HashTagEventService {
+	return hashTagEventService
+}
+
 func GetMetricService() *MetricClient {
 	return metricService
 }
@@ -164,6 +175,7 @@ func GetServerConfig() Config {
 
 func StopServices() {
 	eventService.Stop()
+	hashTagEventService.Stop()
 }
 
 const (
@@ -231,14 +243,16 @@ type Dependency struct {
 	Logger           *log.Logger
 	Metric           *MetricClient
 	Event            *EventService
+	HashTagEvent     *HashTagEventService
 }
 
 var (
-	ErrDepRedisNull  = errors.New("redis service is null")
-	ErrDepDBNull     = errors.New("db service is null")
-	ErrDepLoggerNull = errors.New("logger is null")
-	ErrDepMetricNull = errors.New("metric service is null")
-	ErrDepEventNull  = errors.New("event service is null")
+	ErrDepRedisNull        = errors.New("redis service is null")
+	ErrDepDBNull           = errors.New("db service is null")
+	ErrDepLoggerNull       = errors.New("logger is null")
+	ErrDepMetricNull       = errors.New("metric service is null")
+	ErrDepEventNull        = errors.New("event service is null")
+	ErrDepHashTagEventNull = errors.New("hash_tag event service is null")
 )
 
 func (dep Dependency) Check() error {
@@ -257,6 +271,9 @@ func (dep Dependency) Check() error {
 	if dep.Event == nil {
 		return ErrDepEventNull
 	}
+	if dep.HashTagEvent == nil {
+		return ErrDepHashTagEventNull
+	}
 	return nil
 }
 
@@ -269,6 +286,7 @@ func GetServerDependency() Dependency {
 		Logger:           GetServerLogger(),
 		Metric:           GetMetricService(),
 		Event:            GetEventService(),
+		HashTagEvent:     GetHashTagEventService(),
 	}
 }
 
@@ -281,5 +299,6 @@ func GetTaskDependency() Dependency {
 		Logger:           GetTaskLogger(),
 		Metric:           GetTaskMetricService(),
 		Event:            GetEventService(),
+		HashTagEvent:     GetHashTagEventService(),
 	}
 }

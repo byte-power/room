@@ -36,6 +36,18 @@ metric:
 
 # vector, collect access information
 event_service:
+  tcp:
+    dsn: "127.0.0.1:7006"
+    timeout: 3
+    write_timeout: 0
+  event_buffer:
+    buffer_limit: 1024
+    worker_count: 3
+    worker_process_bulk_size: 50
+    worker_process_interval: 1m
+    worker_drain_duration: 5s
+
+hash_tag_event_service:
   event_report:
     url: "http://127.0.0.1:8082/events"
     request_timeout: "3ms"
@@ -48,17 +60,6 @@ event_service:
   agg_interval : "1m"
   drain_duration: "10s"
   buffer_limit: 10240000
-
-  tcp:
-    dsn: "127.0.0.1:7006"
-    timeout: 3
-    write_timeout: 0
-  event_buffer:
-    buffer_limit: 1024
-    worker_count: 3
-    worker_process_bulk_size: 50
-    worker_process_interval: 1m
-    worker_drain_duration: 5s
 
 load_key:
   retry_times: 5

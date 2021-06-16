@@ -298,6 +298,18 @@ func getMetaKey(key string) string {
 
 func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 	eventService := base.GetEventService()
+	for _, key := range command.ReadKeys() {
+		if err := eventService.SendReadEvent(key, time.Now()); err != nil {
+			return err
+		}
+	}
+	for _, key := range command.WriteKeys() {
+		if err := eventService.SendWriteEvent(key, time.Now()); err != nil {
+			return err
+		}
+	}
+
+	hashTagEventService := base.GetHashTagEventService()
 	hashTag, err := command.HashTag()
 	if err != nil {
 		return err
@@ -306,7 +318,7 @@ func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 		return nil
 	}
 	keys := append(command.ReadKeys(), command.WriteKeys()...)
-	if err := eventService.SendEvent(hashTag, keys, command.HashTagAccessMode(), accessTime); err != nil {
+	if err := hashTagEventService.SendEvent(hashTag, keys, command.HashTagAccessMode(), accessTime); err != nil {
 		return err
 	}
 	return nil

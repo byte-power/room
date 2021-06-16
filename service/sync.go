@@ -301,10 +301,10 @@ func processAccessFile(content []byte) (map[string]time.Time, map[string]time.Ti
 		if err != nil {
 			return nil, nil, err
 		}
-		if event.AccessMode == base.HashTagAccessModeWrite {
-			writtenMap[event.HashTag] = getLaterTime(writtenMap[event.HashTag], event.AccessTime)
+		if event.AccessMode == base.KeyAccessModeWrite {
+			writtenMap[event.Key] = getLaterTime(writtenMap[event.Key], event.AccessTime)
 		}
-		hashTag := commands.ExtractHashTagFromKey(event.HashTag)
+		hashTag := commands.ExtractHashTagFromKey(event.Key)
 		if hashTag != "" {
 			accessedMap[hashTag] = getLaterTime(accessedMap[hashTag], event.AccessTime)
 		}
@@ -327,8 +327,8 @@ func processAccessEvent(eventBytes []byte) (*base.Event, error) {
 	if event.AccessMode == "" {
 		return nil, base.ErrEventAccessModeEmpty
 	}
-	if event.HashTag == "" {
-		return nil, base.ErrEventHashKeyEmpty
+	if event.Key == "" {
+		return nil, base.ErrEventKeyEmpty
 	}
 	return event, nil
 }
@@ -392,7 +392,6 @@ func SyncKeysTask(upsertTryTimes int) error {
 			}
 			if status != HashTagStatusLoaded {
 				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
-				//TODO: need to update
 				if err := Load(hashTag.Name(), time.Now(), base.HashTagAccessModeRead); err != nil {
 					recordTaskError(
 						taskName, err, "load_hash_tag",

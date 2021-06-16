@@ -85,7 +85,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		}
 		return
 	}
-	events := make([]base.Event, 0)
+	events := make([]base.HashTagEvent, 0)
 	if err := json.Unmarshal(body, &events); err != nil {
 		if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {
 			recordTaskError2(
@@ -139,7 +139,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func addEventToDB(dbCluster *base.DBCluster, logger *log.Logger, metric *base.MetricClient, event base.Event, retryTimes int, retryInterval, timeout time.Duration) error {
+func addEventToDB(dbCluster *base.DBCluster, logger *log.Logger, metric *base.MetricClient, event base.HashTagEvent, retryTimes int, retryInterval, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	for i := 0; i < retryTimes; i++ {
