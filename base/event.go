@@ -3,6 +3,10 @@ package base
 import (
 	"bytepower_room/base/log"
 	"bytepower_room/utility"
+	"bytes"
+	"io"
+	"net"
+	"net/http"
 	"strings"
 	"sync/atomic"
 
@@ -20,6 +24,8 @@ var (
 
 	errDrainEventTimeout = errors.New("drain event timeout")
 )
+
+const HTTPContentTypeJSON = "application/json"
 
 var (
 	metricReportEventsError = "error.report_events"
@@ -77,13 +83,17 @@ func (event Event) String() string {
 }
 
 const (
-	defaultEventServiceBufferLimit           = 16 * 1024 * 1024 // 16M
-	defaultEventServiceAggregateInterval     = 1 * time.Minute
-	defaultEventReportRequestTimeout         = 100 * time.Millisecond
-	defaultEventReportRequestWorkerCount     = 2
-	defaultEventReportRequestMaxEvent        = 10
-	defaultEventReportRequestMaxWaitDuration = 5 * time.Second
-	defaultDrainDuration                     = 5 * time.Second
+	defaultEventServiceBufferLimit       = 16 * 1024 * 1024 // 16M
+	defaultEventServiceAggregateInterval = 1 * time.Minute
+	defaultEventServiceDrainDuration     = 5 * time.Second
+
+	defaultEventReportRequestTimeout               = 100 * time.Millisecond
+	defaultEventReportRequestWorkerCount           = 2
+	defaultEventReportRequestMaxEvent              = 10
+	defaultEventReportRequestMaxWaitDuration       = 5 * time.Second
+	defaultEventReportRequestConnKeepAliveInterval = 30 * time.Second
+	defaultEventReportRequestIdleConnTimeout       = 90 * time.Second
+	defaultEventReportRequestMaxConn               = 100
 )
 
 type EventServiceConfig struct {
@@ -110,6 +120,14 @@ type EventReportConfig struct {
 	RequestMaxWaitDuration    time.Duration
 
 	RequestWorkerCount int `yaml:"request_worker_count"`
+
+	RawRequestConnKeepAliveInterval string `yaml:"request_conn_keep_alive_interval"`
+	RequestConnKeepAliveInterval    time.Duration
+
+	RawRequestIdleConnTimeout string `yaml:"request_idle_conn_timeout"`
+	RequestIdleConnTimeout    time.Duration
+
+	RequestMaxConn int `yaml:"request_max_conn"`
 }
 
 type EventService struct {
@@ -123,6 +141,7 @@ type EventService struct {
 	wg                   sync.WaitGroup
 	stopCh               chan bool
 	stop                 int32
+	client               *http.Client
 }
 
 func NewEventService(config EventServiceConfig, logger *log.Logger, metric *MetricClient) (*EventService, error) {
@@ -136,7 +155,7 @@ func NewEventService(config EventServiceConfig, logger *log.Logger, metric *Metr
 		config.AggInterval = duration
 	}
 	if config.RawDrainDuration == "" {
-		config.DrainDuration = defaultDrainDuration
+		config.DrainDuration = defaultEventServiceDrainDuration
 	} else {
 		duration, err := time.ParseDuration(config.RawDrainDuration)
 		if err != nil {
@@ -174,12 +193,44 @@ func NewEventService(config EventServiceConfig, logger *log.Logger, metric *Metr
 	if config.EventReport.RequestWorkerCount <= 0 {
 		config.EventReport.RequestWorkerCount = defaultEventReportRequestWorkerCount
 	}
+	if config.EventReport.RawRequestConnKeepAliveInterval == "" {
+		config.EventReport.RequestConnKeepAliveInterval = defaultEventReportRequestConnKeepAliveInterval
+	} else {
+		duration, err := time.ParseDuration(config.EventReport.RawRequestConnKeepAliveInterval)
+		if err != nil {
+			return nil, fmt.Errorf("event_service.event_report.request_conn_keep_alive_interval is invalid:%w", err)
+		}
+		config.EventReport.RequestConnKeepAliveInterval = duration
+	}
+	if config.EventReport.RawRequestIdleConnTimeout == "" {
+		config.EventReport.RequestIdleConnTimeout = defaultEventReportRequestIdleConnTimeout
+	} else {
+		duration, err := time.ParseDuration(config.EventReport.RawRequestIdleConnTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("event_service.event_report.request_idle_conn_timeout is invalid:%w", err)
+		}
+		config.EventReport.RequestIdleConnTimeout = duration
+	}
+	if config.EventReport.RequestMaxConn <= 0 {
+		config.EventReport.RequestMaxConn = defaultEventReportRequestMaxConn
+	}
 
 	if logger == nil {
 		return nil, errors.New("logger should not be nil")
 	}
 	if metric == nil {
 		return nil, errors.New("metric should not be nil")
+	}
+	client := &http.Client{
+		Timeout: config.EventReport.RequestTimeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				KeepAlive: config.EventReport.RequestConnKeepAliveInterval,
+			}).DialContext,
+			ForceAttemptHTTP2: true,
+			MaxConnsPerHost:   config.EventReport.RequestMaxConn,
+			IdleConnTimeout:   config.EventReport.RequestIdleConnTimeout,
+		},
 	}
 	server := &EventService{
 		config:               &config,
@@ -192,6 +243,7 @@ func NewEventService(config EventServiceConfig, logger *log.Logger, metric *Metr
 		wg:                   sync.WaitGroup{},
 		stopCh:               make(chan bool),
 		stop:                 0,
+		client:               client,
 	}
 	logger.Info(
 		"new event service",
@@ -274,13 +326,13 @@ func (service *EventService) _collect() []Event {
 func (service *EventService) reportEvents() {
 	service.wg.Add(1)
 	defer service.wg.Done()
-	ticker := time.NewTicker(service.config.EventReport.RequestTimeout)
+	ticker := time.NewTicker(service.config.EventReport.RequestMaxWaitDuration)
 	requestMaxEvent := service.config.EventReport.RequestMaxEvent
 	stop := false
 	for {
 		events := make([]Event, 0, requestMaxEvent)
 		eventCount := 0
-		ticker.Reset(service.config.EventReport.RequestTimeout)
+		ticker.Reset(service.config.EventReport.RequestMaxWaitDuration)
 	loop:
 		for {
 			select {
@@ -315,8 +367,28 @@ func (service *EventService) _reportEvents(events []Event) error {
 	if len(events) == 0 {
 		return nil
 	}
-	for _, event := range events {
-		fmt.Printf("send event %s\n", event.String())
+	data := map[string][]Event{"events": events}
+	bs, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	requestBody := bytes.NewReader(bs)
+	resp, err := service.client.Post(service.config.EventReport.URL, HTTPContentTypeJSON, requestBody)
+	defer func() {
+		if resp.Body != nil {
+			io.ReadAll(resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("response error, http_code=%d, read_body_err=%w", resp.StatusCode, err)
+		}
+		return fmt.Errorf("response error, http_code=%d, body=%s", resp.StatusCode, utility.AnyToString(respBody))
 	}
 	return nil
 }
