@@ -11,7 +11,7 @@ const CleanKeysTaskName = "clean_keys_v2"
 // find keys to clean
 // select * from table where status != "cleaned" and accessed_at < ?;
 // update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"
-func CleanKeys(inactiveDuration time.Duration) {
+func CleanKeysTaskV2(inactiveDuration time.Duration) {
 	count := 100
 	startTime := time.Now()
 	accessedAt := time.Now().Add(-inactiveDuration)

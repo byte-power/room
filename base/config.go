@@ -304,7 +304,9 @@ type SyncServiceConfig struct {
 	Coordinator             CoordinatorConfig    `yaml:"coordinator"`
 	SyncRecordTask          SyncRecordTaskConfig `yaml:"sync_record_task"`
 	SyncKeyTask             SyncKeyTaskConfig    `yaml:"sync_key_task"`
+	SyncKeyTaskV2           SyncKeyTaskConfig    `yaml:"sync_key_task_v2"`
 	CleanKeyTask            CleanKeyTaskConfig   `yaml:"clean_key_task"`
+	CleanKeyTaskV2          CleanKeyTaskConfig   `yaml:"clean_key_task_v2"`
 }
 
 func (config SyncServiceConfig) check() error {
@@ -332,7 +334,13 @@ func (config SyncServiceConfig) check() error {
 	if err := config.SyncKeyTask.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
+	if err := config.SyncKeyTaskV2.check(); err != nil {
+		return fmt.Errorf("sync.%w", err)
+	}
 	if err := config.CleanKeyTask.check(); err != nil {
+		return fmt.Errorf("sync.%w", err)
+	}
+	if err := config.CleanKeyTaskV2.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
 	return nil
@@ -430,9 +438,11 @@ func (config SyncRecordTaskConfig) check() error {
 }
 
 type SyncKeyTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
-	UpSertTryTimes  int  `yaml:"upsert_try_times"`
+	IntervalMinutes      int    `yaml:"interval_minutes"`
+	Off                  bool   `yaml:"off"`
+	UpSertTryTimes       int    `yaml:"upsert_try_times"`
+	RawNoWrittenDuration string `yaml:"no_written_duration"`
+	NoWrittenDuration    time.Duration
 }
 
 func (config SyncKeyTaskConfig) check() error {

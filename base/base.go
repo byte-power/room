@@ -120,12 +120,26 @@ func InitSyncService(configPath string) error {
 		return err
 	}
 	accessedRecordDBCluster = accessedRecordCluster
+
+	rawNoWrittenDuration := syncServiceConfig.SyncKeyTaskV2.RawNoWrittenDuration
+	duration, err := time.ParseDuration(rawNoWrittenDuration)
+	if err != nil {
+		return err
+	}
+	serverConfig.SyncService.SyncKeyTaskV2.NoWrittenDuration = duration
+
 	rawInactiveDuration := syncServiceConfig.CleanKeyTask.RawInactiveDuration
-	duration, err := time.ParseDuration(rawInactiveDuration)
+	duration, err = time.ParseDuration(rawInactiveDuration)
 	if err != nil {
 		return err
 	}
 	serverConfig.SyncService.CleanKeyTask.InactiveDuration = duration
+	rawInactiveDuration = syncServiceConfig.CleanKeyTaskV2.RawInactiveDuration
+	duration, err = time.ParseDuration(rawInactiveDuration)
+	if err != nil {
+		return err
+	}
+	serverConfig.SyncService.CleanKeyTaskV2.InactiveDuration = duration
 	return nil
 }
 

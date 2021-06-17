@@ -12,7 +12,7 @@ const SyncKeysTaskName = "sync_keys_v2"
 // find keys to sync
 // select * from table where status = "syncing";
 // update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-func SyncKeys(noWrittenDuration time.Duration) {
+func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
 	count := 1000
 	dep := base.GetTaskDependency()
 	syncedCount := 1
@@ -38,7 +38,7 @@ func SyncKeys(noWrittenDuration time.Duration) {
 			break
 		}
 		for _, model := range models {
-			if err = syncRoomData(dep.DB, model, time.Now()); err != nil {
+			if err = syncRoomData(dep.DB, model, time.Now(), upsertTryTimes); err != nil {
 				recordTaskErrorV2(
 					dep.Logger, dep.Metric, SyncKeysTaskName,
 					err, "sync_room_data",
@@ -54,8 +54,8 @@ func SyncKeys(noWrittenDuration time.Duration) {
 	}
 }
 
-func syncRoomData(db *base.DBCluster, model *roomHashTagKeys, t time.Time) error {
-	if err := syncHashTagKeys(db, model.HashTag, model.Keys); err != nil {
+func syncRoomData(db *base.DBCluster, model *roomHashTagKeys, t time.Time, tryTimes int) error {
+	if err := syncHashTagKeys(db, model.HashTag, model.Keys, tryTimes); err != nil {
 		return err
 	}
 	if err := model.SetStatusAsSynced(db, t); err != nil {
@@ -64,8 +64,7 @@ func syncRoomData(db *base.DBCluster, model *roomHashTagKeys, t time.Time) error
 	return nil
 }
 
-func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string) error {
-	retryTimes := 3
+func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string, tryTimes int) error {
 	value := make(map[string]RedisValue)
 	for _, key := range keys {
 		v, err := getValueFromRedis(key)
@@ -76,7 +75,7 @@ func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string) error {
 			value[key] = v
 		}
 	}
-	err := upsertRoomDataValue(db, hashTag, value, retryTimes)
+	err := upsertRoomDataValue(db, hashTag, value, tryTimes)
 	if err != nil {
 		return err
 	}
