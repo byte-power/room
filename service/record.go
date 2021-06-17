@@ -100,7 +100,7 @@ func recordLoadIntoRedisSuccess(logger *log.Logger, metric *base.MetricClient, h
 	metric.MetricTimeDuration(metricLoadKeyIntoRedisSuccessDuration, duration)
 }
 
-func recordTaskError2(logger *log.Logger, metric *base.MetricClient, taskName string, err error, reason string, ctxInfo map[string]string) {
+func recordTaskErrorV2(logger *log.Logger, metric *base.MetricClient, taskName string, err error, reason string, ctxInfo map[string]string) {
 	recordTaskErrorLog2(logger, taskName, err, reason, ctxInfo)
 	recordTaskErrorMetric2(metric, taskName, reason)
 }

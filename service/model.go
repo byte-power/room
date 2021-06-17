@@ -636,7 +636,7 @@ func (model *roomHashTagKeys) ShardingKey() string {
 }
 
 func (model *roomHashTagKeys) GetTablePrefix() string {
-	return "room_keys"
+	return "room_hash_tag_keys"
 }
 
 func (model *roomHashTagKeys) SetStatusAsSynced(db *base.DBCluster, t time.Time) error {
@@ -660,7 +660,27 @@ func (model *roomHashTagKeys) SetStatusAsSynced(db *base.DBCluster, t time.Time)
 	return nil
 }
 
-func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.Event) error {
+func (model *roomHashTagKeys) SetStatusAsCleaned(db *base.DBCluster, t time.Time) error {
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	result, err := query.Set("status=?", HashTagKeysStatusCleaned).
+		Set("updated_at=?", t).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
+
+func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.HashTagEvent) error {
 	currentTime := time.Now()
 	model := &roomHashTagKeys{HashTag: event.HashTag}
 	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
@@ -725,7 +745,7 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 	return nil
 }
 
-func loadNeedToSyncHashTagKeysModels(db *base.DBCluster, count int) ([]*roomHashTagKeys, error) {
+func loadNeedToSyncHashTagKeysModels(db *base.DBCluster, writtenAt time.Time, count int) ([]*roomHashTagKeys, error) {
 	shardingCount := db.GetShardingCount()
 	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
 	var models []*roomHashTagKeys
@@ -734,7 +754,36 @@ func loadNeedToSyncHashTagKeysModels(db *base.DBCluster, count int) ([]*roomHash
 		if err != nil {
 			return nil, err
 		}
-		if err := query.Where("status=?", HashTagKeysStatusNeedSynced).Limit(count).Select(); err != nil {
+		err = query.Where("status=?", HashTagKeysStatusNeedSynced).
+			Where("written_at<=?", writtenAt).
+			Limit(count).Select()
+		if err != nil {
+			if errors.Is(err, pg.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+	}
+	return nil, nil
+}
+
+func loadNeedToCleanHashTagKeysModels(db *base.DBCluster, accessedAt time.Time, count int) ([]*roomHashTagKeys, error) {
+	shardingCount := db.GetShardingCount()
+	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
+	var models []*roomHashTagKeys
+	for index := 0; index < shardingCount; index++ {
+		query, err := db.Models(&models, tablePrefix, index)
+		if err != nil {
+			return nil, err
+		}
+		err = query.Where("status!=?", HashTagKeysStatusCleaned).
+			Where("accessed_at<=?", accessedAt).
+			Limit(count).
+			Select()
+		if err != nil {
 			if errors.Is(err, pg.ErrNoRows) {
 				continue
 			}

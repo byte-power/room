@@ -39,7 +39,7 @@ func CollectEvents() {
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			recordTaskError2(logger, metric, CollectEventsTaskName, err, "listen_serve", nil)
+			recordTaskErrorV2(logger, metric, CollectEventsTaskName, err, "listen_serve", nil)
 		}
 	}()
 	signalCh := make(chan os.Signal, 1)
@@ -62,7 +62,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		err := fmt.Errorf("method %s is not allowed", request.Method)
 		if writeErr := writeErrorResponse(writer, http.StatusMethodNotAllowed, err); writeErr != nil {
-			recordTaskError2(
+			recordTaskErrorV2(
 				dep.Logger,
 				dep.Metric,
 				CollectEventsTaskName,
@@ -75,7 +75,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	body, err := ioutil.ReadAll(request.Body)
 	if err != nil {
 		if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
-			recordTaskError2(
+			recordTaskErrorV2(
 				dep.Logger,
 				dep.Metric,
 				CollectEventsTaskName,
@@ -88,7 +88,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	events := make([]base.HashTagEvent, 0)
 	if err := json.Unmarshal(body, &events); err != nil {
 		if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {
-			recordTaskError2(
+			recordTaskErrorV2(
 				dep.Logger,
 				dep.Metric,
 				CollectEventsTaskName,
@@ -104,7 +104,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	for _, event := range events {
 		if err := event.Check(); err != nil {
 			if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {
-				recordTaskError2(
+				recordTaskErrorV2(
 					dep.Logger,
 					dep.Metric,
 					CollectEventsTaskName,
@@ -117,7 +117,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		err := addEventToDB(dep.DB, dep.Logger, dep.Metric, event, retryTimes, retryInterval, timeout)
 		if err != nil {
 			if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
-				recordTaskError2(
+				recordTaskErrorV2(
 					dep.Logger,
 					dep.Metric,
 					CollectEventsTaskName,
@@ -129,7 +129,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		}
 	}
 	if writeErr := writeSuccessResponse(writer, len(events)); writeErr != nil {
-		recordTaskError2(
+		recordTaskErrorV2(
 			dep.Logger,
 			dep.Metric,
 			CollectEventsTaskName,
@@ -146,7 +146,7 @@ func addEventToDB(dbCluster *base.DBCluster, logger *log.Logger, metric *base.Me
 		err := upsertHashTagKeysRecordByEvent(ctx, dbCluster, event)
 		if err != nil {
 			if errors.Is(err, base.DBTxError) {
-				recordTaskError2(logger, metric, CollectEventsTaskName, err, "add_event_db_retry", map[string]string{"event": event.String()})
+				recordTaskErrorV2(logger, metric, CollectEventsTaskName, err, "add_event_db_retry", map[string]string{"event": event.String()})
 				time.Sleep(retryInterval)
 				continue
 			}

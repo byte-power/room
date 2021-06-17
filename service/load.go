@@ -75,6 +75,22 @@ func (tag HashTag) CleanKeys(keys ...string) error {
 	return err
 }
 
+func (tag HashTag) CleanKeysV2(accessedAt time.Time, keys ...string) error {
+	if err := tag.acquireLoadLock(); err != nil {
+		return err
+	}
+	defer tag.releaseLoadLock()
+	t, err := tag.meta.GetAccessTime()
+	if t.After(accessedAt) {
+		return nil
+	}
+	if err := tag.meta.SetAsCleaned(); err != nil {
+		return err
+	}
+	_, err = tag.dep.Redis.Del(contextTODO, keys...).Result()
+	return err
+}
+
 func (tag HashTag) GetLoadStatus() (string, error) {
 	return tag.meta.GetLoadStatus()
 }
@@ -218,6 +234,20 @@ func (meta HashTagMetaInfo) SetAsCleaned() error {
 		contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName,
 		HashTagStatusCleaned).Result()
 	return err
+}
+
+//TODO: what if "at" field does not exist?
+func (meta HashTagMetaInfo) GetAccessTime() (time.Time, error) {
+	r, err := meta.dep.Redis.HGet(contextTODO, meta.metaKey, HashTagMetaInfoAccessTimeFieldName).Result()
+	if err != nil {
+		return time.Time{}, err
+	}
+	ts, err := strconv.ParseInt(r, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	seconds, nanoSeconds := utility.GetSecondsAndNanoSecondsFromTsInMs(ts)
+	return time.Unix(seconds, nanoSeconds), nil
 }
 
 func Load(tagName string, accessTime time.Time, accessMode base.HashTagAccessMode) error {

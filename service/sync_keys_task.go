@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-const SyncKeysTaskName = "sync_keys"
+const SyncKeysTaskName = "sync_keys_v2"
 
 // find keys to sync
 // select * from table where status = "syncing";
 // update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-func SyncKeys() {
+func SyncKeys(noWrittenDuration time.Duration) {
 	count := 1000
 	dep := base.GetTaskDependency()
 	syncedCount := 1
@@ -24,9 +24,10 @@ func SyncKeys() {
 		}
 	}()
 	for {
-		models, loadErr := loadNeedToSyncHashTagKeysModels(dep.DB, count)
+		writtenAt := time.Now().Add(-noWrittenDuration)
+		models, loadErr := loadNeedToSyncHashTagKeysModels(dep.DB, writtenAt, count)
 		if loadErr != nil {
-			recordTaskError2(dep.Logger, dep.Metric, SyncKeysTaskName, loadErr, "load_hash_tag_keys", nil)
+			recordTaskErrorV2(dep.Logger, dep.Metric, SyncKeysTaskName, loadErr, "load_hash_tag_keys", nil)
 			err = loadErr
 			return
 		}
@@ -34,8 +35,8 @@ func SyncKeys() {
 			break
 		}
 		for _, model := range models {
-			if err = syncRoomData(dep.DB, model.HashTag, model.Keys, time.Now()); err != nil {
-				recordTaskError2(
+			if err = syncRoomData(dep.DB, model, time.Now()); err != nil {
+				recordTaskErrorV2(
 					dep.Logger, dep.Metric, SyncKeysTaskName,
 					err, "sync_room_data",
 					map[string]string{"hash_tag": model.HashTag, "keys": strings.Join(model.Keys, " ")},
@@ -50,11 +51,10 @@ func SyncKeys() {
 	}
 }
 
-func syncRoomData(db *base.DBCluster, hashTag string, keys []string, t time.Time) error {
-	if err := syncHashTagKeys(db, hashTag, keys); err != nil {
+func syncRoomData(db *base.DBCluster, model *roomHashTagKeys, t time.Time) error {
+	if err := syncHashTagKeys(db, model.HashTag, model.Keys); err != nil {
 		return err
 	}
-	model := &roomHashTagKeys{HashTag: hashTag}
 	if err := model.SetStatusAsSynced(db, t); err != nil {
 		return err
 	}
