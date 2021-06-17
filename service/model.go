@@ -745,32 +745,17 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 	return nil
 }
 
-func loadNeedToSyncHashTagKeysModels(db *base.DBCluster, writtenAt time.Time, count int) ([]*roomHashTagKeys, error) {
-	shardingCount := db.GetShardingCount()
-	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
-	var models []*roomHashTagKeys
-	for index := 0; index < shardingCount; index++ {
-		query, err := db.Models(&models, tablePrefix, index)
-		if err != nil {
-			return nil, err
-		}
-		err = query.Where("status=?", HashTagKeysStatusNeedSynced).
-			Where("written_at<=?", writtenAt).
-			Limit(count).Select()
-		if err != nil {
-			if errors.Is(err, pg.ErrNoRows) {
-				continue
-			}
-			return nil, err
-		}
-		if len(models) > 0 {
-			return models, nil
-		}
-	}
-	return nil, nil
+type dbWhereCondition struct {
+	column    string
+	operator  string
+	parameter interface{}
 }
 
-func loadNeedToCleanHashTagKeysModels(db *base.DBCluster, accessedAt time.Time, count int) ([]*roomHashTagKeys, error) {
+func (condition dbWhereCondition) getConditionAndParameter() (string, interface{}) {
+	return fmt.Sprintf("%s%s?", condition.column, condition.operator), condition.parameter
+}
+
+func loadHashTagKeysModelsByCondition(db *base.DBCluster, count int, conditions ...dbWhereCondition) ([]*roomHashTagKeys, error) {
 	shardingCount := db.GetShardingCount()
 	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
 	var models []*roomHashTagKeys
@@ -779,10 +764,11 @@ func loadNeedToCleanHashTagKeysModels(db *base.DBCluster, accessedAt time.Time, 
 		if err != nil {
 			return nil, err
 		}
-		err = query.Where("status!=?", HashTagKeysStatusCleaned).
-			Where("accessed_at<=?", accessedAt).
-			Limit(count).
-			Select()
+		for _, condition := range conditions {
+			cond, parameter := condition.getConditionAndParameter()
+			query.Where(cond, parameter)
+		}
+		err = query.Limit(count).Select()
 		if err != nil {
 			if errors.Is(err, pg.ErrNoRows) {
 				continue

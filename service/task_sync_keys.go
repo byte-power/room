@@ -25,7 +25,10 @@ func SyncKeys(noWrittenDuration time.Duration) {
 	}()
 	for {
 		writtenAt := time.Now().Add(-noWrittenDuration)
-		models, loadErr := loadNeedToSyncHashTagKeysModels(dep.DB, writtenAt, count)
+		models, loadErr := loadHashTagKeysModelsByCondition(
+			dep.DB, count,
+			dbWhereCondition{column: "status", operator: "=", parameter: HashTagKeysStatusNeedSynced},
+			dbWhereCondition{column: "written_at", operator: "<=", parameter: writtenAt})
 		if loadErr != nil {
 			recordTaskErrorV2(dep.Logger, dep.Metric, SyncKeysTaskName, loadErr, "load_hash_tag_keys", nil)
 			err = loadErr
