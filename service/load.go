@@ -218,7 +218,7 @@ func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode base.Ha
 		HashTagMetaInfoStatusFieldName:     HashTagStatusLoaded,
 		HashTagMetaInfoAccessTimeFieldName: utility.TimestampInMS(accessTime),
 	}
-	if accessMode == base.HashTagAccessModeRead {
+	if accessMode == base.HashTagAccessModeWrite {
 		values[HashTagMetaInfoWriteTimeFieldName] = utility.TimestampInMS(accessTime)
 	}
 	_, err := meta.dep.Redis.TxPipelined(contextTODO, func(pipeliner redis.Pipeliner) error {
