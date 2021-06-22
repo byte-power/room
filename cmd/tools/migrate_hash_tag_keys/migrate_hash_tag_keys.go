@@ -60,35 +60,6 @@ type RedisValue struct {
 	ExpireTs int64  `json:"expire_ts"`
 }
 
-func (v RedisValue) IsExpired(t time.Time) bool {
-	if v.ExpireTs == 0 {
-		return false
-	}
-	if t.IsZero() {
-		return false
-	}
-	return utility.TimestampInMS(t) >= v.ExpireTs
-}
-
-// key does not have expiration, return time.Duration(-1)
-// key has expiration and has already expired, return time.Duration(0)
-// key has expiration and has not expired yet, return positive time.Duration
-func (v RedisValue) TTL(t time.Time) time.Duration {
-	if v.ExpireTs == 0 {
-		return time.Duration(-1)
-	}
-	seconds, nanoSeconds := utility.GetSecondsAndNanoSecondsFromTsInMs(v.ExpireTs)
-	duration := time.Unix(seconds, nanoSeconds).Sub(t)
-	if duration < 0 {
-		return time.Duration(0)
-	}
-	return duration
-}
-
-func (v RedisValue) IsZero() bool {
-	return v.Type == ""
-}
-
 func (v RedisValue) String() string {
 	return fmt.Sprintf(
 		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
@@ -114,23 +85,25 @@ func (model *roomDataModelV2) GetTablePrefix() string {
 	return "room_data_v2"
 }
 
-var (
-	errAccessRecordNotFound = errors.New("access record is not found")
-	errNoRowsUpdated        = errors.New("no rows updated")
-)
-
-var configPath = pflag.StringP("config", "c", "config.yaml", "config file path")
+var errNoRowsUpdated = errors.New("no rows updated")
 
 func parseAndCheckCommandOptions() error {
 	pflag.Parse()
 	if configPath == nil || *configPath == "" {
-		return errors.New("invalid config")
+		return errors.New("config is not set")
+	}
+	if dryRun == nil {
+		return errors.New("dry run is not set")
 	}
 	return nil
 }
 
+var configPath = pflag.StringP("config", "c", "config.yaml", "config file path")
+var dryRun = pflag.BoolP("dryrun", "d", true, "dry run")
+
 func main() {
 	logger := log.New(os.Stdout, "", log.LstdFlags)
+	startTime := time.Now()
 	if err := parseAndCheckCommandOptions(); err != nil {
 		logger.Fatalf("command options error %s\n", err)
 	}
@@ -140,21 +113,41 @@ func main() {
 	dep := base.GetTaskDependency()
 	roomDataTableShardingCount := dep.DB.GetShardingCount()
 	roomDataTablePrefix := (&roomDataModelV2{}).GetTablePrefix()
-	startID := ""
 	count := 100
+	totalProcessCount := 0
+	totalErrorCount := 0
+	logger.Printf(
+		"start to process at %s, table_sharding_count=%d, table_prefix=%s\n",
+		startTime, roomDataTableShardingCount, roomDataTablePrefix)
 	for index := 0; index < roomDataTableShardingCount; index++ {
-		roomDataModels, id, err := loadRoomDataModels(dep.DB, roomDataTablePrefix, index, startID, count)
-		if err != nil {
-			logger.Fatalf("load room data models error %s\n", err)
-		}
-		for _, roomDataModel := range roomDataModels {
-			err := processModel(logger, dep.DB, dep.AccessedRecordDB, roomDataModel)
+		startID := ""
+		errorCount := 0
+		processCount := 0
+		for {
+			roomDataModels, id, err := loadRoomDataModels(dep.DB, roomDataTablePrefix, index, startID, count)
 			if err != nil {
-				logger.Fatalf("process error %s hash_tag %s\n", err, roomDataModel.HashTag)
+				logger.Fatalf("load room data models error %s\n", err)
+			}
+			for _, roomDataModel := range roomDataModels {
+				err := processModel(logger, dep.DB, dep.AccessedRecordDB, roomDataModel, *dryRun)
+				if err != nil {
+					logger.Printf("process error %s hash_tag %s\n", err, roomDataModel.HashTag)
+					errorCount++
+				} else {
+					logger.Printf("process success hash_tag %s\n", roomDataModel.HashTag)
+					processCount++
+				}
+			}
+			startID = id
+			if len(roomDataModels) < count {
+				break
 			}
 		}
-		startID = id
+		logger.Printf("process success, count %d error count %d, table_index %d\n", processCount, errorCount, index)
+		totalProcessCount += processCount
+		totalErrorCount += errorCount
 	}
+	logger.Printf("process success, count %d error count %d duration %s\n", totalProcessCount, totalProcessCount, time.Since(startTime))
 }
 
 func loadRoomDataModels(db *base.DBCluster, tablePrefix string, tableIndex int, startID string, count int) ([]*roomDataModelV2, string, error) {
@@ -179,8 +172,8 @@ func loadRoomDataModels(db *base.DBCluster, tablePrefix string, tableIndex int, 
 	return models, models[len(models)-1].HashTag, nil
 }
 
-func processModel(logger *log.Logger, db, accessedRecordDB *base.DBCluster, roomDataModel *roomDataModelV2) error {
-	accessRecordModel, err := loadAccessedRecordModelByID(logger, accessedRecordDB, roomDataModel.HashTag)
+func processModel(logger *log.Logger, db, accessedRecordDB *base.DBCluster, roomDataModel *roomDataModelV2, dryRun bool) error {
+	accessRecordModel, err := loadAccessedRecordModelByID(accessedRecordDB, roomDataModel.HashTag)
 	if err != nil {
 		return err
 	}
@@ -188,15 +181,19 @@ func processModel(logger *log.Logger, db, accessedRecordDB *base.DBCluster, room
 	for key := range roomDataModel.Value {
 		keys = append(keys, key)
 	}
-	if accessRecordModel == nil {
-		return errAccessRecordNotFound
+	if accessRecordModel == nil || accessRecordModel.AccessedAt.IsZero() {
+		logger.Printf("skip hash_tag %s, accessed record not found\n", roomDataModel.HashTag)
+		return nil
 	}
+	accessedAt := accessRecordModel.AccessedAt
 
-	err = upsertHashTagKeysModel(logger, db, roomDataModel.HashTag, keys, accessRecordModel.AccessedAt)
+	if !dryRun {
+		err = upsertHashTagKeysModel(logger, db, roomDataModel.HashTag, keys, accessedAt)
+	}
 	return err
 }
 
-func loadAccessedRecordModelByID(logger *log.Logger, db *base.DBCluster, hashTag string) (*roomAccessedRecordModelV2, error) {
+func loadAccessedRecordModelByID(db *base.DBCluster, hashTag string) (*roomAccessedRecordModelV2, error) {
 	model := &roomAccessedRecordModelV2{HashTag: hashTag}
 	query, err := db.Model(model)
 	if err != nil {
@@ -205,7 +202,6 @@ func loadAccessedRecordModelByID(logger *log.Logger, db *base.DBCluster, hashTag
 	err = query.WherePK().Select()
 	if err != nil {
 		if errors.Is(err, pg.ErrNoRows) {
-			logger.Printf("accessed record not found hash_tag %s\n", hashTag)
 			return nil, nil
 		}
 		return nil, err
@@ -219,11 +215,13 @@ func upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hashT
 		err := _upsertHashTagKeysModel(logger, dbCluster, hashTag, keys, t)
 		if err != nil {
 			if isRetryError(err) {
+				logger.Printf("retry upsert hash_tag %s, error %s\n", hashTag, err.Error())
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
 			return err
 		}
+		logger.Printf("process success no dry run hash_tag %s\n", hashTag)
 		break
 	}
 	return nil
@@ -254,7 +252,8 @@ func _upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hash
 				WrittenAt:  t,
 				CreatedAt:  currentTime,
 				UpdatedAt:  currentTime,
-				Status:     service.HashTagKeysStatusNeedSynced,
+				SyncedAt:   t,
+				Status:     service.HashTagKeysStatusSynced,
 				Version:    0,
 			}
 			_, err = tx.Model(model).Table(tableName).Insert()
@@ -274,13 +273,8 @@ func _upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hash
 			logger.Printf("update hash_tag_keys record hash_tag %s written_at %s\n", hashTag, t)
 			model.WrittenAt = t
 		}
-		if model.AccessedAt.IsZero() {
-			logger.Printf("update hash_tag_keys record hash_tag %s accessed_at %s\n", hashTag, t)
-			model.AccessedAt = t
-		}
-		if len(originKeys) != len(model.Keys) {
-			model.Status = service.HashTagKeysStatusNeedSynced
-		}
+		model.AccessedAt = utility.GetLatestTime(model.AccessedAt, t)
+		model.Status = service.HashTagKeysStatusNeedSynced
 		result, err := tx.Model(model).Table(tableName).WherePK().Where("version=?", originVersion).Update()
 		if err != nil {
 			return err
