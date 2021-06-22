@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytepower_room/base"
+	"bytepower_room/utility"
 	"context"
 	"errors"
 	"fmt"
@@ -10,11 +12,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-pg/pg/v10"
 	"github.com/go-redis/redis/v8"
 	"github.com/spf13/pflag"
 )
 
 var dryRun = pflag.BoolP("dryrun", "d", true, "dry run")
+var configPath = pflag.StringP("config", "c", "", "config file path")
 var serverAddrs = pflag.StringArrayP("redis", "s", []string{}, "redis server addreses")
 
 type Result struct {
@@ -26,9 +30,14 @@ type Result struct {
 
 func (result Result) String() string {
 	if result.err != nil {
-		return fmt.Sprintf("server %s: error:%s process %d keys, skip %d keys\n", result.server, result.err.Error(), result.processCount, result.skipCount)
+		return fmt.Sprintf(
+			"server:%s error:%s process_keys:%d skip_keys:%d\n",
+			result.server, result.err.Error(),
+			result.processCount, result.skipCount)
 	} else {
-		return fmt.Sprintf("server %s: process %d keys, skip %d keys\n", result.server, result.processCount, result.skipCount)
+		return fmt.Sprintf(
+			"server:%s process_keys:%d skip_keys:%d\n",
+			result.server, result.processCount, result.skipCount)
 	}
 }
 
@@ -40,11 +49,33 @@ func parseAndCheckCommandOptions() error {
 	if dryRun == nil {
 		return errors.New("dryrun is not set")
 	}
+	if configPath == nil || *configPath == "" {
+		return errors.New("config is not set")
+	}
 	return nil
+}
+
+type roomAccessedRecordModelV2 struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag    string    `pg:"hash_tag,pk"`
+	AccessedAt time.Time `pg:"accessed_at"`
+	CreatedAt  time.Time `pg:"created_at"`
+}
+
+func (model *roomAccessedRecordModelV2) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
+	return "room_accessed_record_v2"
 }
 
 func main() {
 	if err := parseAndCheckCommandOptions(); err != nil {
+		panic(err)
+	}
+	if err := base.InitSyncService(*configPath); err != nil {
 		panic(err)
 	}
 	startTime := time.Now()
@@ -55,9 +86,10 @@ func main() {
 
 	wg := &sync.WaitGroup{}
 	ch := make(chan Result, len(*serverAddrs))
+	db := base.GetAccessedRecordDBCluster()
 	for _, server := range *serverAddrs {
 		wg.Add(1)
-		go scanServer(server, *dryRun, ch, logger, wg)
+		go scanServer(server, *dryRun, ch, logger, wg, db)
 	}
 
 	wg.Wait()
@@ -69,10 +101,10 @@ func main() {
 		totalProcessCount += result.processCount
 		totalSkipCount += result.skipCount
 	}
-	logger.Printf("total process %d keys, skip %d keys, duration=%s\n", totalProcessCount, totalSkipCount, time.Since(startTime).String())
+	logger.Printf("total process %d keys, skip %d keys, duration %s\n", totalProcessCount, totalSkipCount, time.Since(startTime).String())
 }
 
-func scanServer(server string, dryRun bool, ch chan<- Result, logger *log.Logger, wg *sync.WaitGroup) {
+func scanServer(server string, dryRun bool, ch chan<- Result, logger *log.Logger, wg *sync.WaitGroup, db *base.DBCluster) {
 	options := &redis.Options{
 		Addr: server,
 	}
@@ -93,30 +125,47 @@ loop:
 			break loop
 		}
 		for _, key := range keys {
-			if isMetaKey(key) {
+			needToProcess, err := isKeyNeededToProcess(logger, client, key)
+			if err != nil {
+				result.err = err
+				ch <- result
+				logger.Printf("check need process error key %s error %s\n", key, err.Error())
+				break loop
+			}
+			if needToProcess {
 				logger.Printf("prepare to process key %s\n", key)
+				hashTag := extractHashTagFromKey(key)
+				model, err := loadAccessedRecordModelByID(db, hashTag)
+				if err != nil {
+					result.err = err
+					ch <- result
+					logger.Printf("load access record error hash_tag %s error %s\n", hashTag, err.Error())
+					break loop
+				}
+				var ts int64
+				if model != nil {
+					ts = utility.TimestampInMS(model.AccessedAt)
+				} else {
+					logger.Printf("access record not found error hash_tag %s\n", hashTag)
+					ts = utility.TimestampInMS(time.Now())
+				}
 				if !dryRun {
-					fieldCount, err := processKey(client, key)
+					fieldCount, err := processKey(client, key, ts)
 					if err != nil {
 						result.err = err
 						ch <- result
-						logger.Printf("process key %s new_key %s error %s\n", key, newKey, err.Error())
+						logger.Printf("process key %s error %s\n", key, err.Error())
 						break loop
 					}
+					logger.Printf("process key success %s, field %d\n", key, fieldCount)
+					result.processCount += 1
 				}
-				// }
-				// 	newKey := getNewUserRatingKey(key)
-				// 	if !dryRun {
-				// 		err := processKey(key, newKey)
-				// 		logger.Printf("process key success %s %s\n", key, newKey)
-				// 	}
-				// 	result.processCount += 1
 			} else {
 				result.skipCount += 1
 				logger.Printf("skip key %s\n", key)
 			}
 		}
-		logger.Printf("scan cursor %d\n", c)
+		logger.Printf("server %s scan cursor %d\n", server, c)
 		if c == stopCursor {
 			ch <- result
 			break loop
@@ -125,6 +174,26 @@ loop:
 		time.Sleep(100 * time.Millisecond)
 	}
 	wg.Done()
+}
+
+func isKeyNeededToProcess(logger *log.Logger, client *redis.Client, key string) (bool, error) {
+	isValidKey := isMetaKey(key)
+	if !isValidKey {
+		return false, nil
+	}
+	value, err := client.HGetAll(context.TODO(), key).Result()
+	if err != nil {
+		return false, err
+	}
+	logger.Printf("get meta key value %s %+v\n", key, value)
+	if len(value) != 1 {
+		return false, nil
+	}
+	status, ok := value["status"]
+	if !ok {
+		return false, nil
+	}
+	return status == "L", nil
 }
 
 //key format: {xxx}:_m
@@ -141,11 +210,11 @@ func isMetaKey(key string) bool {
 	return suffix == "_m"
 }
 
-func processKey(client *redis.Client, key string, ts int) (int, error) {
+func processKey(client *redis.Client, key string, ts int64) (int, error) {
 	scriptSrc := `
-		if redis.call("hlen", KEYS[1]) ~= 1 {
+		if redis.call("hlen", KEYS[1]) ~= 1 then
 			return 0
-		}
+		end
 		return redis.call("hset", KEYS[1], "at", ARGV[1], "wt", ARGV[1], "v", 0)
 	`
 	script := redis.NewScript(scriptSrc)
@@ -154,4 +223,32 @@ func processKey(client *redis.Client, key string, ts int) (int, error) {
 		return 0, err
 	}
 	return result.(int), nil
+}
+
+func loadAccessedRecordModelByID(db *base.DBCluster, hashTag string) (*roomAccessedRecordModelV2, error) {
+	model := &roomAccessedRecordModelV2{HashTag: hashTag}
+	query, err := db.Model(model)
+	if err != nil {
+		return nil, err
+	}
+	err = query.WherePK().Select()
+	if err != nil {
+		if errors.Is(err, pg.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return model, nil
+}
+
+func extractHashTagFromKey(key string) string {
+	leftBraceIndex := strings.Index(key, "{")
+	if leftBraceIndex == -1 {
+		return ""
+	}
+	rightBraceIndex := strings.Index(key[leftBraceIndex:], "}")
+	if rightBraceIndex > 1 {
+		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
+	}
+	return ""
 }
