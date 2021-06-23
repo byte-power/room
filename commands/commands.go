@@ -196,9 +196,8 @@ type Commander interface {
 }
 
 type commonCommand struct {
-	name    string
-	hashTag string
-	args    []string
+	name string
+	args []string
 }
 
 func (command *commonCommand) Name() string {
