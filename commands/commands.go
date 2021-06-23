@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -198,10 +200,11 @@ type Commander interface {
 }
 
 type commonCommand struct {
-	name           string
-	hashTag        string
-	hashTagChecked bool
-	args           []string
+	name             string
+	hashTag          string
+	hashTagChecked   int32
+	hashTagCheckLock *sync.Mutex
+	args             []string
 }
 
 func (command *commonCommand) Name() string {
@@ -225,20 +228,22 @@ func (command *commonCommand) WriteKeys() []string {
 }
 
 func (command *commonCommand) HashTag() (string, error) {
-	if command.hashTagChecked {
+	if atomic.LoadInt32(&command.hashTagChecked) == 1 {
 		return command.hashTag, nil
 	}
+	command.hashTagCheckLock.Lock()
+	defer command.hashTagCheckLock.Unlock()
 	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
 		tag := ExtractHashTagFromKey(key)
 		if tag == "" {
 			return "", errCommandKeyNoHashTag
 		}
-		if tag != command.hashTag {
+		if command.hashTag != "" && tag != command.hashTag {
 			return "", errCommnandKeysMultipleHashTags
 		}
 		command.hashTag = tag
 	}
-	command.hashTagChecked = true
+	atomic.CompareAndSwapInt32(&command.hashTagChecked, 0, 1)
 	return command.hashTag, nil
 }
 
