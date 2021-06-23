@@ -95,37 +95,28 @@ func (tag HashTag) GetLoadStatus() (string, error) {
 	return tag.meta.GetLoadStatus()
 }
 
-func (tag HashTag) SetAsLoadedWithAccessTimeAndMode(accessTime time.Time, accessMode base.HashTagAccessMode) error {
-	if accessTime.IsZero() {
-		return errors.New("access time is empty")
-	}
-	return tag.meta.SetAsLoaded(accessTime, accessMode)
-}
-
-func (tag HashTag) Load(timeout time.Duration) (int, error) {
-	status, err := tag.meta.GetLoadStatus()
-	if err != nil {
-		return 0, err
-	}
-	if status == HashTagStatusLoaded {
-		return 0, nil
-	}
-	if status == HashTagStatusNotExisted {
-		return 0, nil
-	}
+func (tag HashTag) Load(timeout time.Duration) (bool, int, error) {
 	if err := tag.acquireLoadLock(); err != nil {
-		return 0, err
+		return false, 0, err
 	}
 	defer tag.releaseLoadLock()
+	status, err := tag.meta.GetLoadStatus()
+	if err != nil {
+		return false, 0, err
+	}
+	if status == HashTagStatusLoaded {
+		return false, 0, nil
+	}
+	if status == HashTagStatusNotExisted {
+		return false, 0, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	startTime := time.Now()
 	count, err := tag.loadKeys(ctx)
 	if err != nil {
-		return 0, err
+		return true, 0, err
 	}
-	recordLoadKeySuccess(tag.dep.Logger, tag.dep.Metric, tag.name, time.Since(startTime), count)
-	return count, nil
+	return true, count, nil
 }
 
 func (tag HashTag) loadKeys(ctx context.Context) (int, error) {
@@ -214,6 +205,9 @@ func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
 }
 
 func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode base.HashTagAccessMode) error {
+	if accessTime.IsZero() {
+		return errors.New("access time is empty")
+	}
 	values := map[string]interface{}{
 		HashTagMetaInfoStatusFieldName:     HashTagStatusLoaded,
 		HashTagMetaInfoAccessTimeFieldName: utility.TimestampInMS(accessTime),
@@ -227,6 +221,10 @@ func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode base.Ha
 		return nil
 	})
 	return err
+}
+
+func (meta HashTagMetaInfo) UpdateAccessTime(accessTime time.Time, accessMode base.HashTagAccessMode) error {
+	return meta.SetAsLoaded(accessTime, accessMode)
 }
 
 func (meta HashTagMetaInfo) SetAsCleaned() error {
@@ -264,7 +262,7 @@ func Load(tagName string, accessTime time.Time, accessMode base.HashTagAccessMod
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
 	for i := 0; i < loadRetryTimes; i++ {
 		startTime := time.Now()
-		count, e := hashTag.Load(loadTimeout)
+		loaded, count, e := hashTag.Load(loadTimeout)
 		if e != nil {
 			err = e
 			if isRetryLoadError(err) {
@@ -275,7 +273,10 @@ func Load(tagName string, accessTime time.Time, accessMode base.HashTagAccessMod
 			recordLoadKeyError(dep.Logger, dep.Metric, tagName, err, time.Since(startTime), count)
 			return err
 		}
-		return hashTag.SetAsLoadedWithAccessTimeAndMode(accessTime, accessMode)
+		if loaded {
+			recordLoadKeySuccess(dep.Logger, dep.Metric, tagName, time.Since(startTime), count)
+		}
+		return hashTag.meta.UpdateAccessTime(accessTime, accessMode)
 	}
 	return err
 }
