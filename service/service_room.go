@@ -215,11 +215,11 @@ func isTransactionNeeded(command commands.Commander) bool {
 
 func preProcessCommand(command commands.Commander, accessTime time.Time) error {
 	logger := base.GetServerLogger()
-	hashTag, err := command.HashTag()
+	hashTag, err := commands.CheckAndGetCommandKeysHashTag(command)
 	if err != nil {
 		return err
 	}
-	if err := Load(hashTag, accessTime, command.HashTagAccessMode()); err != nil {
+	if err := Load(hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
 		logger.Error(
 			"load hash_tag error",
 			log.String("command", command.String()),
@@ -310,7 +310,7 @@ func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 	}
 
 	hashTagEventService := base.GetHashTagEventService()
-	hashTag, err := command.HashTag()
+	hashTag, err := commands.CheckAndGetCommandKeysHashTag(command)
 	if err != nil {
 		return err
 	}
@@ -318,7 +318,7 @@ func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 		return nil
 	}
 	keys := append(command.ReadKeys(), command.WriteKeys()...)
-	if err := hashTagEventService.SendEvent(hashTag, keys, command.HashTagAccessMode(), accessTime); err != nil {
+	if err := hashTagEventService.SendEvent(hashTag, keys, commands.GetCommnadKeysAccessMode(command), accessTime); err != nil {
 		return err
 	}
 	return nil

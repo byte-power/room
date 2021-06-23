@@ -192,8 +192,6 @@ type Commander interface {
 	Name() string
 	ReadKeys() []string
 	WriteKeys() []string
-	HashTag() (string, error)
-	HashTagAccessMode() base.HashTagAccessMode
 	Cmd() redis.Cmder
 	Args() []string
 	String() string
@@ -247,13 +245,6 @@ func (command *commonCommand) HashTag() (string, error) {
 	return command.hashTag, nil
 }
 
-func (command *commonCommand) HashTagAccessMode() base.HashTagAccessMode {
-	if len(command.WriteKeys()) > 0 {
-		return base.HashTagAccessModeWrite
-	}
-	return base.HashTagAccessModeRead
-}
-
 func (command *commonCommand) init(args []string) {
 	command.name = strings.ToLower(args[0])
 	command.args = args
@@ -265,6 +256,28 @@ func (command *commonCommand) argsToInterfaceSlice() []interface{} {
 		args[index] = arg
 	}
 	return args
+}
+
+func GetCommnadKeysAccessMode(command Commander) base.HashTagAccessMode {
+	if len(command.WriteKeys()) > 0 {
+		return base.HashTagAccessModeWrite
+	}
+	return base.HashTagAccessModeRead
+}
+
+func CheckAndGetCommandKeysHashTag(command Commander) (string, error) {
+	hashTag := ""
+	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
+		tag := ExtractHashTagFromKey(key)
+		if tag == "" {
+			return "", errCommandKeyNoHashTag
+		}
+		if hashTag != "" && tag != hashTag {
+			return "", errCommnandKeysMultipleHashTags
+		}
+		hashTag = tag
+	}
+	return hashTag, nil
 }
 
 func ParseCommand(args []string) (Commander, error) {
