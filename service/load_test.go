@@ -76,7 +76,7 @@ func TestLoadKeyNotExist(t *testing.T) {
 	currentTime := time.Now()
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
-	err := Load(hashTag, currentTime, commands.ReadAccessMode)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -138,7 +138,7 @@ func TestLoadKeyString(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	// load data
-	err := Load(hashTag, currentTime, commands.ReadAccessMode)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -220,7 +220,7 @@ func TestLoadKeyList(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, commands.ReadAccessMode)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -301,7 +301,7 @@ func TestLoadKeyHash(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, commands.ReadAccessMode)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -380,7 +380,7 @@ func TestLoadKeySet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, commands.ReadAccessMode)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -470,7 +470,7 @@ func TestLoadKeyZSet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, commands.ReadAccessMode)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -724,7 +724,8 @@ func TestLoadZsetToRedis(t *testing.T) {
 }
 
 func TestHashTagLoadWithTimeout(t *testing.T) {
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Nanosecond)
+	defer cancel()
 	time.Sleep(10 * time.Nanosecond)
 
 	tag := "abc"
