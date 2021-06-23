@@ -735,3 +735,49 @@ func TestHashTagLoadWithTimeout(t *testing.T) {
 	assert.Equal(t, context.DeadlineExceeded, err)
 	assert.Equal(t, 0, count)
 }
+
+func TestHashTagMetaUpdateAccessTime(t *testing.T) {
+	dep := base.GetServerDependency()
+	// update status, at, version field
+	hashTag := "abc"
+	meta, _ := NewHashTagMetaInfo(hashTag, dep)
+	defer testEmptyKeysInRedis(meta.metaKey)
+	accessTime := time.Now()
+	accessTs := utility.TimestampInMS(accessTime)
+	err := meta.UpdateAccessTime(accessTime, base.HashTagAccessModeRead)
+	assert.Nil(t, err)
+	result, _ := dep.Redis.HGetAll(context.TODO(), meta.metaKey).Result()
+	assert.Equal(t, 3, len(result))
+	assert.Equal(t, HashTagStatusLoaded, result[HashTagMetaInfoStatusFieldName])
+	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoAccessTimeFieldName])
+	assert.Equal(t, "1", result[HashTagMetaInfoVersionFieldName])
+
+	// update status, at, version, wt field
+	hashTag = "xyz"
+	meta, _ = NewHashTagMetaInfo(hashTag, dep)
+	defer testEmptyKeysInRedis(meta.metaKey)
+	accessTime = time.Now()
+	accessTs = utility.TimestampInMS(accessTime)
+	err = meta.UpdateAccessTime(accessTime, base.HashTagAccessModeWrite)
+	assert.Nil(t, err)
+	result, _ = dep.Redis.HGetAll(context.TODO(), meta.metaKey).Result()
+	assert.Equal(t, 4, len(result))
+	assert.Equal(t, HashTagStatusLoaded, result[HashTagMetaInfoStatusFieldName])
+	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoAccessTimeFieldName])
+	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoWriteTimeFieldName])
+	assert.Equal(t, "1", result[HashTagMetaInfoVersionFieldName])
+}
+
+func TestHashTagMetaGetAccessTime(t *testing.T) {
+	dep := base.GetServerDependency()
+	hashTag := "abc"
+	meta, _ := NewHashTagMetaInfo(hashTag, dep)
+	defer testEmptyKeysInRedis(meta.metaKey)
+	accessTime := time.Now()
+	accessTs := utility.TimestampInMS(accessTime)
+	_ = meta.UpdateAccessTime(accessTime, base.HashTagAccessModeRead)
+
+	lastAccessTime, err := meta.GetAccessTime()
+	assert.Nil(t, err)
+	assert.Equal(t, accessTs, lastAccessTime.UnixNano()/1000/1000)
+}
