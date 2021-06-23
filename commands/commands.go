@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -197,11 +196,9 @@ type Commander interface {
 }
 
 type commonCommand struct {
-	name             string
-	hashTag          string
-	hashTagChecked   int32
-	hashTagCheckLock *sync.Mutex
-	args             []string
+	name    string
+	hashTag string
+	args    []string
 }
 
 func (command *commonCommand) Name() string {
