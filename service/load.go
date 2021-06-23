@@ -204,7 +204,7 @@ func (meta HashTagMetaInfo) GetLoadStatus() (string, error) {
 	return result, err
 }
 
-func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode base.HashTagAccessMode) error {
+func (meta HashTagMetaInfo) UpdateAccessTime(accessTime time.Time, accessMode base.HashTagAccessMode) error {
 	if accessTime.IsZero() {
 		return errors.New("access time is empty")
 	}
@@ -223,10 +223,6 @@ func (meta HashTagMetaInfo) SetAsLoaded(accessTime time.Time, accessMode base.Ha
 	return err
 }
 
-func (meta HashTagMetaInfo) UpdateAccessTime(accessTime time.Time, accessMode base.HashTagAccessMode) error {
-	return meta.SetAsLoaded(accessTime, accessMode)
-}
-
 func (meta HashTagMetaInfo) SetAsCleaned() error {
 	_, err := meta.dep.Redis.HSet(
 		contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName,
@@ -234,7 +230,6 @@ func (meta HashTagMetaInfo) SetAsCleaned() error {
 	return err
 }
 
-//TODO: what if "at" field does not exist?
 func (meta HashTagMetaInfo) GetAccessTime() (time.Time, error) {
 	r, err := meta.dep.Redis.HGet(contextTODO, meta.metaKey, HashTagMetaInfoAccessTimeFieldName).Result()
 	if err != nil {
