@@ -147,7 +147,7 @@ func main() {
 		totalProcessCount += processCount
 		totalErrorCount += errorCount
 	}
-	logger.Printf("process success, count %d error count %d duration %s\n", totalProcessCount, totalProcessCount, time.Since(startTime))
+	logger.Printf("process success, count %d error count %d duration %s\n", totalProcessCount, totalErrorCount, time.Since(startTime))
 }
 
 func loadRoomDataModels(db *base.DBCluster, tablePrefix string, tableIndex int, startID string, count int) ([]*roomDataModelV2, string, error) {
