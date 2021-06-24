@@ -31,6 +31,10 @@ var (
 	metricReportEventsError = "error.report_events"
 	metricSendEventPanic    = "error.send_event_panic"
 	metricDrainEventError   = "error.drain_event"
+
+	metricEventCountInEventBuffer          = "event_in_buffer.total"
+	metricEventCountInCollectedEventBuffer = "event_in_collected_buffer.total"
+	metricAggregatedEventCount             = "aggregated_event.total"
 )
 
 type HashTagAccessMode string
@@ -88,12 +92,13 @@ const (
 	defaultEventServiceDrainDuration     = 5 * time.Second
 
 	defaultEventReportRequestTimeout               = 100 * time.Millisecond
-	defaultEventReportRequestWorkerCount           = 2
+	defaultEventReportRequestWorkerCount           = 5
 	defaultEventReportRequestMaxEvent              = 10
 	defaultEventReportRequestMaxWaitDuration       = 5 * time.Second
 	defaultEventReportRequestConnKeepAliveInterval = 30 * time.Second
 	defaultEventReportRequestIdleConnTimeout       = 90 * time.Second
 	defaultEventReportRequestMaxConn               = 100
+	defaultMonitorInterval                         = 10 * time.Second
 )
 
 type HashTagEventServiceConfig struct {
@@ -106,6 +111,9 @@ type HashTagEventServiceConfig struct {
 	DrainDuration    time.Duration
 
 	BufferLimit int `yaml:"buffer_limit"`
+
+	RawMonitorInterval string `yaml:"monitor_interval"`
+	MonitorInterval    time.Duration
 }
 
 type HashTagEventReportConfig struct {
@@ -131,17 +139,19 @@ type HashTagEventReportConfig struct {
 }
 
 type HashTagEventService struct {
-	config               *HashTagEventServiceConfig
-	eventBuffer          chan HashTagEvent
-	mutex                sync.Mutex
-	events               map[string]HashTagEvent
-	collectedEventBuffer chan HashTagEvent
-	logger               *log.Logger
-	metric               *MetricClient
-	wg                   sync.WaitGroup
-	stopCh               chan bool
-	stop                 int32
-	client               *http.Client
+	config                           *HashTagEventServiceConfig
+	eventBuffer                      chan HashTagEvent
+	eventCountInEventBuffer          int64
+	mutex                            sync.Mutex
+	events                           map[string]HashTagEvent
+	collectedEventBuffer             chan HashTagEvent
+	eventCountInCollectedEventBuffer int64
+	logger                           *log.Logger
+	metric                           *MetricClient
+	wg                               sync.WaitGroup
+	stopCh                           chan bool
+	stop                             int32
+	client                           *http.Client
 }
 
 func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger, metric *MetricClient) (*HashTagEventService, error) {
@@ -165,6 +175,15 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 	}
 	if config.BufferLimit <= 0 {
 		config.BufferLimit = defaultEventServiceBufferLimit
+	}
+	if config.RawMonitorInterval == "" {
+		config.MonitorInterval = defaultMonitorInterval
+	} else {
+		duration, err := time.ParseDuration(config.RawMonitorInterval)
+		if err != nil {
+			return nil, fmt.Errorf("event_service.monitor_interval is invalid:%w", err)
+		}
+		config.MonitorInterval = duration
 	}
 	if config.EventReport.URL == "" {
 		return nil, errors.New("event_service.event_report.url is empty")
@@ -253,21 +272,26 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 }
 
 func (service *HashTagEventService) startWorkers() {
+	service.wg.Add(1)
 	go service.aggregateEvents()
+	service.wg.Add(1)
 	go service.collectAggregatedEvents()
 	for i := 0; i < service.config.EventReport.RequestWorkerCount; i++ {
+		service.wg.Add(1)
 		go service.reportEvents()
 	}
+	service.wg.Add(1)
+	go service.mointor(service.config.MonitorInterval)
 }
 
 // returns when channel `service.stopCh` is closed.
 func (service *HashTagEventService) aggregateEvents() {
-	service.wg.Add(1)
 	defer service.wg.Done()
 loop:
 	for {
 		select {
 		case event := <-service.eventBuffer:
+			atomic.AddInt64(&service.eventCountInEventBuffer, -1)
 			service.aggregateEvent(event)
 		case <-service.stopCh:
 			break loop
@@ -293,25 +317,25 @@ func (service *HashTagEventService) aggregateEvent(event HashTagEvent) {
 
 // returns when channel `service.stopCh` is closed
 func (service *HashTagEventService) collectAggregatedEvents() {
-	service.wg.Add(1)
 	defer service.wg.Done()
 	ticker := time.NewTicker(service.config.AggInterval)
+	defer ticker.Stop()
 loop:
 	for {
 		select {
 		case <-ticker.C:
-			events := service._collect()
+			events := service.collectEvents()
 			for _, event := range events {
 				service.collectedEventBuffer <- event
+				atomic.AddInt64(&service.eventCountInCollectedEventBuffer, 1)
 			}
 		case <-service.stopCh:
 			break loop
 		}
 	}
-	ticker.Stop()
 }
 
-func (service *HashTagEventService) _collect() []HashTagEvent {
+func (service *HashTagEventService) collectEvents() []HashTagEvent {
 	events := make([]HashTagEvent, 0)
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
@@ -324,9 +348,9 @@ func (service *HashTagEventService) _collect() []HashTagEvent {
 
 // returns when channel `service.stopCh` is closed
 func (service *HashTagEventService) reportEvents() {
-	service.wg.Add(1)
 	defer service.wg.Done()
 	ticker := time.NewTicker(service.config.EventReport.RequestMaxWaitDuration)
+	defer ticker.Stop()
 	requestMaxEvent := service.config.EventReport.RequestMaxEvent
 	stop := false
 	for {
@@ -338,8 +362,10 @@ func (service *HashTagEventService) reportEvents() {
 			select {
 			case event, ok := <-service.collectedEventBuffer:
 				if !ok {
+					stop = true
 					break loop
 				}
+				atomic.AddInt64(&service.eventCountInCollectedEventBuffer, -1)
 				eventCount += 1
 				events = append(events, event)
 				if eventCount >= requestMaxEvent {
@@ -360,7 +386,6 @@ func (service *HashTagEventService) reportEvents() {
 			break
 		}
 	}
-	ticker.Stop()
 }
 
 func (service *HashTagEventService) _reportEvents(events []HashTagEvent) error {
@@ -428,6 +453,7 @@ func (service *HashTagEventService) send(event HashTagEvent) error {
 	}()
 	select {
 	case service.eventBuffer <- event:
+		atomic.AddInt64(&service.eventCountInEventBuffer, 1)
 		return nil
 	default:
 		return fmt.Errorf(
@@ -448,16 +474,16 @@ func (service *HashTagEventService) Stop() {
 
 func (service *HashTagEventService) drainEvents() error {
 	timer := time.NewTimer(service.config.DrainDuration)
-	if err := service.closeAndEmptifyChannelWithTimer(timer, service.collectedEventBuffer); err != nil {
+	if err := service.closeAndEmptifyChannelWithTimer(timer, service.collectedEventBuffer, &service.eventCountInCollectedEventBuffer); err != nil {
 		return err
 	}
-	if err := service.closeAndEmptifyChannelWithTimer(timer, service.eventBuffer); err != nil {
+	if err := service.closeAndEmptifyChannelWithTimer(timer, service.eventBuffer, &service.eventCountInEventBuffer); err != nil {
 		return err
 	}
 	requestMaxEvent := service.config.EventReport.RequestMaxEvent
+	allEvents := service.collectEvents()
 	events := make([]HashTagEvent, 0, requestMaxEvent)
-	//TODO: add timeout
-	for _, event := range service.events {
+	for _, event := range allEvents {
 		events = append(events, event)
 		if len(events) == requestMaxEvent {
 			if err := service._reportEvents(events); err != nil {
@@ -472,13 +498,14 @@ func (service *HashTagEventService) drainEvents() error {
 	return nil
 }
 
-func (service *HashTagEventService) closeAndEmptifyChannelWithTimer(timer *time.Timer, ch chan HashTagEvent) error {
+func (service *HashTagEventService) closeAndEmptifyChannelWithTimer(timer *time.Timer, ch chan HashTagEvent, counter *int64) error {
 	close(ch)
 loop:
 	for {
 		select {
 		case event, ok := <-ch:
 			if ok {
+				atomic.AddInt64(counter, -1)
 				service.aggregateEvent(event)
 			} else {
 				break loop
@@ -493,4 +520,41 @@ loop:
 func (service *HashTagEventService) recordDrainError(err error) {
 	service.logger.Error(metricDrainEventError, log.Error(err))
 	service.metric.MetricIncrease(metricDrainEventError)
+}
+
+func (service *HashTagEventService) mointor(interval time.Duration) {
+	defer service.wg.Done()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+loop:
+	for {
+		select {
+		case <-ticker.C:
+			service.recordStat(
+				metricEventCountInEventBuffer,
+				atomic.LoadInt64(&service.eventCountInEventBuffer),
+			)
+			service.recordStat(
+				metricEventCountInCollectedEventBuffer,
+				atomic.LoadInt64(&service.eventCountInCollectedEventBuffer),
+			)
+			service.recordStat(
+				metricAggregatedEventCount,
+				service.GetAggregatedEventCount(),
+			)
+		case <-service.stopCh:
+			break loop
+		}
+	}
+}
+
+func (service *HashTagEventService) GetAggregatedEventCount() int64 {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	return int64(len(service.events))
+}
+
+func (service *HashTagEventService) recordStat(metricName string, count int64) {
+	service.logger.Info(metricName, log.Int64("count", count))
+	service.metric.MetricGauge(metricName, count)
 }

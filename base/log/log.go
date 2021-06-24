@@ -79,6 +79,10 @@ func Int(k string, v int) LogPair {
 	return LogPair{key: k, value: v}
 }
 
+func Int64(k string, v int64) LogPair {
+	return LogPair{key: k, value: v}
+}
+
 func Error(err error) LogPair {
 	logPair := LogPair{key: "error"}
 	if err == nil {

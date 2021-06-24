@@ -60,6 +60,7 @@ hash_tag_event_service:
   agg_interval : "1m"
   drain_duration: "10s"
   buffer_limit: 10240000
+  monitor_interval: "15s"
 
 load_key:
   retry_times: 5
