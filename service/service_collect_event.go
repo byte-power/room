@@ -57,6 +57,7 @@ func CollectEvents() {
 const failedReasonWriteToClient = "write_to_client"
 
 func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
+	startTime := time.Now()
 	config := base.GetServerConfig().CollectEventService.AddEvent
 	dep := base.GetTaskDependency()
 	if request.Method != http.MethodPost {
@@ -137,6 +138,8 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 			failedReasonWriteToClient,
 			map[string]string{"body": utility.AnyToString(body)})
 	}
+	recordTaskSuccessV2(dep.Logger, dep.Metric, CollectEventsTaskName, time.Since(startTime))
+	recordTaskSuccessInfo(dep.Logger, dep.Metric, CollectEventsTaskName, "add_event", len(events))
 }
 
 func addEventToDB(dbCluster *base.DBCluster, logger *log.Logger, metric *base.MetricClient, event base.HashTagEvent, retryTimes int, retryInterval, timeout time.Duration) error {

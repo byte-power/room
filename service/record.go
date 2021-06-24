@@ -128,3 +128,31 @@ func recordTaskErrorMetric2(metric *base.MetricClient, taskName string, reasons 
 		metric.MetricIncrease(errorMetricName)
 	}
 }
+
+func recordTaskSuccessV2(logger *log.Logger, metric *base.MetricClient, taskName string, d time.Duration) {
+	recordTaskSuccessLogV2(logger, taskName, d)
+	recordTaskSuccessMetricV2(metric, taskName, d)
+}
+
+func recordTaskSuccessLogV2(logger *log.Logger, taskName string, d time.Duration) {
+	logger.Info(
+		"task success",
+		log.String("task", taskName),
+		log.String("duration", d.String()),
+	)
+}
+
+func recordTaskSuccessMetricV2(metric *base.MetricClient, taskName string, d time.Duration) {
+	metricName := fmt.Sprintf("%s.success", taskName)
+	metric.MetricIncrease(metricName)
+	if d != time.Duration(0) {
+		durationMetricName := fmt.Sprintf("%s.duration", metricName)
+		metric.MetricTimeDuration(durationMetricName, d)
+	}
+}
+
+func recordTaskSuccessInfo(logger *log.Logger, metric *base.MetricClient, taskName string, info string, count int) {
+	metricName := fmt.Sprintf("%s.success.%s", taskName, info)
+	logger.Info(metricName, log.Int("count", count))
+	metric.MetricCount(metricName, count)
+}
