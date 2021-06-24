@@ -563,6 +563,9 @@ func (set *StringSet) MarshalJSON() ([]byte, error) {
 }
 
 func (set *StringSet) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
 	slice := make([]string, 0)
 	if err := json.Unmarshal(data, &slice); err != nil {
 		return err
