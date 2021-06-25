@@ -47,7 +47,7 @@ SQL = {
         "create": textwrap.dedent('''
             CREATE TABLE public.room_hash_tag_keys_{db_index} (
                 hash_tag character varying NOT NULL,
-                keys text NOT NULL,
+                keys text[] NOT NULL,
                 accessed_at timestamp with time zone NOT NULL,
                 written_at timestamp with time zone DEFAULT NULL,
                 synced_at timestamp with time zone DEFAULT NULL,
