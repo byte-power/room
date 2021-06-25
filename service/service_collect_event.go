@@ -146,7 +146,7 @@ func addEventToDB(dbCluster *base.DBCluster, logger *log.Logger, metric *base.Me
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	for i := 0; i < retryTimes; i++ {
-		err := upsertHashTagKeysRecordByEvent(ctx, dbCluster, event)
+		err := upsertHashTagKeysRecordByEvent(ctx, dbCluster, event, time.Now())
 		if err != nil {
 			if errors.Is(err, base.DBTxError) {
 				recordTaskErrorV2(logger, metric, CollectEventsTaskName, err, "add_event_db_retry", map[string]string{"event": event.String()})

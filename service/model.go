@@ -680,14 +680,43 @@ func (model *roomHashTagKeys) SetStatusAsCleaned(db *base.DBCluster, t time.Time
 	return nil
 }
 
-func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.HashTagEvent) error {
-	currentTime := time.Now()
+func (model *roomHashTagKeys) updateFromEvent(event base.HashTagEvent) []string {
+	toBeUpdatedColumns := []string{}
+
+	originKeys := model.Keys
+	newKeys := utility.MergeStringSliceAndRemoveDuplicateItems(originKeys, event.Keys.ToSlice())
+	if len(originKeys) != len(newKeys) {
+		model.Keys = newKeys
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "keys")
+	}
+
+	model.AccessedAt = utility.GetLatestTime(model.AccessedAt, event.AccessTime)
+	model.Version = model.Version + 1
+	toBeUpdatedColumns = append(toBeUpdatedColumns, "accessed_at", "version")
+
+	if event.AccessMode == base.HashTagAccessModeWrite {
+		model.WrittenAt = utility.GetLatestTime(model.WrittenAt, event.AccessTime)
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "written_at")
+	}
+	var newStatus HashTagKeysStatus
+	if (len(originKeys) != len(newKeys)) || event.AccessMode == base.HashTagAccessModeWrite {
+		newStatus = HashTagKeysStatusNeedSynced
+	} else if model.Status == HashTagKeysStatusCleaned {
+		newStatus = HashTagKeysStatusSynced
+	}
+	if newStatus != "" && newStatus != model.Status {
+		model.Status = newStatus
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "status")
+	}
+	return toBeUpdatedColumns
+}
+
+func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.HashTagEvent, currentTime time.Time) error {
 	model := &roomHashTagKeys{HashTag: event.HashTag}
 	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
 	if err != nil {
 		return err
 	}
-	//TODO: add timeout
 	err = db.RunInTransaction(ctx, func(tx *pg.Tx) error {
 		err := tx.Model(model).Table(tableName).WherePK().For("UPDATE").Select()
 		if err != nil && !errors.Is(err, pg.ErrNoRows) {
@@ -711,22 +740,18 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 			return err
 		}
 		// update
-		model.HashTag = event.HashTag
-		originKeys := model.Keys
-		model.Keys = utility.MergeStringSliceAndRemoveDuplicateItems(originKeys, event.Keys.ToSlice())
-		model.AccessedAt = utility.GetLatestTime(model.AccessedAt, event.AccessTime)
-		model.UpdatedAt = currentTime
 		originVersion := model.Version
-		model.Version = originVersion + 1
-		if event.AccessMode == base.HashTagAccessModeWrite {
-			model.WrittenAt = utility.GetLatestTime(model.WrittenAt, event.AccessTime)
+		toBeUpdatedColumns := model.updateFromEvent(event)
+		if len(toBeUpdatedColumns) == 0 {
+			return nil
 		}
-		if (len(originKeys) != len(model.Keys)) || event.AccessMode == base.HashTagAccessModeWrite {
-			model.Status = HashTagKeysStatusNeedSynced
-		} else {
-			model.Status = HashTagKeysStatusSynced
+		model.UpdatedAt = currentTime
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "updated_at")
+		query := tx.Model(model).Table(tableName)
+		for _, column := range toBeUpdatedColumns {
+			query.Column(column)
 		}
-		result, err := tx.Model(model).Table(tableName).WherePK().Where("version=?", originVersion).Update()
+		result, err := query.WherePK().Where("version=?", originVersion).Update()
 		if err != nil {
 			return err
 		}

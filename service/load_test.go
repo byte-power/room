@@ -45,6 +45,13 @@ func testEmptyRoomDataRecordInDatabase(hashTag string) {
 	query.WherePK().ForceDelete()
 }
 
+func testEmptyHashTagKeysRecordInDB(hashTag string) {
+	db := base.GetDBCluster()
+	model := &roomHashTagKeys{HashTag: hashTag}
+	query, _ := db.Model(model)
+	query.WherePK().ForceDelete()
+}
+
 type testInsertRoomDataInput struct {
 	key      string
 	dataType string
@@ -156,7 +163,7 @@ func TestLoadKeyString(t *testing.T) {
 		}
 	}
 
-	for key, _ := range expireValue {
+	for key := range expireValue {
 		_, err := client.Get(testContextTODO, key).Result()
 		assert.Equal(t, redis.Nil, err)
 	}

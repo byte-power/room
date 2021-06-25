@@ -26,7 +26,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 	for {
 		models, loadErr := loadHashTagKeysModelsByCondition(
 			dep.DB, count,
-			dbWhereCondition{column: "status", operator: "!=", parameter: HashTagKeysStatusCleaned},
+			dbWhereCondition{column: "status", operator: "=", parameter: HashTagKeysStatusSynced},
 			dbWhereCondition{column: "accessed_at", operator: "<=", parameter: accessedAt},
 		)
 		if loadErr != nil {

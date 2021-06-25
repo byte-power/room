@@ -362,3 +362,108 @@ func TestUpsertRoomData(t *testing.T) {
 	assert.Equal(t, count-1-errorCount, m.Version)
 	assert.Equal(t, count-errorCount, len(m.Value))
 }
+
+func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
+	db := base.GetDBCluster()
+
+	// insert row with read event
+	hashTag := "abc"
+	defer testEmptyHashTagKeysRecordInDB(hashTag)
+	keys := []string{"{abc}a", "{abc}b", "{abc}a", "{abc}c", "{abc}b", "{abc}d"}
+	uniqueKeys := []string{"{abc}a", "{abc}b", "{abc}c", "{abc}d"}
+	currentTime := time.Now()
+	eventTime, _ := time.Parse("2006-01-02 15:04:05", "2021-06-25 11:30:25")
+	event, _ := base.NewHashTagEvent(hashTag, keys, base.HashTagAccessModeRead, eventTime)
+	err := upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ := loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model := models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, uniqueKeys, model.Keys)
+	assert.True(t, model.WrittenAt.IsZero())
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(0), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.Equal(model.CreatedAt))
+
+	// insert row with write event
+	hashTag = "def"
+	defer testEmptyHashTagKeysRecordInDB(hashTag)
+	keys = []string{"{def}a", "{def}b", "{def}a", "{def}c", "{def}b", "{def}d"}
+	uniqueKeys = []string{"{def}a", "{def}b", "{def}c", "{def}d"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 12:35:20")
+	event, _ = base.NewHashTagEvent(hashTag, keys, base.HashTagAccessModeWrite, eventTime)
+	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model = models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, uniqueKeys, model.Keys)
+	assert.True(t, model.WrittenAt.Equal(event.AccessTime))
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(0), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.Equal(model.CreatedAt))
+
+	hashTag = "xyz"
+	defer testEmptyHashTagKeysRecordInDB(hashTag)
+	keys = []string{"{xyz}a", "{xyz}b", "{xyz}a", "{xyz}c"}
+	uniqueKeys = []string{"{xyz}a", "{xyz}b", "{xyz}c"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 13:42:30")
+	event, _ = base.NewHashTagEvent(hashTag, keys, base.HashTagAccessModeRead, eventTime)
+	_ = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+
+	// update row with read keys
+	newKeys := []string{"{xyz}x", "{xyz}y", "{xyz}z", "{xyz}a", "{xyz}b", "{xyz}z"}
+	uniqueNewKeys := []string{"{xyz}x", "{xyz}y", "{xyz}z"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 13:43:25")
+	event, _ = base.NewHashTagEvent(hashTag, newKeys, base.HashTagAccessModeRead, eventTime)
+	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model = models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, append(uniqueKeys, uniqueNewKeys...), model.Keys)
+	assert.True(t, model.WrittenAt.IsZero())
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(1), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.After(model.CreatedAt))
+
+	// update row with write keys
+	newKeys2 := []string{"{xyz}n", "{xyz}m", "{xyz}m", "{xyz}a", "{xyz}b", "{xyz}z", "{xyz}x"}
+	uniqueNewKeys2 := []string{"{xyz}m", "{xyz}n"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 13:53:45")
+	event, _ = base.NewHashTagEvent(hashTag, newKeys2, base.HashTagAccessModeWrite, eventTime)
+	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model = models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, append(append(uniqueKeys, uniqueNewKeys...), uniqueNewKeys2...), model.Keys)
+	assert.True(t, model.WrittenAt.Equal(event.AccessTime))
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(2), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.After(model.CreatedAt))
+}
