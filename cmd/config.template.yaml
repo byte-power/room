@@ -49,7 +49,7 @@ event_service:
 
 hash_tag_event_service:
   event_report:
-    url: "http://127.0.0.1:8082/events"
+    url: "http://127.0.0.1:8080/events"
     request_timeout: "3ms"
     request_max_event: 10
     request_max_wait_duration: "5s"
@@ -107,7 +107,7 @@ db_cluster:
 
 collect_event:
   service:
-    url: "http://127.0.0.1:8090"
+    url: "127.0.0.1:8080"
     read_timeout_ms: 1000
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
