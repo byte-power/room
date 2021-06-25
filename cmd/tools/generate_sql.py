@@ -43,6 +43,31 @@ SQL = {
         "truncate": "truncate table room_data_v2_{db_index};",
         "sum": "select sum(count), 'room_data_v2' as table_name from ({sql}) as t;",
     },
+    "keys": {
+        "create": textwrap.dedent('''
+            CREATE TABLE public.room_hash_tag_keys_{db_index} (
+                hash_tag character varying NOT NULL,
+                keys text NOT NULL,
+                accessed_at timestamp with time zone NOT NULL,
+                written_at timestamp with time zone DEFAULT NULL,
+                synced_at timestamp with time zone DEFAULT NULL,
+                created_at timestamp with time zone NOT NULL DEFAULT now(),
+                updated_at timestamp with time zone NOT NULL DEFAULT now(),
+                status character varying NOT NULL,
+                version bigint NOT NULL DEFAULT 0
+            );
+
+            ALTER TABLE ONLY public.room_hash_tag_keys_{db_index}
+                ADD CONSTRAINT room_hash_tag_keys_{db_index}_pkey PRIMARY KEY (hash_tag);
+
+            CREATE INDEX room_hash_tag_keys_status_accessed_at_{db_index}_idx ON public.room_hash_tag_keys_{db_index} USING btree (status, accessed_at);
+
+            CREATE INDEX room_hash_tag_keys_status_written_at_{db_index}_idx ON public.room_hash_tag_keys_{db_index} USING btree (status, written_at);
+        '''),
+        "count": "select 'room_hash_tag_keys_{db_index}' as table_name, count(*) as count from room_hash_tag_keys_{db_index}",
+        "truncate": "truncate table room_hash_tag_keys_{db_index}",
+        "sum": "select sum(count), 'room_hash_tag_keys' as table_name from ({sql}) as t;",
+    },
     "access": {
         "create": textwrap.dedent('''
             CREATE TABLE public.room_accessed_record_{db_index} (
@@ -133,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--database", required=True)
     parser.add_argument(
         "-t", "--table", 
-        choices=["data", "data2", "write", "access", "access2"], 
+        choices=["data", "data2", "keys", "write", "access", "access2"],
         required=True)
     parser.add_argument("-s", "--start_index", type=int, required=True)
     parser.add_argument("-e", "--end_index", type=int, required=True)
