@@ -621,7 +621,7 @@ type roomHashTagKeys struct {
 	tableName struct{} `pg:"_"`
 
 	HashTag    string            `pg:"hash_tag,pk"`
-	Keys       []string          `pg:"keys"`
+	Keys       []string          `pg:"keys,array"`
 	AccessedAt time.Time         `pg:"accessed_at"`
 	WrittenAt  time.Time         `pg:"written_at"`
 	SyncedAt   time.Time         `pg:"synced_at"`
