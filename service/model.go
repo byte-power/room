@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytepower_room/base"
-	"bytepower_room/base/log"
 	"bytepower_room/utility"
 	"context"
 	"errors"
@@ -21,89 +20,6 @@ const (
 )
 
 var supportedRedisDataTypes = []string{stringType, listType, hashType, setType, zsetType}
-
-type roomDataModel struct {
-	tableName struct{} `pg:"_"`
-
-	Key       string    `pg:"key,pk"`
-	Type      string    `pg:"type"`
-	Value     string    `pg:"value,use_zero"`
-	Deleted   bool      `pg:"deleted"`
-	UpdatedAt time.Time `pg:"updated_at"`
-	SyncedAt  time.Time `pg:"synced_at"`
-	ExpireAt  time.Time `pg:"expire_at"`
-	CreatedAt time.Time `pg:"created_at"`
-	Version   int64     `pg:"version"`
-}
-
-func (model *roomDataModel) ShardingKey() string {
-	return model.Key
-}
-
-func (model *roomDataModel) GetTablePrefix() string {
-	return "room_data"
-}
-
-func (model *roomDataModel) IsExpired(t time.Time) bool {
-	if model.ExpireAt.IsZero() {
-		return false
-	}
-	return model.ExpireAt.Before(t)
-}
-
-func loadDataByKey(key string) (*roomDataModel, error) {
-	logger := base.GetServerLogger()
-	dbCluster := base.GetDBCluster()
-	model := &roomDataModel{Key: key}
-	query, err := dbCluster.Model(model)
-	if err != nil {
-		return nil, err
-	}
-	startTime := time.Now()
-	if err := query.WherePK().Where("deleted != ?", true).Select(); err != nil {
-		if errors.Is(err, pg.ErrNoRows) {
-			logger.Info(
-				"query database",
-				log.String("key", key),
-				log.String("duration", time.Since(startTime).String()))
-			return nil, nil
-		}
-		return nil, err
-	}
-	logger.Info(
-		"query database",
-		log.String("key", key),
-		log.String("duration", time.Since(startTime).String()))
-	return model, nil
-}
-
-type clusterRoomDataModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomDataModel
-}
-
-func getClusterModelsFromRoomDataModels(models ...*roomDataModel) ([]clusterRoomDataModel, error) {
-	db := base.GetDBCluster()
-	clusterModelsMap := make(map[string]clusterRoomDataModel)
-	for _, model := range models {
-		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
-		if err != nil {
-			return nil, err
-		}
-		if origin, ok := clusterModelsMap[tableName]; ok {
-			origin.models = append(origin.models, model)
-			clusterModelsMap[tableName] = origin
-		} else {
-			clusterModelsMap[tableName] = clusterRoomDataModel{tableName: tableName, client: client, models: []*roomDataModel{model}}
-		}
-	}
-	clusterModels := make([]clusterRoomDataModel, 0, len(clusterModelsMap))
-	for _, clusterModel := range clusterModelsMap {
-		clusterModels = append(clusterModels, clusterModel)
-	}
-	return clusterModels, nil
-}
 
 type RedisValue struct {
 	Type     string `json:"type"`
@@ -450,28 +366,6 @@ func getClusterModelsFromWrittenRecordModels(models ...*roomWrittenRecordModel) 
 		clusterModels = append(clusterModels, clusterModel)
 	}
 	return clusterModels, nil
-}
-
-type roomAccessedRecordModel struct {
-	tableName struct{} `pg:"_"`
-
-	Key        string    `pg:"key,pk"`
-	AccessedAt time.Time `pg:"accessed_at"`
-	CreatedAt  time.Time `pg:"created_at"`
-}
-
-func (model *roomAccessedRecordModel) ShardingKey() string {
-	return model.Key
-}
-
-func (model *roomAccessedRecordModel) GetTablePrefix() string {
-	return "room_accessed_record"
-}
-
-type clusterAccessedRecordModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomAccessedRecordModel
 }
 
 type roomAccessedRecordModelV2 struct {
