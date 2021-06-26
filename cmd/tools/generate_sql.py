@@ -65,7 +65,7 @@ SQL = {
             CREATE INDEX room_hash_tag_keys_status_written_at_{db_index}_idx ON public.room_hash_tag_keys_{db_index} USING btree (status, written_at);
         '''),
         "count": "select 'room_hash_tag_keys_{db_index}' as table_name, count(*) as count from room_hash_tag_keys_{db_index}",
-        "truncate": "truncate table room_hash_tag_keys_{db_index}",
+        "truncate": "truncate table room_hash_tag_keys_{db_index};",
         "sum": "select sum(count), 'room_hash_tag_keys' as table_name from ({sql}) as t;",
     },
     "access": {
