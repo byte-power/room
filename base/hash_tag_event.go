@@ -265,7 +265,7 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 		client:               client,
 	}
 	logger.Info(
-		"new event service",
+		"new hash_tag_event service",
 		log.String("config", fmt.Sprintf("%+v", config)))
 	server.startWorkers()
 	return server, nil
@@ -286,7 +286,11 @@ func (service *HashTagEventService) startWorkers() {
 
 // returns when channel `service.stopCh` is closed.
 func (service *HashTagEventService) aggregateEvents() {
-	defer service.wg.Done()
+	defer func() {
+		service.logger.Info("stop aggregate events in hash_tag_event service")
+		service.wg.Done()
+	}()
+
 loop:
 	for {
 		select {
@@ -317,7 +321,10 @@ func (service *HashTagEventService) aggregateEvent(event HashTagEvent) {
 
 // returns when channel `service.stopCh` is closed
 func (service *HashTagEventService) collectAggregatedEvents() {
-	defer service.wg.Done()
+	defer func() {
+		service.logger.Info("stop collect aggregated events in hash_tag_event service")
+		service.wg.Done()
+	}()
 	ticker := time.NewTicker(service.config.AggInterval)
 	defer ticker.Stop()
 loop:
@@ -348,7 +355,10 @@ func (service *HashTagEventService) collectEvents() []HashTagEvent {
 
 // returns when channel `service.stopCh` is closed
 func (service *HashTagEventService) reportEvents() {
-	defer service.wg.Done()
+	defer func() {
+		service.wg.Done()
+		service.logger.Info("stop report events in hash_tag_event service")
+	}()
 	ticker := time.NewTicker(service.config.EventReport.RequestMaxWaitDuration)
 	defer ticker.Stop()
 	requestMaxEvent := service.config.EventReport.RequestMaxEvent
@@ -399,15 +409,15 @@ func (service *HashTagEventService) _reportEvents(events []HashTagEvent) error {
 	}
 	requestBody := bytes.NewReader(bs)
 	resp, err := service.client.Post(service.config.EventReport.URL, HTTPContentTypeJSON, requestBody)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		if resp.Body != nil {
 			io.ReadAll(resp.Body)
 			resp.Body.Close()
 		}
 	}()
-	if err != nil {
-		return err
-	}
 	if resp.StatusCode != http.StatusOK {
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -523,7 +533,10 @@ func (service *HashTagEventService) recordDrainError(err error) {
 }
 
 func (service *HashTagEventService) mointor(interval time.Duration) {
-	defer service.wg.Done()
+	defer func() {
+		service.logger.Info("stop monitor in hash_tag_event service")
+		service.wg.Done()
+	}()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 loop:

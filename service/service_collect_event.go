@@ -56,12 +56,17 @@ func CollectEvents() {
 
 const failedReasonWriteToClient = "write_to_client"
 
+type CollectEventsRequestBody struct {
+	Events []base.HashTagEvent `json:"events"`
+}
+
 func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	startTime := time.Now()
 	config := base.GetServerConfig().CollectEventService.AddEvent
 	dep := base.GetTaskDependency()
 	if request.Method != http.MethodPost {
 		err := fmt.Errorf("method %s is not allowed", request.Method)
+		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "method_not_allowed", map[string]string{"method": request.Method})
 		if writeErr := writeErrorResponse(writer, http.StatusMethodNotAllowed, err); writeErr != nil {
 			recordTaskErrorV2(
 				dep.Logger,
@@ -75,6 +80,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	}
 	body, err := ioutil.ReadAll(request.Body)
 	if err != nil {
+		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "read_body", nil)
 		if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
 			recordTaskErrorV2(
 				dep.Logger,
@@ -86,8 +92,10 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		}
 		return
 	}
-	events := make([]base.HashTagEvent, 0)
-	if err := json.Unmarshal(body, &events); err != nil {
+	dep.Logger.Debug("collect_event_service receive event", log.String("body", string(body)))
+	requestBodyStruct := CollectEventsRequestBody{}
+	if err := json.Unmarshal(body, &requestBodyStruct); err != nil {
+		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "unmarshal_body", map[string]string{"body": string(body)})
 		if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {
 			recordTaskErrorV2(
 				dep.Logger,
@@ -99,11 +107,13 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		}
 		return
 	}
+	events := requestBodyStruct.Events
 	retryTimes := config.RetryTimes
 	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
 	timeout := time.Duration(config.DBTimeoutMS) * time.Millisecond
 	for _, event := range events {
 		if err := event.Check(); err != nil {
+			recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "event_check", map[string]string{"event": event.String()})
 			if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {
 				recordTaskErrorV2(
 					dep.Logger,
@@ -117,6 +127,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		}
 		err := addEventToDB(dep.DB, dep.Logger, dep.Metric, event, retryTimes, retryInterval, timeout)
 		if err != nil {
+			recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "add_event", map[string]string{"event": event.String()})
 			if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
 				recordTaskErrorV2(
 					dep.Logger,
