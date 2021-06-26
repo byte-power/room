@@ -147,3 +147,23 @@ func TestStringSet(t *testing.T) {
 		assert.True(t, set4.Contains(item))
 	}
 }
+
+func TestMergeStringSliceAndRemoveDuplicateItems(t *testing.T) {
+	slices := [][]string{{"a", "b", "c"}, {"a", "b", "d"}, {"x", "y", "x", "d"}}
+	uniqueItems := []string{"a", "b", "c", "d", "x", "y"}
+	result := MergeStringSliceAndRemoveDuplicateItems(slices...)
+	assert.Equal(t, len(uniqueItems), len(result))
+	assert.ElementsMatch(t, result, uniqueItems)
+
+	slices = [][]string{{}, {"a", "b"}, {"a"}}
+	uniqueItems = []string{"a", "b"}
+	result = MergeStringSliceAndRemoveDuplicateItems(slices...)
+	assert.Equal(t, len(uniqueItems), len(result))
+	assert.ElementsMatch(t, result, uniqueItems)
+
+	slice := []string{"a", "b", "a", "c"}
+	uniqueItems = []string{"a", "b", "c"}
+	result = MergeStringSliceAndRemoveDuplicateItems(slice)
+	assert.Equal(t, len(uniqueItems), len(result))
+	assert.ElementsMatch(t, result, uniqueItems)
+}
