@@ -473,16 +473,21 @@ func (config CleanKeyTaskConfig) check() error {
 }
 
 type CollectEventConfig struct {
-	Service  CollectEventServiceConfig  `yaml:"service"`
-	AddEvent CollectEventAddEventConfig `yaml:"add_event"`
+	Service         CollectEventServiceConfig         `yaml:"service"`
+	AddEventToRedis CollectEventAddEventToRedisConfig `yaml:"add_event_to_redis"`
+	AddEventToDB    CollectEventAddEventToDBConfig    `yaml:"add_event_to_db"`
 }
 
 func (config CollectEventConfig) check() error {
+	prefix := "collect_event"
 	if err := config.Service.check(); err != nil {
-		return fmt.Errorf("collect_event.%w", err)
+		return fmt.Errorf("%s.%w", prefix, err)
 	}
-	if err := config.AddEvent.check(); err != nil {
-		return fmt.Errorf("collect_event.%w", err)
+	if err := config.AddEventToRedis.check(); err != nil {
+		return fmt.Errorf("%s.%w", prefix, err)
+	}
+	if err := config.AddEventToDB.check(); err != nil {
+		return fmt.Errorf("%s.%w", prefix, err)
 	}
 	return nil
 }
@@ -510,21 +515,42 @@ func (config CollectEventServiceConfig) check() error {
 	return nil
 }
 
-type CollectEventAddEventConfig struct {
-	RetryTimes      int `yaml:"retry_times"`
-	RetryIntervalMS int `yaml:"retry_interval_ms"`
-	DBTimeoutMS     int `yaml:"db_timeout_ms"`
+type CollectEventAddEventToRedisConfig struct {
+	BulkSize  int `yaml:"bulk_size"`
+	TimeoutMS int `yaml:"timeout_ms"`
 }
 
-func (config CollectEventAddEventConfig) check() error {
+func (config CollectEventAddEventToRedisConfig) check() error {
+	prefix := "add_event_to_redis"
+	if config.BulkSize <= 0 {
+		return fmt.Errorf("%s.bulk_size is %d, it should be greater than 0", prefix, config.BulkSize)
+	}
+	if config.TimeoutMS <= 0 {
+		return fmt.Errorf("%s.timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
+	}
+	return nil
+}
+
+type CollectEventAddEventToDBConfig struct {
+	RetryTimes      int   `yaml:"retry_times"`
+	RetryIntervalMS int   `yaml:"retry_interval_ms"`
+	BulkSize        int64 `yaml:"bulk_size"`
+	TimeoutMS       int   `yaml:"timeout_ms"`
+}
+
+func (config CollectEventAddEventToDBConfig) check() error {
+	prefix := "add_event_to_db"
 	if config.RetryTimes <= 0 {
-		return fmt.Errorf("add_event.retry_times is %d, it should be greater than 0", config.RetryTimes)
+		return fmt.Errorf("%s.retry_times is %d, it should be greater than 0", prefix, config.RetryTimes)
 	}
 	if config.RetryIntervalMS <= 0 {
-		return fmt.Errorf("add_event.retry_interval_ms is %d, it should be greater than 0", config.RetryIntervalMS)
+		return fmt.Errorf("%s.retry_interval_ms is %d, it should be greater than 0", prefix, config.RetryIntervalMS)
 	}
-	if config.DBTimeoutMS <= 0 {
-		return fmt.Errorf("add_event.db_timeout_ms is %d, it should be greater than 0", config.DBTimeoutMS)
+	if config.BulkSize <= 0 {
+		return fmt.Errorf("%s.bulk_size is %d, it should be greater than 0", prefix, config.BulkSize)
+	}
+	if config.TimeoutMS <= 0 {
+		return fmt.Errorf("%s.db_timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
 	}
 	return nil
 }

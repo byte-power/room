@@ -13,15 +13,18 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 const (
 	HTTPHeaderContentType = "Content-Type"
 	HTTPContentTypeJSON   = "application/json"
 
-	CollectEventsTaskName    = "collect_events"
-	SyncHashtagKeysTaskName  = "sync_keys"
-	CleanHashTagkeysTaskName = "clean_keys"
+	CollectEventsTaskName = "collect_events"
+
+	readHashTagZSetName  = "room:hash_tag:read"
+	writeHashTagZSetName = "room:hash_tag:write"
 )
 
 func CollectEvents() {
@@ -62,7 +65,7 @@ type CollectEventsRequestBody struct {
 
 func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 	startTime := time.Now()
-	config := base.GetServerConfig().CollectEventService.AddEvent
+	config := base.GetServerConfig().CollectEventService.AddEventToRedis
 	dep := base.GetTaskDependency()
 	if request.Method != http.MethodPost {
 		err := fmt.Errorf("method %s is not allowed", request.Method)
@@ -93,6 +96,7 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	dep.Logger.Debug("collect_event_service receive event", log.String("body", string(body)))
+	dep.Logger.Info("collect_event_service receive request", log.Int("body_length", len(body)))
 	requestBodyStruct := CollectEventsRequestBody{}
 	if err := json.Unmarshal(body, &requestBodyStruct); err != nil {
 		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "unmarshal_body", map[string]string{"body": string(body)})
@@ -108,9 +112,6 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	events := requestBodyStruct.Events
-	retryTimes := config.RetryTimes
-	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
-	timeout := time.Duration(config.DBTimeoutMS) * time.Millisecond
 	for _, event := range events {
 		if err := event.Check(); err != nil {
 			recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "event_check", map[string]string{"event": event.String()})
@@ -125,21 +126,52 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 			}
 			return
 		}
-		err := addEventToDB(dep.DB, dep.Logger, dep.Metric, event, retryTimes, retryInterval, timeout)
-		if err != nil {
-			recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "add_event", map[string]string{"event": event.String()})
-			if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
-				recordTaskErrorV2(
-					dep.Logger,
-					dep.Metric,
-					CollectEventsTaskName,
-					writeErr,
-					failedReasonWriteToClient,
-					map[string]string{"body": utility.AnyToString(body)})
-			}
-			return
-		}
 	}
+
+	timeout := time.Duration(config.TimeoutMS) * time.Millisecond
+	err = addEventsToRedis(dep.Redis, events, config.BulkSize, timeout)
+	if err != nil {
+		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "add_event_to_redis", map[string]string{"body": string(body)})
+		if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
+			recordTaskErrorV2(
+				dep.Logger,
+				dep.Metric,
+				CollectEventsTaskName,
+				writeErr,
+				failedReasonWriteToClient,
+				map[string]string{"body": utility.AnyToString(body)})
+		}
+		return
+	}
+	// for _, event := range events {
+	// 	if err := event.Check(); err != nil {
+	// 		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "event_check", map[string]string{"event": event.String()})
+	// 		if writeErr := writeErrorResponse(writer, http.StatusBadRequest, err); writeErr != nil {
+	// 			recordTaskErrorV2(
+	// 				dep.Logger,
+	// 				dep.Metric,
+	// 				CollectEventsTaskName,
+	// 				writeErr,
+	// 				failedReasonWriteToClient,
+	// 				map[string]string{"body": utility.AnyToString(body)})
+	// 		}
+	// 		return
+	// 	}
+	// 	err := addEventToDB(dep.DB, dep.Logger, dep.Metric, event, retryTimes, retryInterval, timeout)
+	// 	if err != nil {
+	// 		recordTaskErrorV2(dep.Logger, dep.Metric, CollectEventsTaskName, err, "add_event", map[string]string{"event": event.String()})
+	// 		if writeErr := writeErrorResponse(writer, http.StatusInternalServerError, err); writeErr != nil {
+	// 			recordTaskErrorV2(
+	// 				dep.Logger,
+	// 				dep.Metric,
+	// 				CollectEventsTaskName,
+	// 				writeErr,
+	// 				failedReasonWriteToClient,
+	// 				map[string]string{"body": utility.AnyToString(body)})
+	// 		}
+	// 		return
+	// 	}
+	// }
 	if writeErr := writeSuccessResponse(writer, len(events)); writeErr != nil {
 		recordTaskErrorV2(
 			dep.Logger,
@@ -150,23 +182,84 @@ func postEventsHandler(writer http.ResponseWriter, request *http.Request) {
 			map[string]string{"body": utility.AnyToString(body)})
 	}
 	recordTaskSuccessV2(dep.Logger, dep.Metric, CollectEventsTaskName, time.Since(startTime))
-	recordTaskSuccessInfo(dep.Logger, dep.Metric, CollectEventsTaskName, "add_event", len(events))
+	recordTaskSuccessInfo(dep.Logger, dep.Metric, CollectEventsTaskName, "add_event_to_redis", len(events))
 }
 
-func addEventToDB(dbCluster *base.DBCluster, logger *log.Logger, metric *base.MetricClient, event base.HashTagEvent, retryTimes int, retryInterval, timeout time.Duration) error {
+func addEventsToRedis(client *redis.ClusterClient, events []base.HashTagEvent, bulkSize int, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	for i := 0; i < retryTimes; i++ {
-		err := upsertHashTagKeysRecordByEvent(ctx, dbCluster, event, time.Now())
-		if err != nil {
-			if errors.Is(err, base.DBTxError) {
-				recordTaskErrorV2(logger, metric, CollectEventsTaskName, err, "add_event_db_retry", map[string]string{"event": event.String()})
-				time.Sleep(retryInterval)
-				continue
-			}
+	readValidEvents := make([]interface{}, 0)
+	writeValidEvents := make([]interface{}, 0)
+	for _, event := range events {
+		if err := event.Check(); err != nil {
 			return err
 		}
-		break
+		if event.AccessMode == base.HashTagAccessModeRead {
+			readValidEvents = append(readValidEvents, event)
+		} else {
+			writeValidEvents = append(writeValidEvents, event)
+		}
+	}
+	err := addEventsToRedisByAccessMode(ctx, client, readValidEvents, base.HashTagAccessModeRead, bulkSize)
+	if err != nil {
+		return err
+	}
+	return addEventsToRedisByAccessMode(ctx, client, writeValidEvents, base.HashTagAccessModeWrite, bulkSize)
+}
+
+const scriptSrc = `
+	local key = KEYS[1]
+	if key == nil or key == '' then
+		return {err: 'key is empty'}
+	end
+
+	local field_count = tonumber(ARGV[1])
+	if field_count == nil then
+		return {err: 'filed count is empty'}
+	end
+
+	if field_count <= 0 then 
+		return {err: 'field count should be greater than 0'}
+	end
+
+	local processed_count = 0
+	for i=2,field_count*2,2 do
+		local field = ARGV[i]
+		local score = ARGV[i+1]
+		local existed_score = redis.call('zscore', field)
+		if existed_score == nil or tonumber(existed_score) < tonumber(score) then
+			processed_count = processed_count + 1
+			redis.call('zadd', key, score, field)
+		end
+	end
+	return processed_count
+`
+
+func addEventsToRedisByAccessMode(ctx context.Context, client *redis.ClusterClient, events []interface{}, mode base.HashTagAccessMode, bulkSize int) error {
+	ess, err := utility.SplitSliceBySize(events, bulkSize)
+	if err != nil {
+		return err
+	}
+	var redisKey string
+	if mode == base.HashTagAccessModeRead {
+		redisKey = readHashTagZSetName
+	} else {
+		redisKey = writeHashTagZSetName
+	}
+	script := redis.NewScript(scriptSrc)
+	for _, es := range ess {
+		args := make([]interface{}, 0, len(es))
+		for _, e := range es {
+			if event, ok := e.(base.HashTagEvent); ok {
+				args = append(args, event.HashTag, utility.TimestampInMS(event.AccessTime))
+			} else {
+				return fmt.Errorf("invalid event %+v\n", e)
+			}
+		}
+		_, err := script.Run(ctx, client, []string{redisKey}, args...).Result()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
