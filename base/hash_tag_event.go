@@ -81,9 +81,16 @@ func (event HashTagEvent) Check() error {
 }
 
 func (event HashTagEvent) String() string {
-	return fmt.Sprintf(
-		"Event[hash_tag=%s, access_mode=%s, access_time=%v, keys=%s]",
-		event.HashTag, event.AccessMode, event.AccessTime, strings.Join(event.Keys.ToSlice(), " "))
+	var result string
+	bs, err := json.Marshal(event)
+	if err != nil {
+		result = fmt.Sprintf(
+			"Event[hash_tag=%s, access_mode=%s, access_time=%v, keys=%s]",
+			event.HashTag, event.AccessMode, event.AccessTime, strings.Join(event.Keys.ToSlice(), " "))
+	} else {
+		result = string(bs)
+	}
+	return result
 }
 
 const (
