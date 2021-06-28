@@ -95,19 +95,30 @@ func (tag HashTag) GetLoadStatus() (string, error) {
 	return tag.meta.GetLoadStatus()
 }
 
+func (tag HashTag) NeedToLoad() (bool, error) {
+	status, err := tag.meta.GetLoadStatus()
+	if err != nil {
+		return false, err
+	}
+	if status == HashTagStatusLoaded {
+		return false, nil
+	}
+	if status == HashTagStatusNotExisted {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (tag HashTag) Load(timeout time.Duration) (bool, int, error) {
 	if err := tag.acquireLoadLock(); err != nil {
 		return false, 0, err
 	}
 	defer tag.releaseLoadLock()
-	status, err := tag.meta.GetLoadStatus()
+	needToLoad, err := tag.NeedToLoad()
 	if err != nil {
 		return false, 0, err
 	}
-	if status == HashTagStatusLoaded {
-		return false, 0, nil
-	}
-	if status == HashTagStatusNotExisted {
+	if !needToLoad {
 		return false, 0, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -256,10 +267,18 @@ func Load(tagName string, accessTime time.Time, accessMode base.HashTagAccessMod
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
 	for i := 0; i < loadRetryTimes; i++ {
+		needToLoad, needToLoadErr := hashTag.NeedToLoad()
+		if needToLoadErr != nil {
+			recordLoadKeyCheckNeedToLoadError(dep.Logger, dep.Metric, tagName, needToLoadErr)
+			return needToLoadErr
+		}
+		if !needToLoad {
+			return hashTag.meta.UpdateAccessTime(accessTime, accessMode)
+		}
 		startTime := time.Now()
-		loaded, count, e := hashTag.Load(loadTimeout)
-		if e != nil {
-			err = e
+		loaded, count, loadErr := hashTag.Load(loadTimeout)
+		if loadErr != nil {
+			err = loadErr
 			if isRetryLoadError(err) {
 				time.Sleep(loadRetryInterval)
 				recordLoadKeyRetryError(dep.Logger, dep.Metric, tagName, err, i+1, count)
