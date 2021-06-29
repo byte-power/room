@@ -106,19 +106,18 @@ db_cluster:
         end_index: 4
 
 collect_event:
+  buffer_limit: 10240000
+  monitor_interval: "15s"
   service:
     url: "127.0.0.1:8080"
     read_timeout_ms: 1000
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
-  add_event_to_redis:
-    bulk_size: 5
-    timeout_ms: 2000
   add_event_to_db:
-    bulk_size: 50
     retry_times: 3
     retry_interval_ms: 20
     timeout_ms: 2000
+    worker_count: 2
 
 sync:
   metric:

@@ -1,6 +1,6 @@
 roomBIN="linux_room_service"
 syncBIN="linux_room_sync"
-collectEventsBIN="linux_room_collect_events"
+collectEventsBIN="linux_room_collect_event"
 testTransactionBin="linux_trans"
 
 build-room:
@@ -9,8 +9,8 @@ build-room:
 build-sync:
 	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags '-w -s' -v -o $(syncBIN) cmd/sync/main.go
 
-build-collect-events:
-	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags '-w -s' -v -o $(collectEventsBIN) cmd/collect_events/main.go
+build-collect-event:
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags '-w -s' -v -o $(collectEventsBIN) cmd/collect_event/main.go
 
 build-trans:
 	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags '-w -s' -v -o $(testTransactionBin) cmd/tools/transaction.go

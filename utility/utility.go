@@ -574,6 +574,14 @@ func (set *StringSet) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func MergeStringSet(sets ...*StringSet) *StringSet {
+	set := NewStringSet([]string{}...)
+	for _, s := range sets {
+		set.AddItems(s.ToSlice()...)
+	}
+	return set
+}
+
 func IsTwoStringSliceEqual(s1, s2 []string) bool {
 	if len(s1) != len(s2) {
 		return false
@@ -679,9 +687,16 @@ func GetLatestTime(times ...time.Time) time.Time {
 }
 
 func MergeStringSliceAndRemoveDuplicateItems(slices ...[]string) []string {
-	set := NewStringSet([]string{}...)
-	for _, slice := range slices {
+	return MergeStringSlicesToStringSet(slices...).ToSlice()
+}
+
+func MergeStringSlicesToStringSet(slices ...[]string) *StringSet {
+	if len(slices) == 0 {
+		return NewStringSet([]string{}...)
+	}
+	set := NewStringSet(slices[0]...)
+	for _, slice := range slices[1:] {
 		set.AddItems(slice...)
 	}
-	return set.ToSlice()
+	return set
 }

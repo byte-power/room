@@ -473,9 +473,13 @@ func (config CleanKeyTaskConfig) check() error {
 }
 
 type CollectEventConfig struct {
-	Service         CollectEventServiceConfig         `yaml:"service"`
-	AddEventToRedis CollectEventAddEventToRedisConfig `yaml:"add_event_to_redis"`
-	AddEventToDB    CollectEventAddEventToDBConfig    `yaml:"add_event_to_db"`
+	Service      CollectEventServiceConfig      `yaml:"service"`
+	AddEventToDB CollectEventAddEventToDBConfig `yaml:"add_event_to_db"`
+
+	BufferLimit int `yaml:"buffer_limit"`
+
+	RawMonitorInterval string `yaml:"monitor_interval"`
+	MonitorInterval    time.Duration
 }
 
 func (config CollectEventConfig) check() error {
@@ -483,12 +487,29 @@ func (config CollectEventConfig) check() error {
 	if err := config.Service.check(); err != nil {
 		return fmt.Errorf("%s.%w", prefix, err)
 	}
-	if err := config.AddEventToRedis.check(); err != nil {
-		return fmt.Errorf("%s.%w", prefix, err)
-	}
 	if err := config.AddEventToDB.check(); err != nil {
 		return fmt.Errorf("%s.%w", prefix, err)
 	}
+	if config.BufferLimit <= 0 {
+		return fmt.Errorf("%s.buffer_limit is %d, it should be greater than 0", prefix, config.BufferLimit)
+	}
+	if config.RawMonitorInterval == "" {
+		return fmt.Errorf("%s.monitor_interval should not be empty", prefix)
+	}
+	return nil
+}
+
+func (config *CollectEventConfig) Init() error {
+	prefix := "collect_event"
+	if err := config.check(); err != nil {
+		return err
+	}
+
+	duration, err := time.ParseDuration(config.RawMonitorInterval)
+	if err != nil {
+		return fmt.Errorf("%s.monitor_interval is inavlid %w", prefix, err)
+	}
+	config.MonitorInterval = duration
 	return nil
 }
 
@@ -515,27 +536,11 @@ func (config CollectEventServiceConfig) check() error {
 	return nil
 }
 
-type CollectEventAddEventToRedisConfig struct {
-	BulkSize  int `yaml:"bulk_size"`
-	TimeoutMS int `yaml:"timeout_ms"`
-}
-
-func (config CollectEventAddEventToRedisConfig) check() error {
-	prefix := "add_event_to_redis"
-	if config.BulkSize <= 0 {
-		return fmt.Errorf("%s.bulk_size is %d, it should be greater than 0", prefix, config.BulkSize)
-	}
-	if config.TimeoutMS <= 0 {
-		return fmt.Errorf("%s.timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
-	}
-	return nil
-}
-
 type CollectEventAddEventToDBConfig struct {
-	RetryTimes      int   `yaml:"retry_times"`
-	RetryIntervalMS int   `yaml:"retry_interval_ms"`
-	BulkSize        int64 `yaml:"bulk_size"`
-	TimeoutMS       int   `yaml:"timeout_ms"`
+	RetryTimes      int `yaml:"retry_times"`
+	RetryIntervalMS int `yaml:"retry_interval_ms"`
+	TimeoutMS       int `yaml:"timeout_ms"`
+	WorkerCount     int `yaml:"worker_count"`
 }
 
 func (config CollectEventAddEventToDBConfig) check() error {
@@ -546,11 +551,11 @@ func (config CollectEventAddEventToDBConfig) check() error {
 	if config.RetryIntervalMS <= 0 {
 		return fmt.Errorf("%s.retry_interval_ms is %d, it should be greater than 0", prefix, config.RetryIntervalMS)
 	}
-	if config.BulkSize <= 0 {
-		return fmt.Errorf("%s.bulk_size is %d, it should be greater than 0", prefix, config.BulkSize)
-	}
 	if config.TimeoutMS <= 0 {
-		return fmt.Errorf("%s.db_timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
+		return fmt.Errorf("%s.timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
+	}
+	if config.WorkerCount <= 0 {
+		return fmt.Errorf("%s.worker_count is %d, it should be greater than 0", prefix, config.WorkerCount)
 	}
 	return nil
 }

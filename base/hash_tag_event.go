@@ -28,9 +28,10 @@ var (
 const HTTPContentTypeJSON = "application/json"
 
 var (
-	metricReportEventsError = "error.report_events"
-	metricSendEventPanic    = "error.send_event_panic"
-	metricDrainEventError   = "error.drain_event"
+	metricReportEventsError   = "error.report_events"
+	metricSendEventPanic      = "error.send_event_panic"
+	metricDrainEventError     = "error.drain_event"
+	metricAggregateEventError = "error.agg_event"
 
 	metricEventCountInEventBuffer          = "event_in_buffer.total"
 	metricEventCountInCollectedEventBuffer = "event_in_collected_buffer.total"
@@ -93,6 +94,24 @@ func (event HashTagEvent) String() string {
 	return result
 }
 
+func (event HashTagEvent) Merge(anotherEvent HashTagEvent) (HashTagEvent, error) {
+	if err := anotherEvent.Check(); err != nil {
+		return HashTagEvent{}, err
+	}
+	if event.HashTag != anotherEvent.HashTag {
+		return HashTagEvent{}, errors.New("events to be merged should have the same hash_tag")
+	}
+	newEvent := HashTagEvent{HashTag: event.HashTag}
+	if anotherEvent.AccessMode == HashTagAccessModeWrite {
+		newEvent.AccessMode = anotherEvent.AccessMode
+	} else {
+		newEvent.AccessMode = event.AccessMode
+	}
+	newEvent.AccessTime = utility.GetLatestTime(event.AccessTime, anotherEvent.AccessTime)
+	newEvent.Keys = utility.MergeStringSet(event.Keys, anotherEvent.Keys)
+	return newEvent, nil
+}
+
 const (
 	defaultEventServiceBufferLimit       = 16 * 1024 * 1024 // 16M
 	defaultEventServiceAggregateInterval = 1 * time.Minute
@@ -146,6 +165,7 @@ type HashTagEventReportConfig struct {
 }
 
 type HashTagEventService struct {
+	name                             string
 	config                           *HashTagEventServiceConfig
 	eventBuffer                      chan HashTagEvent
 	eventCountInEventBuffer          int64
@@ -259,6 +279,7 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 		},
 	}
 	server := &HashTagEventService{
+		name:                 "HashTagEventService",
 		config:               &config,
 		eventBuffer:          make(chan HashTagEvent, config.BufferLimit),
 		mutex:                sync.Mutex{},
@@ -303,27 +324,39 @@ loop:
 		select {
 		case event := <-service.eventBuffer:
 			atomic.AddInt64(&service.eventCountInEventBuffer, -1)
-			service.aggregateEvent(event)
+			if err := service.aggregateEvent(event); err != nil {
+				service.recordAggregateEventError(event, err)
+			}
 		case <-service.stopCh:
 			break loop
 		}
 	}
 }
 
-func (service *HashTagEventService) aggregateEvent(event HashTagEvent) {
+func (service *HashTagEventService) recordAggregateEventError(event HashTagEvent, err error) {
+	service.logger.Error(
+		metricAggregateEventError,
+		log.String("event", event.String()),
+		log.Error(err),
+	)
+	service.metric.MetricIncrease(metricAggregateEventError)
+}
+
+func (service *HashTagEventService) aggregateEvent(event HashTagEvent) error {
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
+	var newEvent HashTagEvent
+	var err error
 	if savedEvent, ok := service.events[event.HashTag]; ok {
-		if savedEvent.AccessMode == HashTagAccessModeWrite {
-			event.AccessMode = savedEvent.AccessMode
+		newEvent, err = savedEvent.Merge(event)
+		if err != nil {
+			return err
 		}
-		if savedEvent.AccessTime.After(event.AccessTime) {
-			event.AccessTime = savedEvent.AccessTime
-		}
-		savedEvent.Keys.AddItems(event.Keys.ToSlice()...)
-		event.Keys = savedEvent.Keys
+	} else {
+		newEvent = event
 	}
-	service.events[event.HashTag] = event
+	service.events[event.HashTag] = newEvent
+	return nil
 }
 
 // returns when channel `service.stopCh` is closed
@@ -523,7 +556,9 @@ loop:
 		case event, ok := <-ch:
 			if ok {
 				atomic.AddInt64(counter, -1)
-				service.aggregateEvent(event)
+				if err := service.aggregateEvent(event); err != nil {
+					service.recordAggregateEventError(event, err)
+				}
 			} else {
 				break loop
 			}
@@ -575,6 +610,7 @@ func (service *HashTagEventService) GetAggregatedEventCount() int64 {
 }
 
 func (service *HashTagEventService) recordStat(metricName string, count int64) {
+	metricName = fmt.Sprintf("%s.%s", service.name, metricName)
 	service.logger.Info(metricName, log.Int64("count", count))
 	service.metric.MetricGauge(metricName, count)
 }

@@ -17,5 +17,13 @@ func main() {
 	if err := base.InitSyncService(*configPath); err != nil {
 		panic(err)
 	}
-	service.CollectEvents()
+	config := base.GetServerConfig().CollectEventService
+	logger := base.GetTaskLogger()
+	metric := base.GetTaskMetricService()
+	db := base.GetDBCluster()
+	collectEventService, err := service.NewCollectEventService(config, logger, metric, db)
+	if err != nil {
+		panic(err)
+	}
+	collectEventService.Run()
 }
