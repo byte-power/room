@@ -23,7 +23,7 @@ var loggers map[string]*log.Logger
 var serverConfig Config
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-func InitServices(configPath string) error {
+func InitBasicDependencies(configPath string) error {
 	config, err := NewConfigFromFile(configPath)
 	if err != nil {
 		return err
@@ -64,17 +64,6 @@ func InitServices(configPath string) error {
 	}
 	dbCluster = databaseCluster
 
-	event, err := NewEventService(config.EventService, loggers["server"])
-	if err != nil {
-		return err
-	}
-	eventService = event
-
-	hashTagEventSrv, err := NewHashTagEventService(config.HashTagEventService, loggers["server"], metricService)
-	if err != nil {
-		return err
-	}
-	hashTagEventService = hashTagEventSrv
 	d, err := time.ParseDuration(serverConfig.LoadKey.RawRetryInterval)
 	if err != nil {
 		return err
@@ -89,6 +78,26 @@ func InitServices(configPath string) error {
 	return nil
 }
 
+func InitRoomService(configPath string) error {
+	if err := InitBasicDependencies(configPath); err != nil {
+		return err
+	}
+
+	event, err := NewEventService(serverConfig.EventService, loggers["server"])
+	if err != nil {
+		return err
+	}
+	eventService = event
+
+	hashTagEventSrv, err := NewHashTagEventService(serverConfig.HashTagEventService, loggers["server"], metricService)
+	if err != nil {
+		return err
+	}
+	hashTagEventService = hashTagEventSrv
+
+	return nil
+}
+
 func areAllRequiredLoggersConfigured(loggers map[string]map[string]interface{}) bool {
 	requiredLoggerNames := []string{"server", "task"}
 	for _, name := range requiredLoggerNames {
@@ -100,7 +109,7 @@ func areAllRequiredLoggersConfigured(loggers map[string]map[string]interface{}) 
 }
 
 func InitSyncService(configPath string) error {
-	if err := InitServices(configPath); err != nil {
+	if err := InitBasicDependencies(configPath); err != nil {
 		return err
 	}
 	syncServiceConfig := GetServerConfig().SyncService
