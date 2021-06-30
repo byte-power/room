@@ -22,8 +22,9 @@ const (
 	HTTPContentTypeJSON   = "application/json"
 )
 
+const CollectEventServiceName = "collect_event_service"
+
 type CollectEventService struct {
-	name                    string
 	config                  *base.CollectEventConfig
 	eventBuffer             chan base.HashTagEvent
 	eventCountInEventBuffer int64
@@ -50,7 +51,6 @@ func NewCollectEventService(config base.CollectEventConfig, logger *log.Logger, 
 		return nil, errors.New("db should not be nil")
 	}
 	server := &CollectEventService{
-		name:        "CollectEvent",
 		config:      &config,
 		eventBuffer: make(chan base.HashTagEvent, config.BufferLimit),
 		logger:      logger,
@@ -61,7 +61,7 @@ func NewCollectEventService(config base.CollectEventConfig, logger *log.Logger, 
 		stop:        0,
 	}
 	logger.Info(
-		"new ecollect event service",
+		"new collect event service",
 		log.String("config", fmt.Sprintf("%+v", config)))
 	return server, nil
 }
@@ -81,10 +81,10 @@ func (service *CollectEventService) Run() {
 
 	sig := <-signalCh
 	service.logger.Info(
-		fmt.Sprintf("signal received, closing %s service...", service.name),
+		fmt.Sprintf("signal received, closing %s ...", CollectEventServiceName),
 		log.String("signal", sig.String()))
 	service.Stop()
-	service.logger.Info(fmt.Sprintf("close %s service success", service.name))
+	service.logger.Info(fmt.Sprintf("close %s service success", CollectEventServiceName))
 }
 
 func (service *CollectEventService) startServer() {
@@ -151,7 +151,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
 	defer func() {
 		if r := recover(); r != nil {
-			recordTaskErrorV2(service.logger, service.metric, service.name, fmt.Errorf("%+v", r), "add_event_panic", nil)
+			recordTaskErrorV2(service.logger, service.metric, CollectEventServiceName, fmt.Errorf("%+v", r), "add_event_panic", nil)
 		}
 	}()
 	if err := event.Check(); err != nil {
@@ -225,14 +225,14 @@ loop:
 }
 
 func (service *CollectEventService) recordGauge(metricName string, count int64) {
-	metricName = fmt.Sprintf("%s.%s", service.name, metricName)
+	metricName = fmt.Sprintf("%s.%s", CollectEventServiceName, metricName)
 	service.logger.Info(metricName, log.Int64("count", count))
 	service.metric.MetricGauge(metricName, count)
 }
 
 func (service *CollectEventService) recordError(reason string, err error, info map[string]string) {
 	logPairs := make([]log.LogPair, 0)
-	logPairs = append(logPairs, log.String("service", service.name))
+	logPairs = append(logPairs, log.String("service", CollectEventServiceName))
 	if reason != "" {
 		logPairs = append(logPairs, log.String("reason", reason))
 	}
@@ -244,7 +244,7 @@ func (service *CollectEventService) recordError(reason string, err error, info m
 	}
 	service.logger.Error("collect event service error", logPairs...)
 
-	errorMetricName := fmt.Sprintf("%s.error", service.name)
+	errorMetricName := fmt.Sprintf("%s.error", CollectEventServiceName)
 	service.metric.MetricIncrease(errorMetricName)
 	specificErrorMetricName := fmt.Sprintf("%s.%s", errorMetricName, reason)
 	service.metric.MetricIncrease(specificErrorMetricName)
@@ -256,7 +256,7 @@ func (service *CollectEventService) recordWriteResponseError(err error, body []b
 }
 
 func (service *CollectEventService) recordSuccessWithDuration(info string, duration time.Duration) {
-	metricName := fmt.Sprintf("%s.success.%s", service.name, info)
+	metricName := fmt.Sprintf("%s.success.%s", CollectEventServiceName, info)
 	service.logger.Info(metricName, log.String("duration", duration.String()))
 	service.metric.MetricIncrease(metricName)
 	if duration > time.Duration(0) {
@@ -266,7 +266,7 @@ func (service *CollectEventService) recordSuccessWithDuration(info string, durat
 }
 
 func (service *CollectEventService) recordSuccessWithCount(info string, count int) {
-	metricName := fmt.Sprintf("%s.success.%s", service.name, info)
+	metricName := fmt.Sprintf("%s.success.%s", CollectEventServiceName, info)
 	service.logger.Info(metricName, log.Int("count", count))
 	service.metric.MetricCount(metricName, count)
 }
