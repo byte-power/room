@@ -25,7 +25,7 @@ const (
 const CollectEventServiceName = "collect_event_service"
 
 type CollectEventService struct {
-	config                  *base.CollectEventConfig
+	config                  *base.CollectEventServiceConfig
 	eventBuffer             chan base.HashTagEvent
 	eventCountInEventBuffer int64
 	logger                  *log.Logger
@@ -37,7 +37,7 @@ type CollectEventService struct {
 	server                  *http.Server
 }
 
-func NewCollectEventService(config base.CollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
+func NewCollectEventService(config base.CollectEventServiceConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
 	if err := config.Init(); err != nil {
 		return nil, err
 	}
@@ -50,26 +50,26 @@ func NewCollectEventService(config base.CollectEventConfig, logger *log.Logger, 
 	if db == nil {
 		return nil, errors.New("db should not be nil")
 	}
-	server := &CollectEventService{
-		config:      &config,
-		eventBuffer: make(chan base.HashTagEvent, config.BufferLimit),
-		logger:      logger,
-		metric:      metric,
-		db:          db,
-		wg:          sync.WaitGroup{},
-		stopCh:      make(chan bool),
-		stop:        0,
+	service := &CollectEventService{
+		config:                  &config,
+		eventBuffer:             make(chan base.HashTagEvent, config.BufferLimit),
+		eventCountInEventBuffer: 0,
+		logger:                  logger,
+		metric:                  metric,
+		db:                      db,
+		wg:                      sync.WaitGroup{},
+		stopCh:                  make(chan bool),
+		stop:                    0,
+		server:                  nil,
 	}
-	logger.Info(
-		"new collect event service",
-		log.String("config", fmt.Sprintf("%+v", config)))
-	return server, nil
+	logger.Info(fmt.Sprintf("new %s", CollectEventServiceName), log.String("config", fmt.Sprintf("%+v", config)))
+	return service, nil
 }
 
 func (service *CollectEventService) Run() {
 	service.wg.Add(1)
 	go service.startServer()
-	for i := 0; i < service.config.AddEventToDB.WorkerCount; i++ {
+	for i := 0; i < service.config.SaveEvent.WorkerCount; i++ {
 		service.wg.Add(1)
 		go service.saveEvents()
 	}
@@ -80,31 +80,46 @@ func (service *CollectEventService) Run() {
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
 	sig := <-signalCh
+
 	service.logger.Info(
 		fmt.Sprintf("signal received, closing %s ...", CollectEventServiceName),
 		log.String("signal", sig.String()))
 	service.Stop()
-	service.logger.Info(fmt.Sprintf("close %s service success", CollectEventServiceName))
 }
 
 func (service *CollectEventService) startServer() {
-	defer service.wg.Done()
+	defer func() {
+		service.logger.Info(fmt.Sprintf("stop %s server", CollectEventServiceName))
+		service.wg.Done()
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", service.postEventsHandler)
 	service.server = &http.Server{
-		Addr:         service.config.Service.URL,
+		Addr:         service.config.Server.URL,
 		Handler:      mux,
-		ReadTimeout:  time.Duration(service.config.Service.ReadTimeoutMS) * time.Millisecond,
-		WriteTimeout: time.Duration(service.config.Service.WriteTimeoutMS) * time.Millisecond,
-		IdleTimeout:  time.Duration(service.config.Service.IdleTimeoutMS) * time.Millisecond,
+		ReadTimeout:  time.Duration(service.config.Server.ReadTimeoutMS) * time.Millisecond,
+		WriteTimeout: time.Duration(service.config.Server.WriteTimeoutMS) * time.Millisecond,
+		IdleTimeout:  time.Duration(service.config.Server.IdleTimeoutMS) * time.Millisecond,
 	}
-	if err := service.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		service.recordError("listen_serve", err, nil)
+	go func() {
+		if err := service.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			service.recordError("listen_serve", err, nil)
+		}
+	}()
+
+	<-service.stopCh
+	if err := service.server.Close(); err != nil {
+		service.recordError("close_server", err, nil)
+	} else {
+		service.logger.Info(fmt.Sprintf("close %s server success", CollectEventServiceName))
 	}
 }
 
 func (service *CollectEventService) saveEvents() {
-	defer service.wg.Done()
+	defer func() {
+		service.logger.Info(fmt.Sprintf("stop %s save events", CollectEventServiceName))
+		service.wg.Done()
+	}()
 loop:
 	for {
 		select {
@@ -115,7 +130,7 @@ loop:
 			atomic.AddInt64(&service.eventCountInEventBuffer, -1)
 			if err := service.saveEvent(event); err != nil {
 				service.recordError(
-					"add_event_to_db", err,
+					"save_event", err,
 					map[string]string{"event": event.String()},
 				)
 			}
@@ -129,7 +144,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 	if err := event.Check(); err != nil {
 		return err
 	}
-	config := service.config.AddEventToDB
+	config := service.config.SaveEvent
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
@@ -137,7 +152,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 		err := upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
 		if err != nil {
 			if errors.Is(err, base.DBTxError) {
-				service.recordError("add_event_to_db_retry", err, map[string]string{"event": event.String()})
+				service.recordError("save_event_retry", err, map[string]string{"event": event.String()})
 				time.Sleep(retryInterval)
 				continue
 			}
@@ -151,7 +166,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
 	defer func() {
 		if r := recover(); r != nil {
-			recordTaskErrorV2(service.logger, service.metric, CollectEventServiceName, fmt.Errorf("%+v", r), "add_event_panic", nil)
+			service.recordError("add_event_panic", fmt.Errorf("%+v", r), nil)
 		}
 	}()
 	if err := event.Check(); err != nil {
@@ -163,8 +178,8 @@ func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"collect event service buffer is full with limit %d, event %s is discarded",
-			service.config.BufferLimit, event.String())
+			"%s buffer is full with limit %d, event %s is discarded",
+			CollectEventServiceName, service.config.BufferLimit, event.String())
 	}
 }
 
@@ -182,14 +197,8 @@ func (service *CollectEventService) Stop() {
 		close(service.stopCh)
 	}
 	service.wg.Wait()
-	if service.server != nil {
-		if err := service.server.Close(); err != nil {
-			service.logger.Error("close collect events server error", log.Error(err))
-		} else {
-			service.logger.Info("close collect events server success")
-		}
-	}
 	service.drainEvents()
+	service.logger.Info(fmt.Sprintf("close %s success", CollectEventServiceName))
 }
 
 func (service *CollectEventService) drainEvents() {
@@ -198,7 +207,7 @@ func (service *CollectEventService) drainEvents() {
 		err := service.saveEvent(event)
 		if err != nil {
 			service.recordError(
-				"add_event_to_db", err,
+				"save_event", err,
 				map[string]string{"event": event.String()},
 			)
 		}
@@ -206,13 +215,13 @@ func (service *CollectEventService) drainEvents() {
 }
 
 func (service *CollectEventService) mointor(interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer func() {
-		service.logger.Info("stop monitor in collect event service")
+		service.logger.Info(fmt.Sprintf("stop %s monitor", CollectEventServiceName))
+		ticker.Stop()
 		service.wg.Done()
 	}()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	metricName := "event_in_buffer.total"
+	metricName := "event_in_buffer"
 loop:
 	for {
 		select {
@@ -225,7 +234,7 @@ loop:
 }
 
 func (service *CollectEventService) recordGauge(metricName string, count int64) {
-	metricName = fmt.Sprintf("%s.%s", CollectEventServiceName, metricName)
+	metricName = fmt.Sprintf("%s.%s.total", CollectEventServiceName, metricName)
 	service.logger.Info(metricName, log.Int64("count", count))
 	service.metric.MetricGauge(metricName, count)
 }
@@ -242,7 +251,7 @@ func (service *CollectEventService) recordError(reason string, err error, info m
 	if err != nil {
 		logPairs = append(logPairs, log.Error(err))
 	}
-	service.logger.Error("collect event service error", logPairs...)
+	service.logger.Error(fmt.Sprintf("%s error", CollectEventServiceName), logPairs...)
 
 	errorMetricName := fmt.Sprintf("%s.error", CollectEventServiceName)
 	service.metric.MetricIncrease(errorMetricName)
@@ -316,7 +325,7 @@ func (service *CollectEventService) postEventsHandler(writer http.ResponseWriter
 
 	err = service.AddEvents(events)
 	if err != nil {
-		service.recordError("add_event_to_cache", err, map[string]string{"body": string(body)})
+		service.recordError("add_event", err, map[string]string{"body": string(body)})
 		if err = writeErrorResponse(writer, http.StatusInternalServerError, err); err != nil {
 			service.recordWriteResponseError(err, body)
 		}
@@ -325,8 +334,8 @@ func (service *CollectEventService) postEventsHandler(writer http.ResponseWriter
 	if err = writeSuccessResponse(writer, len(events)); err != nil {
 		service.recordWriteResponseError(err, body)
 	}
-	service.recordSuccessWithDuration("add_event_to_cache", time.Since(startTime))
-	service.recordSuccessWithCount("add_event_to_cache.events", len(events))
+	service.recordSuccessWithDuration("add_event", time.Since(startTime))
+	service.recordSuccessWithCount("add_event.events", len(events))
 }
 
 func writeErrorResponse(writer http.ResponseWriter, code int, err error) error {

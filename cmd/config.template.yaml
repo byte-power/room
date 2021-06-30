@@ -108,12 +108,12 @@ db_cluster:
 collect_event:
   buffer_limit: 10240000
   monitor_interval: "15s"
-  service:
+  server:
     url: "127.0.0.1:8080"
     read_timeout_ms: 1000
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
-  add_event_to_db:
+  save_event:
     retry_times: 3
     retry_interval_ms: 20
     timeout_ms: 2000

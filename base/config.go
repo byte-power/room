@@ -26,7 +26,7 @@ type Config struct {
 	Log                 map[string]map[string]interface{} `yaml:"log"`
 	LoadKey             LoadKeyConfig                     `yaml:"load_key"`
 	SyncService         SyncServiceConfig                 `yaml:"sync"`
-	CollectEventService CollectEventConfig                `yaml:"collect_event"`
+	CollectEventService CollectEventServiceConfig         `yaml:"collect_event"`
 }
 
 func (config Config) check() error {
@@ -472,9 +472,9 @@ func (config CleanKeyTaskConfig) check() error {
 	return nil
 }
 
-type CollectEventConfig struct {
-	Service      CollectEventServiceConfig      `yaml:"service"`
-	AddEventToDB CollectEventAddEventToDBConfig `yaml:"add_event_to_db"`
+type CollectEventServiceConfig struct {
+	Server    CollectEventServiceServerConfig    `yaml:"server"`
+	SaveEvent CollectEventServiceSaveEventConfig `yaml:"save_event"`
 
 	BufferLimit int `yaml:"buffer_limit"`
 
@@ -482,12 +482,12 @@ type CollectEventConfig struct {
 	MonitorInterval    time.Duration
 }
 
-func (config CollectEventConfig) check() error {
+func (config CollectEventServiceConfig) check() error {
 	prefix := "collect_event"
-	if err := config.Service.check(); err != nil {
+	if err := config.Server.check(); err != nil {
 		return fmt.Errorf("%s.%w", prefix, err)
 	}
-	if err := config.AddEventToDB.check(); err != nil {
+	if err := config.SaveEvent.check(); err != nil {
 		return fmt.Errorf("%s.%w", prefix, err)
 	}
 	if config.BufferLimit <= 0 {
@@ -499,7 +499,7 @@ func (config CollectEventConfig) check() error {
 	return nil
 }
 
-func (config *CollectEventConfig) Init() error {
+func (config *CollectEventServiceConfig) Init() error {
 	prefix := "collect_event"
 	if err := config.check(); err != nil {
 		return err
@@ -513,14 +513,14 @@ func (config *CollectEventConfig) Init() error {
 	return nil
 }
 
-type CollectEventServiceConfig struct {
+type CollectEventServiceServerConfig struct {
 	URL            string `yaml:"url"`
 	ReadTimeoutMS  int    `yaml:"read_timeout_ms"`
 	WriteTimeoutMS int    `yaml:"write_timeout_ms"`
 	IdleTimeoutMS  int    `yaml:"idle_timeout_ms"`
 }
 
-func (config CollectEventServiceConfig) check() error {
+func (config CollectEventServiceServerConfig) check() error {
 	if config.URL == "" {
 		return errors.New("service.url should not be empty")
 	}
@@ -536,15 +536,15 @@ func (config CollectEventServiceConfig) check() error {
 	return nil
 }
 
-type CollectEventAddEventToDBConfig struct {
+type CollectEventServiceSaveEventConfig struct {
 	RetryTimes      int `yaml:"retry_times"`
 	RetryIntervalMS int `yaml:"retry_interval_ms"`
 	TimeoutMS       int `yaml:"timeout_ms"`
 	WorkerCount     int `yaml:"worker_count"`
 }
 
-func (config CollectEventAddEventToDBConfig) check() error {
-	prefix := "add_event_to_db"
+func (config CollectEventServiceSaveEventConfig) check() error {
+	prefix := "save_event"
 	if config.RetryTimes <= 0 {
 		return fmt.Errorf("%s.retry_times is %d, it should be greater than 0", prefix, config.RetryTimes)
 	}
