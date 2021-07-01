@@ -104,11 +104,11 @@ func (event HashTagEvent) Merge(anotherEvent HashTagEvent) (HashTagEvent, error)
 	newEvent := HashTagEvent{HashTag: event.HashTag}
 	if anotherEvent.AccessMode == HashTagAccessModeWrite {
 		newEvent.AccessMode = anotherEvent.AccessMode
-		newEvent.Keys = utility.MergeStringSet(event.Keys, anotherEvent.Keys)
 	} else {
 		newEvent.AccessMode = event.AccessMode
 	}
 	newEvent.AccessTime = utility.GetLatestTime(event.AccessTime, anotherEvent.AccessTime)
+	newEvent.Keys = utility.MergeStringSet(event.Keys, anotherEvent.Keys)
 	return newEvent, nil
 }
 
@@ -342,6 +342,9 @@ func (service *HashTagEventService) recordAggregateEventError(event HashTagEvent
 }
 
 func (service *HashTagEventService) aggregateEvent(event HashTagEvent) error {
+	if event.AccessMode == HashTagAccessModeRead {
+		event.Keys = utility.NewStringSet([]string{}...)
+	}
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
 	var newEvent HashTagEvent
