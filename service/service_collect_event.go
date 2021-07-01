@@ -266,7 +266,6 @@ func (service *CollectEventService) recordWriteResponseError(err error, body []b
 
 func (service *CollectEventService) recordSuccessWithDuration(info string, duration time.Duration) {
 	metricName := fmt.Sprintf("%s.success.%s", CollectEventServiceName, info)
-	service.logger.Info(metricName, log.String("duration", duration.String()))
 	service.metric.MetricIncrease(metricName)
 	if duration > time.Duration(0) {
 		durationMetricName := fmt.Sprintf("%s.duration", metricName)
@@ -276,7 +275,6 @@ func (service *CollectEventService) recordSuccessWithDuration(info string, durat
 
 func (service *CollectEventService) recordSuccessWithCount(info string, count int) {
 	metricName := fmt.Sprintf("%s.success.%s", CollectEventServiceName, info)
-	service.logger.Info(metricName, log.Int("count", count))
 	service.metric.MetricCount(metricName, count)
 }
 
