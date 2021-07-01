@@ -20,7 +20,6 @@ var (
 	ErrEventHashKeyEmpty    = errors.New("event hash_tag is empty")
 	ErrEventAccessModeEmpty = errors.New("event access_mode is empty")
 	ErrEventAccessTimeEmpty = errors.New("event access_time is empty")
-	ErrEventNoKeys          = errors.New("event contains no keys")
 
 	errDrainEventTimeout = errors.New("drain event timeout")
 )
@@ -74,9 +73,6 @@ func (event HashTagEvent) Check() error {
 	}
 	if event.AccessTime.IsZero() {
 		return ErrEventAccessTimeEmpty
-	}
-	if event.Keys.Len() == 0 {
-		return ErrEventNoKeys
 	}
 	return nil
 }
@@ -484,7 +480,13 @@ func (service *HashTagEventService) recordReportEventsError(events []HashTagEven
 }
 
 func (service *HashTagEventService) SendEvent(hashTag string, keys []string, accessMode HashTagAccessMode, accessTime time.Time) error {
-	event, err := NewHashTagEvent(hashTag, keys, accessMode, accessTime)
+	var event HashTagEvent
+	var err error
+	if accessMode == HashTagAccessModeRead {
+		event, err = NewHashTagEvent(hashTag, []string{}, accessMode, accessTime)
+	} else {
+		event, err = NewHashTagEvent(hashTag, keys, accessMode, accessTime)
+	}
 	if err != nil {
 		return err
 	}
