@@ -291,12 +291,6 @@ func (dep Dependency) Check() error {
 	if dep.Metric == nil {
 		return ErrDepMetricNull
 	}
-	if dep.Event == nil {
-		return ErrDepEventNull
-	}
-	if dep.HashTagEvent == nil {
-		return ErrDepHashTagEventNull
-	}
 	return nil
 }
 
