@@ -221,9 +221,14 @@ loop:
 }
 
 func (service *CollectEventService) recordGauge(metricName string, count int64) {
-	metricName = fmt.Sprintf("%s.%s.total", CollectEventServiceName, metricName)
-	service.logger.Info(metricName, log.Int64("count", count))
-	service.metric.MetricGauge(metricName, count)
+	recordName := fmt.Sprintf("%s.%s.total", CollectEventServiceName, metricName)
+	service.logger.Info(recordName, log.Int64("count", count))
+	service.recordGaugeMetric(metricName, count)
+}
+
+func (service *CollectEventService) recordGaugeMetric(metricName string, count int64) {
+	recordName := fmt.Sprintf("%s.%s.total", CollectEventServiceName, metricName)
+	service.metric.MetricGauge(recordName, count)
 }
 
 func (service *CollectEventService) recordError(reason string, err error, info map[string]string) {
@@ -287,8 +292,7 @@ func (service *CollectEventService) postEventsHandler(writer http.ResponseWriter
 		}
 		return
 	}
-	service.logger.Debug("collect_event_service receive event", log.String("body", string(body)))
-	service.logger.Info("collect_event_service receive request", log.Int("body_length", len(body)))
+	service.recordGaugeMetric("request_body", int64(len(body)))
 	requestBodyStruct := CollectEventsRequestBody{}
 	if err = json.Unmarshal(body, &requestBodyStruct); err != nil {
 		service.recordError("unmarshal_body", err, map[string]string{"body": string(body)})

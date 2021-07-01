@@ -624,11 +624,15 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 				AccessedAt: event.AccessTime,
 				CreatedAt:  currentTime,
 				UpdatedAt:  currentTime,
-				Status:     HashTagKeysStatusNeedSynced,
 				Version:    0,
 			}
 			if event.AccessMode == base.HashTagAccessModeWrite {
 				model.WrittenAt = event.AccessTime
+			}
+			if event.Keys.Len() == 0 {
+				model.Status = HashTagKeysStatusSynced
+			} else {
+				model.Status = HashTagKeysStatusNeedSynced
 			}
 			_, err = tx.Model(model).Table(tableName).Insert()
 			return err

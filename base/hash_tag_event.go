@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	ErrEventHashKeyEmpty    = errors.New("event hash_tag is empty")
-	ErrEventAccessModeEmpty = errors.New("event access_mode is empty")
-	ErrEventAccessTimeEmpty = errors.New("event access_time is empty")
+	ErrEventHashKeyEmpty     = errors.New("event hash_tag is empty")
+	ErrEventAccessModeEmpty  = errors.New("event access_mode is empty")
+	ErrEventAccessTimeEmpty  = errors.New("event access_time is empty")
+	ErrWriteEventWithoutKeys = errors.New("write event does not have keys")
 
 	errDrainEventTimeout = errors.New("drain event timeout")
 )
@@ -74,6 +75,9 @@ func (event HashTagEvent) Check() error {
 	if event.AccessTime.IsZero() {
 		return ErrEventAccessTimeEmpty
 	}
+	if event.AccessMode == HashTagAccessModeWrite && event.Keys.Len() == 0 {
+		return ErrWriteEventWithoutKeys
+	}
 	return nil
 }
 
@@ -100,11 +104,11 @@ func (event HashTagEvent) Merge(anotherEvent HashTagEvent) (HashTagEvent, error)
 	newEvent := HashTagEvent{HashTag: event.HashTag}
 	if anotherEvent.AccessMode == HashTagAccessModeWrite {
 		newEvent.AccessMode = anotherEvent.AccessMode
+		newEvent.Keys = utility.MergeStringSet(event.Keys, anotherEvent.Keys)
 	} else {
 		newEvent.AccessMode = event.AccessMode
 	}
 	newEvent.AccessTime = utility.GetLatestTime(event.AccessTime, anotherEvent.AccessTime)
-	newEvent.Keys = utility.MergeStringSet(event.Keys, anotherEvent.Keys)
 	return newEvent, nil
 }
 
@@ -479,13 +483,7 @@ func (service *HashTagEventService) recordReportEventsError(events []HashTagEven
 }
 
 func (service *HashTagEventService) SendEvent(hashTag string, keys []string, accessMode HashTagAccessMode, accessTime time.Time) error {
-	var event HashTagEvent
-	var err error
-	if accessMode == HashTagAccessModeRead {
-		event, err = NewHashTagEvent(hashTag, []string{}, accessMode, accessTime)
-	} else {
-		event, err = NewHashTagEvent(hashTag, keys, accessMode, accessTime)
-	}
+	event, err := NewHashTagEvent(hashTag, keys, accessMode, accessTime)
 	if err != nil {
 		return err
 	}
