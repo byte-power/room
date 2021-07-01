@@ -61,7 +61,7 @@ func main() {
 	if err := parseAndCheckCommandOptions(); err != nil {
 		logger.Fatalf("command options error %s\n", err)
 	}
-	if err := base.InitServices(*configPath); err != nil {
+	if err := base.InitBasicDependencies(*configPath); err != nil {
 		logger.Fatalf("init service error %s\n", err)
 	}
 	db := base.GetDBCluster()

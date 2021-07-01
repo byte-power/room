@@ -19,7 +19,7 @@ func main() {
 		fmt.Println(roomVersion)
 		return
 	}
-	if err := base.InitServices(*configPath); err != nil {
+	if err := base.InitRoomService(*configPath); err != nil {
 		panic(err)
 	}
 
@@ -27,4 +27,5 @@ func main() {
 	logger := base.GetServerLogger()
 	logger.Info("room server is stopped, try to stop other related services...")
 	base.StopServices()
+
 }
