@@ -131,11 +131,10 @@ func NewEventService(config EventServiceConfig, logger *log.Logger) (*EventServi
 	logger.Info(
 		"new event service",
 		log.String("config", fmt.Sprintf("%+v", config)))
-	server.startWorkers()
 	return server, nil
 }
 
-func (service *EventService) startWorkers() {
+func (service *EventService) Run() {
 	rand.Seed(time.Now().UnixNano())
 	for i := 0; i < service.config.EventBuffer.WorkerCount; i++ {
 		// add a random duration between [50, 100) ms, avoid workers to report events at the same time.

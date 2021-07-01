@@ -196,6 +196,11 @@ func GetServerConfig() Config {
 	return serverConfig
 }
 
+func StartServices() {
+	eventService.Run()
+	hashTagEventService.Run()
+}
+
 func StopServices() {
 	eventService.Stop()
 	hashTagEventService.Stop()

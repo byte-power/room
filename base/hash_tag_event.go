@@ -291,11 +291,10 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 	logger.Info(
 		"new hash_tag_event service",
 		log.String("config", fmt.Sprintf("%+v", config)))
-	server.startWorkers()
 	return server, nil
 }
 
-func (service *HashTagEventService) startWorkers() {
+func (service *HashTagEventService) Run() {
 	service.wg.Add(1)
 	go service.aggregateEvents()
 	service.wg.Add(1)

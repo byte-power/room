@@ -2,7 +2,12 @@ package main
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/base/log"
 	"bytepower_room/service"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/pflag"
 )
@@ -26,4 +31,16 @@ func main() {
 		panic(err)
 	}
 	collectEventService.Run()
+
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	sig := <-signalCh
+
+	logger.Info(
+		fmt.Sprintf("signal received, closing %s ...", service.CollectEventServiceName),
+		log.String("signal", sig.String()))
+
+	collectEventService.Stop()
+	logger.Info(fmt.Sprintf("close %s success", service.CollectEventServiceName))
 }

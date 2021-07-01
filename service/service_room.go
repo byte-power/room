@@ -9,11 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"os/signal"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/gogf/greuse"
@@ -41,59 +38,66 @@ func newInvalidKeyError(key string) error {
 
 var errInvalidResponse = errors.New("ERR invalid command response")
 
-func StartServer() {
-	config := base.GetServerConfig().Server
-	logger := base.GetServerLogger()
+type RoomService struct {
+	config      base.RoomServerConfig
+	dep         base.Dependency
+	server      *redcon.Server
+	pprofServer *http.Server
+}
 
-	logger.Info("starting room server...", log.String("url", config.URL))
-	server := redcon.NewServer(config.URL, connServeHandler, connAcceptHandler, connCloseHandler)
-	server.AcceptError = connAcceptErrorHandler
-	listener, err := greuse.Listen("tcp", config.URL)
+func NewRoomService(config base.RoomServerConfig, dep base.Dependency) (*RoomService, error) {
+	if err := config.Check(); err != nil {
+		return nil, err
+	}
+	if err := dep.Check(); err != nil {
+		return nil, err
+	}
+	return &RoomService{config: config, dep: dep}, nil
+}
+
+func (service *RoomService) Run() {
+	service.dep.Logger.Info("starting room server...", log.String("url", service.config.URL))
+	service.server = redcon.NewServer(service.config.URL, connServeHandler, connAcceptHandler, connCloseHandler)
+	service.server.AcceptError = connAcceptErrorHandler
+	listener, err := greuse.Listen("tcp", service.config.URL)
 	if err != nil {
-		logger.Error("start room server failed", log.Error(err))
+		service.dep.Logger.Error("start room server failed", log.Error(err))
 		panic(err)
 	}
 	go func() {
-		if err := server.Serve(listener); err != nil {
-			logger.Error("serve room server failed", log.Error(err))
+		if err := service.server.Serve(listener); err != nil {
+			service.dep.Logger.Error("serve room server failed", log.Error(err))
 			panic(err)
 		}
 	}()
 
 	// start pprof server
-	var pprofServer *http.Server
-	if config.PProfURL != "" {
-		logger.Info("starting pprof server...", log.String("url", config.PProfURL))
-		pprofServer = &http.Server{Handler: nil}
-		listener, err := greuse.Listen("tcp", config.PProfURL)
+	if service.config.PProfURL != "" {
+		service.dep.Logger.Info("starting pprof server...", log.String("url", service.config.PProfURL))
+		service.pprofServer = &http.Server{Handler: nil}
+		listener, err := greuse.Listen("tcp", service.config.PProfURL)
 		if err != nil {
-			logger.Error("start pprof server failed", log.Error(err))
+			service.dep.Logger.Error("start pprof server failed", log.Error(err))
 			panic(err)
 		}
 		go func() {
-			if err := pprofServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-				logger.Error("serve pprof server failed", log.Error(err))
+			if err := service.pprofServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+				service.dep.Logger.Error("serve pprof server failed", log.Error(err))
 				panic(err)
 			}
 		}()
 	}
+}
 
-	logger.Info("service has started")
-
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-	sig := <-signalCh
-	logger.Info("signal received, closing service...", log.String("signal", sig.String()))
-	if err := server.Close(); err != nil {
-		logger.Error("close room server error", log.Error(err))
+func (service *RoomService) Stop() {
+	if err := service.server.Close(); err != nil {
+		service.dep.Logger.Error("close room server error", log.Error(err))
 	}
-	if pprofServer != nil {
-		if err := pprofServer.Close(); err != nil {
-			logger.Error("close pprof server error", log.Error(err))
+	if service.pprofServer != nil {
+		if err := service.pprofServer.Close(); err != nil {
+			service.dep.Logger.Error("close pprof server error", log.Error(err))
 		}
 	}
-	logger.Info("room server is closed")
 }
 
 func connAcceptHandler(conn redcon.Conn) bool {

@@ -33,7 +33,7 @@ func (config Config) check() error {
 	if config.Name == "" {
 		return errors.New("config.name should not be empty")
 	}
-	if err := config.Server.check(); err != nil {
+	if err := config.Server.Check(); err != nil {
 		return fmt.Errorf("config.%w", err)
 	}
 	if err := config.RedisCluster.check(); err != nil {
@@ -65,7 +65,7 @@ type RoomServerConfig struct {
 	PProfURL string `yaml:"pprof_url"`
 }
 
-func (config RoomServerConfig) check() error {
+func (config RoomServerConfig) Check() error {
 	if config.URL == "" {
 		return errors.New("room_service.url should not be empty")
 	}

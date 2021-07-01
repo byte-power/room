@@ -6,10 +6,7 @@ import (
 	"context"
 	"io/ioutil"
 	"net/http"
-	"os"
-	"os/signal"
 	"sync/atomic"
-	"syscall"
 
 	"errors"
 	"fmt"
@@ -76,15 +73,6 @@ func (service *CollectEventService) Run() {
 	service.wg.Add(1)
 	go service.mointor(service.config.MonitorInterval)
 
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-
-	sig := <-signalCh
-
-	service.logger.Info(
-		fmt.Sprintf("signal received, closing %s ...", CollectEventServiceName),
-		log.String("signal", sig.String()))
-	service.Stop()
 }
 
 func (service *CollectEventService) startServer() {
@@ -198,7 +186,6 @@ func (service *CollectEventService) Stop() {
 	}
 	service.wg.Wait()
 	service.drainEvents()
-	service.logger.Info(fmt.Sprintf("close %s success", CollectEventServiceName))
 }
 
 func (service *CollectEventService) drainEvents() {
