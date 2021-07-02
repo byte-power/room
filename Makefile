@@ -14,3 +14,6 @@ build-collect-event:
 
 build-trans:
 	CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags '-w -s' -v -o $(testTransactionBin) cmd/tools/transaction.go
+
+build-all: build-room build-sync build-collect-event
+
