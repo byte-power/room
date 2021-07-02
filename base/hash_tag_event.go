@@ -27,6 +27,8 @@ var (
 
 const HTTPContentTypeJSON = "application/json"
 
+const HashTagEventServiceName = "hash_tag_event_service"
+
 var (
 	metricReportEventsError   = "error.report_events"
 	metricSendEventPanic      = "error.send_event_panic"
@@ -48,16 +50,18 @@ const (
 type HashTagEvent struct {
 	HashTag    string             `json:"hash_tag"`
 	Keys       *utility.StringSet `json:"keys"`
-	AccessMode HashTagAccessMode  `json:"access_mode"`
 	AccessTime time.Time          `json:"access_time"`
+	WriteTime  time.Time          `json:"write_time"`
 }
 
 func NewHashTagEvent(hashTag string, keys []string, accessMode HashTagAccessMode, accessTime time.Time) (HashTagEvent, error) {
 	event := HashTagEvent{
 		HashTag:    hashTag,
 		Keys:       utility.NewStringSet(keys...),
-		AccessMode: accessMode,
 		AccessTime: accessTime,
+	}
+	if accessMode == HashTagAccessModeWrite {
+		event.WriteTime = accessTime
 	}
 	if err := event.Check(); err != nil {
 		return HashTagEvent{}, err
@@ -69,13 +73,10 @@ func (event HashTagEvent) Check() error {
 	if event.HashTag == "" {
 		return ErrEventHashKeyEmpty
 	}
-	if event.AccessMode == "" {
-		return ErrEventAccessModeEmpty
-	}
 	if event.AccessTime.IsZero() {
 		return ErrEventAccessTimeEmpty
 	}
-	if event.AccessMode == HashTagAccessModeWrite && event.Keys.Len() == 0 {
+	if !event.WriteTime.IsZero() && event.Keys.Len() == 0 {
 		return ErrWriteEventWithoutKeys
 	}
 	return nil
@@ -86,29 +87,39 @@ func (event HashTagEvent) String() string {
 	bs, err := json.Marshal(event)
 	if err != nil {
 		result = fmt.Sprintf(
-			"Event[hash_tag=%s, access_mode=%s, access_time=%v, keys=%s]",
-			event.HashTag, event.AccessMode, event.AccessTime, strings.Join(event.Keys.ToSlice(), " "))
+			"Event[hash_tag=%s, access_time=%v, write_time=%v, keys=%s]",
+			event.HashTag, event.AccessTime, event.WriteTime, strings.Join(event.Keys.ToSlice(), " "))
 	} else {
 		result = string(bs)
 	}
 	return result
 }
 
-func (event HashTagEvent) Merge(anotherEvent HashTagEvent) (HashTagEvent, error) {
-	if err := anotherEvent.Check(); err != nil {
+func (event HashTagEvent) Copy() HashTagEvent {
+	return HashTagEvent{
+		HashTag:    event.HashTag,
+		Keys:       event.Keys.Copy(),
+		AccessTime: event.AccessTime,
+		WriteTime:  event.WriteTime,
+	}
+}
+
+func MergeEvents(event HashTagEvent, events ...HashTagEvent) (HashTagEvent, error) {
+	if err := event.Check(); err != nil {
 		return HashTagEvent{}, err
 	}
-	if event.HashTag != anotherEvent.HashTag {
-		return HashTagEvent{}, errors.New("events to be merged should have the same hash_tag")
+	newEvent := event.Copy()
+	for _, event := range events {
+		if err := event.Check(); err != nil {
+			return HashTagEvent{}, err
+		}
+		if newEvent.HashTag != event.HashTag {
+			return HashTagEvent{}, errors.New("events should have the same hash_tag")
+		}
+		newEvent.WriteTime = utility.GetLatestTime(newEvent.WriteTime, event.WriteTime)
+		newEvent.AccessTime = utility.GetLatestTime(newEvent.AccessTime, event.AccessTime)
+		newEvent.Keys.Merge(event.Keys)
 	}
-	newEvent := HashTagEvent{HashTag: event.HashTag}
-	if anotherEvent.AccessMode == HashTagAccessModeWrite {
-		newEvent.AccessMode = anotherEvent.AccessMode
-	} else {
-		newEvent.AccessMode = event.AccessMode
-	}
-	newEvent.AccessTime = utility.GetLatestTime(event.AccessTime, anotherEvent.AccessTime)
-	newEvent.Keys = utility.MergeStringSet(event.Keys, anotherEvent.Keys)
 	return newEvent, nil
 }
 
@@ -279,7 +290,7 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 		},
 	}
 	server := &HashTagEventService{
-		name:                 "HashTagEventService",
+		name:                 HashTagEventServiceName,
 		config:               &config,
 		eventBuffer:          make(chan HashTagEvent, config.BufferLimit),
 		mutex:                sync.Mutex{},
@@ -342,7 +353,7 @@ func (service *HashTagEventService) recordAggregateEventError(event HashTagEvent
 }
 
 func (service *HashTagEventService) aggregateEvent(event HashTagEvent) error {
-	if event.AccessMode == HashTagAccessModeRead {
+	if event.WriteTime.IsZero() {
 		event.Keys = utility.NewStringSet([]string{}...)
 	}
 	service.mutex.Lock()
@@ -350,7 +361,7 @@ func (service *HashTagEventService) aggregateEvent(event HashTagEvent) error {
 	var newEvent HashTagEvent
 	var err error
 	if savedEvent, ok := service.events[event.HashTag]; ok {
-		newEvent, err = savedEvent.Merge(event)
+		newEvent, err = MergeEvents(savedEvent, event)
 		if err != nil {
 			return err
 		}

@@ -584,16 +584,17 @@ func (model *roomHashTagKeys) updateFromEvent(event base.HashTagEvent) []string 
 		toBeUpdatedColumns = append(toBeUpdatedColumns, "keys")
 	}
 
-	model.AccessedAt = utility.GetLatestTime(model.AccessedAt, event.AccessTime)
-	model.Version = model.Version + 1
-	toBeUpdatedColumns = append(toBeUpdatedColumns, "accessed_at", "version")
-
-	if event.AccessMode == base.HashTagAccessModeWrite {
-		model.WrittenAt = utility.GetLatestTime(model.WrittenAt, event.AccessTime)
+	if event.AccessTime.After(model.AccessedAt) {
+		model.AccessedAt = event.AccessTime
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "accessed_at")
+	}
+	if event.WriteTime.After(model.WrittenAt) {
+		model.WrittenAt = event.WriteTime
 		toBeUpdatedColumns = append(toBeUpdatedColumns, "written_at")
 	}
+
 	var newStatus HashTagKeysStatus
-	if (len(originKeys) != len(newKeys)) || event.AccessMode == base.HashTagAccessModeWrite {
+	if (len(originKeys) != len(newKeys)) || !event.WriteTime.IsZero() {
 		newStatus = HashTagKeysStatusNeedSynced
 	} else if model.Status == HashTagKeysStatusCleaned {
 		newStatus = HashTagKeysStatusSynced
@@ -626,8 +627,8 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 				UpdatedAt:  currentTime,
 				Version:    0,
 			}
-			if event.AccessMode == base.HashTagAccessModeWrite {
-				model.WrittenAt = event.AccessTime
+			if !event.WriteTime.IsZero() {
+				model.WrittenAt = event.WriteTime
 			}
 			if event.Keys.Len() == 0 {
 				model.Status = HashTagKeysStatusSynced
@@ -643,8 +644,9 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 		if len(toBeUpdatedColumns) == 0 {
 			return nil
 		}
+		model.Version = model.Version + 1
 		model.UpdatedAt = currentTime
-		toBeUpdatedColumns = append(toBeUpdatedColumns, "updated_at")
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "version", "updated_at")
 		query := tx.Model(model).Table(tableName)
 		for _, column := range toBeUpdatedColumns {
 			query.Column(column)

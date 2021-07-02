@@ -574,6 +574,25 @@ func (set *StringSet) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func (set *StringSet) Copy() *StringSet {
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
+	m := make(map[string]bool, len(set.m))
+	for key, value := range set.m {
+		m[key] = value
+	}
+	return &StringSet{m: m, mutex: sync.Mutex{}}
+}
+
+func (set *StringSet) Merge(s *StringSet) {
+	slice := s.ToSlice()
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
+	for _, item := range slice {
+		set.m[item] = true
+	}
+}
+
 func MergeStringSet(sets ...*StringSet) *StringSet {
 	set := NewStringSet([]string{}...)
 	for _, s := range sets {
