@@ -270,17 +270,13 @@ type Dependency struct {
 	WrittenRecordDB  *DBCluster
 	Logger           *log.Logger
 	Metric           *MetricClient
-	Event            *EventService
-	HashTagEvent     *HashTagEventService
 }
 
 var (
-	ErrDepRedisNull        = errors.New("redis service is null")
-	ErrDepDBNull           = errors.New("db service is null")
-	ErrDepLoggerNull       = errors.New("logger is null")
-	ErrDepMetricNull       = errors.New("metric service is null")
-	ErrDepEventNull        = errors.New("event service is null")
-	ErrDepHashTagEventNull = errors.New("hash_tag event service is null")
+	ErrDepRedisNull  = errors.New("redis service is null")
+	ErrDepDBNull     = errors.New("db service is null")
+	ErrDepLoggerNull = errors.New("logger is null")
+	ErrDepMetricNull = errors.New("metric service is null")
 )
 
 func (dep Dependency) Check() error {
@@ -307,8 +303,6 @@ func GetServerDependency() Dependency {
 		WrittenRecordDB:  GetWrittenRecordDBCluster(),
 		Logger:           GetServerLogger(),
 		Metric:           GetMetricService(),
-		Event:            GetEventService(),
-		HashTagEvent:     GetHashTagEventService(),
 	}
 }
 
@@ -320,7 +314,5 @@ func GetTaskDependency() Dependency {
 		WrittenRecordDB:  GetWrittenRecordDBCluster(),
 		Logger:           GetTaskLogger(),
 		Metric:           GetTaskMetricService(),
-		Event:            GetEventService(),
-		HashTagEvent:     GetHashTagEventService(),
 	}
 }
