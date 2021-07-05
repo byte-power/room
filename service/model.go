@@ -630,7 +630,7 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 			if !event.WriteTime.IsZero() {
 				model.WrittenAt = event.WriteTime
 			}
-			if event.Keys.Len() == 0 {
+			if event.Keys.Len() == 0 && event.WriteTime.IsZero() {
 				model.Status = HashTagKeysStatusSynced
 			} else {
 				model.Status = HashTagKeysStatusNeedSynced
