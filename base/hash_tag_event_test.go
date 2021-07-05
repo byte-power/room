@@ -14,9 +14,43 @@ func testInitHashTagEventService() *HashTagEventService {
 		"room", "event_service",
 		loggerConfig)
 	metric, _ := InitMetric(MetricConfig{Host: "localhost"})
-	hashTagEventConfig := HashTagEventServiceConfig{EventReport: HashTagEventReportConfig{URL: "localhost"}}
+	hashTagEventConfig := HashTagEventServiceConfig{EventReport: HashTagEventServiceEventReportConfig{URL: "localhost"}}
 	service, _ := NewHashTagEventService(hashTagEventConfig, logger, metric)
 	return service
+}
+
+func TestNewHashTagEvent(t *testing.T) {
+	hashTag := "xyz"
+	keys := []string{"{xyz}a", "{xyz}b", "{xyz}c"}
+	accessTime := time.Now()
+
+	// read event
+	event, err := NewHashTagEvent(hashTag, keys, HashTagAccessModeRead, accessTime)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTag, event.HashTag)
+	assert.True(t, event.AccessTime.Equal(accessTime))
+	assert.True(t, event.WriteTime.IsZero())
+	assert.ElementsMatch(t, event.Keys.ToSlice(), keys)
+
+	// write event
+	event, err = NewHashTagEvent(hashTag, keys, HashTagAccessModeWrite, accessTime)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTag, event.HashTag)
+	assert.True(t, event.AccessTime.Equal(accessTime))
+	assert.True(t, event.WriteTime.Equal(accessTime))
+	assert.ElementsMatch(t, event.Keys.ToSlice(), keys)
+
+	// read with empty keys
+	event, err = NewHashTagEvent(hashTag, []string{}, HashTagAccessModeRead, accessTime)
+	assert.Nil(t, err)
+	assert.Equal(t, hashTag, event.HashTag)
+	assert.True(t, event.AccessTime.Equal(accessTime))
+	assert.True(t, event.WriteTime.IsZero())
+	assert.Equal(t, 0, event.Keys.Len())
+
+	// write with empty keys
+	event, err = NewHashTagEvent(hashTag, []string{}, HashTagAccessModeWrite, accessTime)
+	assert.NotNil(t, err)
 }
 
 func TestHashTagEventAggregateEvent(t *testing.T) {
@@ -41,6 +75,24 @@ func TestHashTagEventAggregateEvent(t *testing.T) {
 	assert.Equal(t, currentTime, service.events[hashTag].AccessTime)
 	assert.Equal(t, currentTime, service.events[hashTag].WriteTime)
 	assert.ElementsMatch(t, keys2, service.events[hashTag].Keys.ToSlice())
+
+	currentTime2 := time.Now()
+	keys3 := []string{"x{abc}", "y{abc}"}
+	event, _ = NewHashTagEvent(hashTag, keys3, HashTagAccessModeRead, currentTime2)
+	service.aggregateEvent(event)
+	assert.Equal(t, 1, len(service.events))
+	assert.Equal(t, currentTime2, service.events[hashTag].AccessTime)
+	assert.Equal(t, currentTime, service.events[hashTag].WriteTime)
+	assert.ElementsMatch(t, keys2, service.events[hashTag].Keys.ToSlice())
+
+	currentTime3 := time.Now()
+	keys4 := []string{"m{abc}", "n{abc}"}
+	event, _ = NewHashTagEvent(hashTag, keys4, HashTagAccessModeWrite, currentTime3)
+	service.aggregateEvent(event)
+	assert.Equal(t, 1, len(service.events))
+	assert.Equal(t, currentTime3, service.events[hashTag].AccessTime)
+	assert.Equal(t, currentTime3, service.events[hashTag].WriteTime)
+	assert.ElementsMatch(t, append(keys2, keys4...), service.events[hashTag].Keys.ToSlice())
 }
 
 func TestHashTagEventCollectEvent(t *testing.T) {

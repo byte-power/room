@@ -21,8 +21,6 @@ var (
 	ErrEventAccessModeEmpty  = errors.New("event access_mode is empty")
 	ErrEventAccessTimeEmpty  = errors.New("event access_time is empty")
 	ErrWriteEventWithoutKeys = errors.New("write event does not have keys")
-
-	errDrainEventTimeout = errors.New("drain event timeout")
 )
 
 const HTTPContentTypeJSON = "application/json"
@@ -30,14 +28,15 @@ const HTTPContentTypeJSON = "application/json"
 const HashTagEventServiceName = "hash_tag_event_service"
 
 var (
-	metricReportEventsError   = "error.report_events"
-	metricSendEventPanic      = "error.send_event_panic"
-	metricDrainEventError     = "error.drain_event"
-	metricAggregateEventError = "error.agg_event"
+	metricReportEventsError   = fmt.Sprintf("%s.error.report_events", HashTagEventServiceName)
+	metricSendEventPanic      = fmt.Sprintf("%s.error.send_event_panic", HashTagEventServiceName)
+	metricAggregateEventError = fmt.Sprintf("%s.error.agg_event", HashTagEventServiceName)
 
-	metricEventCountInEventBuffer          = "event_in_buffer.total"
-	metricEventCountInCollectedEventBuffer = "event_in_collected_buffer.total"
-	metricAggregatedEventCount             = "aggregated_event.total"
+	metricReportEventsSuccess = fmt.Sprintf("%s.report_events", HashTagEventServiceName)
+
+	metricEventCountInEventBuffer          = fmt.Sprintf("%s.event_in_buffer.total", HashTagEventServiceName)
+	metricEventCountInCollectedEventBuffer = fmt.Sprintf("%s.event_in_collected_buffer.total", HashTagEventServiceName)
+	metricAggregatedEventCount             = fmt.Sprintf("%s.aggregated_event.total", HashTagEventServiceName)
 )
 
 type HashTagAccessMode string
@@ -126,7 +125,6 @@ func MergeEvents(event HashTagEvent, events ...HashTagEvent) (HashTagEvent, erro
 const (
 	defaultEventServiceBufferLimit       = 16 * 1024 * 1024 // 16M
 	defaultEventServiceAggregateInterval = 1 * time.Minute
-	defaultEventServiceDrainDuration     = 5 * time.Second
 
 	defaultEventReportRequestTimeout               = 100 * time.Millisecond
 	defaultEventReportRequestWorkerCount           = 5
@@ -139,13 +137,10 @@ const (
 )
 
 type HashTagEventServiceConfig struct {
-	EventReport HashTagEventReportConfig `yaml:"event_report"`
+	EventReport HashTagEventServiceEventReportConfig `yaml:"event_report"`
 
 	RawAggInterval string `yaml:"agg_interval"`
 	AggInterval    time.Duration
-
-	RawDrainDuration string `yaml:"drain_duration"`
-	DrainDuration    time.Duration
 
 	BufferLimit int `yaml:"buffer_limit"`
 
@@ -153,7 +148,7 @@ type HashTagEventServiceConfig struct {
 	MonitorInterval    time.Duration
 }
 
-type HashTagEventReportConfig struct {
+type HashTagEventServiceEventReportConfig struct {
 	URL string `yaml:"url"`
 
 	RawRequestTimeout string `yaml:"request_timeout"`
@@ -202,15 +197,7 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 		}
 		config.AggInterval = duration
 	}
-	if config.RawDrainDuration == "" {
-		config.DrainDuration = defaultEventServiceDrainDuration
-	} else {
-		duration, err := time.ParseDuration(config.RawDrainDuration)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.drain_duration is invalid:%w", err)
-		}
-		config.DrainDuration = duration
-	}
+
 	if config.BufferLimit <= 0 {
 		config.BufferLimit = defaultEventServiceBufferLimit
 	}
@@ -290,18 +277,20 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 		},
 	}
 	server := &HashTagEventService{
-		name:                 HashTagEventServiceName,
-		config:               &config,
-		eventBuffer:          make(chan HashTagEvent, config.BufferLimit),
-		mutex:                sync.Mutex{},
-		events:               make(map[string]HashTagEvent),
-		collectedEventBuffer: make(chan HashTagEvent, config.BufferLimit),
-		logger:               logger,
-		metric:               metric,
-		wg:                   sync.WaitGroup{},
-		stopCh:               make(chan bool),
-		stop:                 0,
-		client:               client,
+		name:                             HashTagEventServiceName,
+		config:                           &config,
+		eventBuffer:                      make(chan HashTagEvent, config.BufferLimit),
+		eventCountInEventBuffer:          0,
+		mutex:                            sync.Mutex{},
+		events:                           make(map[string]HashTagEvent),
+		collectedEventBuffer:             make(chan HashTagEvent, config.BufferLimit),
+		eventCountInCollectedEventBuffer: 0,
+		logger:                           logger,
+		metric:                           metric,
+		wg:                               sync.WaitGroup{},
+		stopCh:                           make(chan bool),
+		stop:                             0,
+		client:                           client,
 	}
 	logger.Info(
 		"new hash_tag_event service",
@@ -325,7 +314,7 @@ func (service *HashTagEventService) Run() {
 // returns when channel `service.stopCh` is closed.
 func (service *HashTagEventService) aggregateEvents() {
 	defer func() {
-		service.logger.Info("stop aggregate events in hash_tag_event service")
+		service.logger.Info(fmt.Sprintf("%s: stop aggregate events", service.name))
 		service.wg.Done()
 	}()
 
@@ -374,12 +363,12 @@ func (service *HashTagEventService) aggregateEvent(event HashTagEvent) error {
 
 // returns when channel `service.stopCh` is closed
 func (service *HashTagEventService) collectAggregatedEvents() {
+	ticker := time.NewTicker(service.config.AggInterval)
 	defer func() {
-		service.logger.Info("stop collect aggregated events in hash_tag_event service")
+		service.logger.Info(fmt.Sprintf("%s: stop collect aggregated events", service.name))
+		ticker.Stop()
 		service.wg.Done()
 	}()
-	ticker := time.NewTicker(service.config.AggInterval)
-	defer ticker.Stop()
 loop:
 	for {
 		select {
@@ -408,12 +397,12 @@ func (service *HashTagEventService) collectEvents() []HashTagEvent {
 
 // returns when channel `service.stopCh` is closed
 func (service *HashTagEventService) reportEvents() {
-	defer func() {
-		service.wg.Done()
-		service.logger.Info("stop report events in hash_tag_event service")
-	}()
 	ticker := time.NewTicker(service.config.EventReport.RequestMaxWaitDuration)
-	defer ticker.Stop()
+	defer func() {
+		service.logger.Info(fmt.Sprintf("%s: stop report events in hash_tag_event service", service.name))
+		ticker.Stop()
+		service.wg.Done()
+	}()
 	requestMaxEvent := service.config.EventReport.RequestMaxEvent
 	stop := false
 	for {
@@ -444,6 +433,8 @@ func (service *HashTagEventService) reportEvents() {
 		err := service._reportEvents(events)
 		if err != nil {
 			service.recordReportEventsError(events, err)
+		} else {
+			service.metric.MetricCount(metricReportEventsSuccess, len(events))
 		}
 		if stop {
 			break
@@ -520,80 +511,62 @@ func (service *HashTagEventService) send(event HashTagEvent) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"event service buffer is full with limit %d, event %s is discarded",
-			service.config.BufferLimit, event.String())
+			"%s: buffer is full with limit %d, event %s is discarded",
+			service.name, service.config.BufferLimit, event.String())
 	}
 }
 
 func (service *HashTagEventService) Stop() {
 	if atomic.CompareAndSwapInt32(&service.stop, 0, 1) {
 		close(service.stopCh)
-	}
-	service.wg.Wait()
-	if err := service.drainEvents(); err != nil {
-		service.recordDrainError(err)
+		service.wg.Wait()
+		service.drainEvents()
 	}
 }
 
-func (service *HashTagEventService) drainEvents() error {
-	timer := time.NewTimer(service.config.DrainDuration)
-	if err := service.closeAndEmptifyChannelWithTimer(timer, service.collectedEventBuffer, &service.eventCountInCollectedEventBuffer); err != nil {
-		return err
-	}
-	if err := service.closeAndEmptifyChannelWithTimer(timer, service.eventBuffer, &service.eventCountInEventBuffer); err != nil {
-		return err
-	}
+func (service *HashTagEventService) drainEvents() {
+	service.closeAndEmptifyChannel(service.collectedEventBuffer, &service.eventCountInCollectedEventBuffer)
+	service.closeAndEmptifyChannel(service.eventBuffer, &service.eventCountInEventBuffer)
+
 	requestMaxEvent := service.config.EventReport.RequestMaxEvent
 	allEvents := service.collectEvents()
 	events := make([]HashTagEvent, 0, requestMaxEvent)
+	service.logger.Info(fmt.Sprintf("%s: draining %d events", service.name, len(allEvents)))
 	for _, event := range allEvents {
 		events = append(events, event)
 		if len(events) == requestMaxEvent {
 			if err := service._reportEvents(events); err != nil {
-				return err
+				service.recordReportEventsError(events, err)
+			} else {
+				service.metric.MetricCount(metricReportEventsSuccess, len(events))
 			}
 			events = make([]HashTagEvent, 0, requestMaxEvent)
 		}
 	}
 	if err := service._reportEvents(events); err != nil {
-		return err
+		service.recordReportEventsError(events, err)
+	} else {
+		service.metric.MetricCount(metricReportEventsSuccess, len(events))
 	}
-	return nil
 }
 
-func (service *HashTagEventService) closeAndEmptifyChannelWithTimer(timer *time.Timer, ch chan HashTagEvent, counter *int64) error {
+func (service *HashTagEventService) closeAndEmptifyChannel(ch chan HashTagEvent, counter *int64) {
 	close(ch)
-loop:
-	for {
-		select {
-		case event, ok := <-ch:
-			if ok {
-				atomic.AddInt64(counter, -1)
-				if err := service.aggregateEvent(event); err != nil {
-					service.recordAggregateEventError(event, err)
-				}
-			} else {
-				break loop
-			}
-		case <-timer.C:
-			return errDrainEventTimeout
+	for event := range ch {
+		atomic.AddInt64(counter, -1)
+		if err := service.aggregateEvent(event); err != nil {
+			service.recordAggregateEventError(event, err)
 		}
 	}
-	return nil
-}
-
-func (service *HashTagEventService) recordDrainError(err error) {
-	service.logger.Error(metricDrainEventError, log.Error(err))
-	service.metric.MetricIncrease(metricDrainEventError)
 }
 
 func (service *HashTagEventService) mointor(interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer func() {
-		service.logger.Info("stop monitor in hash_tag_event service")
+		service.logger.Info(fmt.Sprintf("%s: stop monitor", service.name))
+		ticker.Stop()
 		service.wg.Done()
 	}()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 loop:
 	for {
 		select {
@@ -623,7 +596,6 @@ func (service *HashTagEventService) GetAggregatedEventCount() int64 {
 }
 
 func (service *HashTagEventService) recordStat(metricName string, count int64) {
-	metricName = fmt.Sprintf("%s.%s", service.name, metricName)
 	service.logger.Info(metricName, log.Int64("count", count))
 	service.metric.MetricGauge(metricName, count)
 }
