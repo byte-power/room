@@ -16,17 +16,18 @@ import (
 )
 
 type Config struct {
-	Name                string                            `yaml:"name"`
-	Server              RoomServerConfig                  `yaml:"room_server"`
-	RedisCluster        RedisClusterConfig                `yaml:"redis_cluster"`
-	DBCluster           DBClusterConfig                   `yaml:"db_cluster"`
-	EventService        EventServiceConfig                `yaml:"event_service"`
-	HashTagEventService HashTagEventServiceConfig         `yaml:"hash_tag_event_service"`
-	Metric              MetricConfig                      `yaml:"metric"`
-	Log                 map[string]map[string]interface{} `yaml:"log"`
-	LoadKey             LoadKeyConfig                     `yaml:"load_key"`
-	SyncService         SyncServiceConfig                 `yaml:"sync"`
-	CollectEventService CollectEventServiceConfig         `yaml:"collect_event"`
+	Name                      string                            `yaml:"name"`
+	Server                    RoomServerConfig                  `yaml:"room_server"`
+	RedisCluster              RedisClusterConfig                `yaml:"redis_cluster"`
+	DBCluster                 DBClusterConfig                   `yaml:"db_cluster"`
+	EventService              EventServiceConfig                `yaml:"event_service"`
+	HashTagEventService       HashTagEventServiceConfig         `yaml:"hash_tag_event_service"`
+	Metric                    MetricConfig                      `yaml:"metric"`
+	Log                       map[string]map[string]interface{} `yaml:"log"`
+	LoadKey                   LoadKeyConfig                     `yaml:"load_key"`
+	SyncService               SyncServiceConfig                 `yaml:"sync"`
+	CollectEventService       CollectEventServiceConfig         `yaml:"collect_event"`
+	CollectEventServiceMetric MetricConfig                      `yaml:"collect_event_metric"`
 }
 
 func (config Config) check() error {
@@ -438,9 +439,10 @@ func (config SyncRecordTaskConfig) check() error {
 }
 
 type SyncKeyTaskConfig struct {
-	IntervalMinutes      int    `yaml:"interval_minutes"`
-	Off                  bool   `yaml:"off"`
-	UpSertTryTimes       int    `yaml:"upsert_try_times"`
+	IntervalMinutes int  `yaml:"interval_minutes"`
+	Off             bool `yaml:"off"`
+	UpSertTryTimes  int  `yaml:"upsert_try_times"`
+
 	RawNoWrittenDuration string `yaml:"no_written_duration"`
 	NoWrittenDuration    time.Duration
 }
@@ -456,9 +458,10 @@ func (config SyncKeyTaskConfig) check() error {
 }
 
 type CleanKeyTaskConfig struct {
-	IntervalMinutes     int    `yaml:"interval_minutes"`
+	IntervalMinutes int  `yaml:"interval_minutes"`
+	Off             bool `yaml:"off"`
+
 	RawInactiveDuration string `yaml:"inactive_duration"`
-	Off                 bool   `yaml:"off"`
 	InactiveDuration    time.Duration
 }
 

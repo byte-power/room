@@ -19,6 +19,7 @@ var eventService *EventService
 var hashTagEventService *HashTagEventService
 var metricService *MetricClient
 var taskMetricService *MetricClient
+var collectEventMetricService *MetricClient
 var loggers map[string]*log.Logger
 var serverConfig Config
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -152,6 +153,19 @@ func InitSyncService(configPath string) error {
 	return nil
 }
 
+func InitCollectEventService(configPath string) error {
+	if err := InitBasicDependencies(configPath); err != nil {
+		return err
+	}
+	metricConfig := GetServerConfig().CollectEventServiceMetric
+	metric, err := InitMetric(metricConfig)
+	if err != nil {
+		return err
+	}
+	collectEventMetricService = metric
+	return nil
+}
+
 func GetRedisCluster() *redis.ClusterClient {
 	return redisCluster
 }
@@ -188,8 +202,16 @@ func GetTaskLogger() *log.Logger {
 	return loggers["task"]
 }
 
+func GetCollectEventLogger() *log.Logger {
+	return loggers["collect_event"]
+}
+
 func GetTaskMetricService() *MetricClient {
 	return taskMetricService
+}
+
+func GetCollectEventMetricService() *MetricClient {
+	return collectEventMetricService
 }
 
 func GetServerConfig() Config {

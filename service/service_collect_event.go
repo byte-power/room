@@ -19,6 +19,11 @@ const (
 	HTTPContentTypeJSON   = "application/json"
 )
 
+const (
+	metricEventInBuffer     = "event_in_buffer.total"
+	metricRequestBodyLength = "request_body_length.total"
+)
+
 const CollectEventServiceName = "collect_event_service"
 
 type CollectEventService struct {
@@ -72,12 +77,11 @@ func (service *CollectEventService) Run() {
 	}
 	service.wg.Add(1)
 	go service.mointor(service.config.MonitorInterval)
-
 }
 
 func (service *CollectEventService) startServer() {
 	defer func() {
-		service.logger.Info(fmt.Sprintf("stop %s server", CollectEventServiceName))
+		service.logger.Info(fmt.Sprintf("%s: stop server", CollectEventServiceName))
 		service.wg.Done()
 	}()
 	mux := http.NewServeMux()
@@ -96,16 +100,16 @@ func (service *CollectEventService) startServer() {
 	}()
 
 	<-service.stopCh
-	if err := service.server.Close(); err != nil {
+	if err := service.server.Shutdown(context.TODO()); err != nil {
 		service.recordError("close_server", err, nil)
 	} else {
-		service.logger.Info(fmt.Sprintf("close %s server success", CollectEventServiceName))
+		service.logger.Info(fmt.Sprintf("%s: close server success", CollectEventServiceName))
 	}
 }
 
 func (service *CollectEventService) saveEvents() {
 	defer func() {
-		service.logger.Info(fmt.Sprintf("stop %s save events", CollectEventServiceName))
+		service.logger.Info(fmt.Sprintf("%s: stop save events", CollectEventServiceName))
 		service.wg.Done()
 	}()
 loop:
@@ -166,7 +170,7 @@ func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s buffer is full with limit %d, event %s is discarded",
+			"%s: buffer is full with limit %d, event %s is discarded",
 			CollectEventServiceName, service.config.BufferLimit, event.String())
 	}
 }
@@ -183,9 +187,9 @@ func (service *CollectEventService) AddEvents(events []base.HashTagEvent) error 
 func (service *CollectEventService) Stop() {
 	if atomic.CompareAndSwapInt32(&service.stop, 0, 1) {
 		close(service.stopCh)
+		service.wg.Wait()
+		service.drainEvents()
 	}
-	service.wg.Wait()
-	service.drainEvents()
 }
 
 func (service *CollectEventService) drainEvents() {
@@ -204,16 +208,15 @@ func (service *CollectEventService) drainEvents() {
 func (service *CollectEventService) mointor(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer func() {
-		service.logger.Info(fmt.Sprintf("stop %s monitor", CollectEventServiceName))
+		service.logger.Info(fmt.Sprintf("%s: stop monitor", CollectEventServiceName))
 		ticker.Stop()
 		service.wg.Done()
 	}()
-	metricName := "event_in_buffer"
 loop:
 	for {
 		select {
 		case <-ticker.C:
-			service.recordGauge(metricName, atomic.LoadInt64(&service.eventCountInEventBuffer))
+			service.recordGauge(metricEventInBuffer, atomic.LoadInt64(&service.eventCountInEventBuffer))
 		case <-service.stopCh:
 			break loop
 		}
@@ -221,14 +224,12 @@ loop:
 }
 
 func (service *CollectEventService) recordGauge(metricName string, count int64) {
-	recordName := fmt.Sprintf("%s.%s.total", CollectEventServiceName, metricName)
-	service.logger.Info(recordName, log.Int64("count", count))
+	service.logger.Info(metricName, log.Int64("count", count))
 	service.recordGaugeMetric(metricName, count)
 }
 
 func (service *CollectEventService) recordGaugeMetric(metricName string, count int64) {
-	recordName := fmt.Sprintf("%s.%s.total", CollectEventServiceName, metricName)
-	service.metric.MetricGauge(recordName, count)
+	service.metric.MetricGauge(metricName, count)
 }
 
 func (service *CollectEventService) recordError(reason string, err error, info map[string]string) {
@@ -245,7 +246,7 @@ func (service *CollectEventService) recordError(reason string, err error, info m
 	}
 	service.logger.Error(fmt.Sprintf("%s error", CollectEventServiceName), logPairs...)
 
-	errorMetricName := fmt.Sprintf("%s.error", CollectEventServiceName)
+	errorMetricName := "error"
 	service.metric.MetricIncrease(errorMetricName)
 	specificErrorMetricName := fmt.Sprintf("%s.%s", errorMetricName, reason)
 	service.metric.MetricIncrease(specificErrorMetricName)
@@ -256,8 +257,7 @@ func (service *CollectEventService) recordWriteResponseError(err error, body []b
 	service.recordError(failedReasonWriteToClient, err, map[string]string{"body": string(body)})
 }
 
-func (service *CollectEventService) recordSuccessWithDuration(info string, duration time.Duration) {
-	metricName := fmt.Sprintf("%s.success.%s", CollectEventServiceName, info)
+func (service *CollectEventService) recordSuccessWithDuration(metricName string, duration time.Duration) {
 	service.metric.MetricIncrease(metricName)
 	if duration > time.Duration(0) {
 		durationMetricName := fmt.Sprintf("%s.duration", metricName)
@@ -265,8 +265,7 @@ func (service *CollectEventService) recordSuccessWithDuration(info string, durat
 	}
 }
 
-func (service *CollectEventService) recordSuccessWithCount(info string, count int) {
-	metricName := fmt.Sprintf("%s.success.%s", CollectEventServiceName, info)
+func (service *CollectEventService) recordSuccessWithCount(metricName string, count int) {
 	service.metric.MetricCount(metricName, count)
 }
 
@@ -292,7 +291,7 @@ func (service *CollectEventService) postEventsHandler(writer http.ResponseWriter
 		}
 		return
 	}
-	service.recordGaugeMetric("request_body", int64(len(body)))
+	service.recordGaugeMetric(metricRequestBodyLength, int64(len(body)))
 	requestBodyStruct := CollectEventsRequestBody{}
 	if err = json.Unmarshal(body, &requestBodyStruct); err != nil {
 		service.recordError("unmarshal_body", err, map[string]string{"body": string(body)})

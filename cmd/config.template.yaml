@@ -28,6 +28,9 @@ log:
     task:
       console:
         level: debug
+    collect_event:
+      console:
+        level: debug
 
 
 metric:
@@ -60,6 +63,7 @@ hash_tag_event_service:
   agg_interval : "1m"
   buffer_limit: 10240000
   monitor_interval: "15s"
+
 
 load_key:
   retry_times: 5
@@ -117,6 +121,10 @@ collect_event:
     retry_interval_ms: 20
     timeout_ms: 2000
     worker_count: 2
+
+collect_event_metric:
+    prefix: "bytepower_room.collect_event"
+    host: "127.0.0.1:8125"
 
 sync:
   metric:
