@@ -290,16 +290,6 @@ func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {
 	}
 }
 
-func isKeyValid(key string) bool {
-	leftBraceIndex := strings.Index(key, "{")
-	rightBraceIndex := strings.Index(key, "}")
-	return (leftBraceIndex != -1) && (rightBraceIndex != -1) && (leftBraceIndex+1 < rightBraceIndex)
-}
-
-func getMetaKey(key string) string {
-	return key + ":_meta"
-}
-
 func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 	eventService := base.GetEventService()
 	for _, key := range command.ReadKeys() {
