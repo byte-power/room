@@ -15,7 +15,10 @@ import (
 var errDataFormatError = errors.New("data format is invalid")
 var errLoadKeysLockFailed = errors.New("do not get load lock")
 
-var ErrEmptyHashTag = errors.New("hash tag is empty")
+var (
+	ErrEmptyHashTag      = errors.New("hash tag is empty")
+	ErrAccessAfterRecord = errors.New("hash tag is accessed after recording")
+)
 
 func newParseError(err error) error {
 	return fmt.Errorf("parse value error, %w", err)
@@ -82,7 +85,7 @@ func (tag HashTag) CleanKeysV2(accessedAt time.Time, keys ...string) error {
 	defer tag.releaseLoadLock()
 	t, err := tag.meta.GetAccessTime()
 	if t.After(accessedAt) {
-		return nil
+		return ErrAccessAfterRecord
 	}
 	if err := tag.meta.SetAsCleaned(); err != nil {
 		return err
@@ -228,6 +231,9 @@ func (meta HashTagMetaInfo) UpdateAccessTime(accessTime time.Time, accessMode ba
 	}
 	_, err := meta.dep.Redis.TxPipelined(contextTODO, func(pipeliner redis.Pipeliner) error {
 		pipeliner.HSet(contextTODO, meta.metaKey, values)
+		// if accessMode == base.HashTagAccessModeRead {
+		// 	pipeliner.HSetNX(contextTODO, meta.metaKey, HashTagMetaInfoWriteTimeFieldName, utility.TimestampInMS(accessTime))
+		// }
 		pipeliner.HIncrBy(contextTODO, meta.metaKey, HashTagMetaInfoVersionFieldName, 1)
 		return nil
 	})

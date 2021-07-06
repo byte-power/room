@@ -74,12 +74,18 @@ func recordTaskErrorMetric(taskName string, reasons ...string) {
 	}
 }
 
-func logTaskStart(taskName string, startTime time.Time) {
+func logTaskStart(taskName string, startTime time.Time, pairs ...log.LogPair) {
 	logger := base.GetTaskLogger()
-	logger.Info(
-		"start task",
+	logPairs := []log.LogPair{
 		log.String("task", taskName),
 		log.String("start_time", startTime.String()),
+	}
+	for _, pair := range pairs {
+		logPairs = append(logPairs, pair)
+	}
+	logger.Info(
+		"start task",
+		logPairs...,
 	)
 }
 

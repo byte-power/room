@@ -377,7 +377,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err := upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ := loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	models, _ := loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model := models[0]
 	assert.Equal(t, hashTag, model.HashTag)
@@ -401,7 +401,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model = models[0]
 	assert.Equal(t, hashTag, model.HashTag)
@@ -432,7 +432,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model = models[0]
 	assert.Equal(t, hashTag, model.HashTag)
@@ -454,7 +454,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=", parameter: hashTag})
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model = models[0]
 	assert.Equal(t, hashTag, model.HashTag)

@@ -677,7 +677,7 @@ type dbWhereCondition struct {
 }
 
 func (condition dbWhereCondition) getConditionAndParameter() (string, interface{}) {
-	return fmt.Sprintf("%s%s?", condition.column, condition.operator), condition.parameter
+	return fmt.Sprintf("%s %s", condition.column, condition.operator), condition.parameter
 }
 
 func loadHashTagKeysModelsByCondition(db *base.DBCluster, count int, conditions ...dbWhereCondition) ([]*roomHashTagKeys, error) {
