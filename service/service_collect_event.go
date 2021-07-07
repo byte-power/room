@@ -143,7 +143,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 	for i := 0; i < config.RetryTimes; i++ {
 		err := upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
 		if err != nil {
-			if errors.Is(err, base.DBTxError) {
+			if isRetryErrorForUpdateInTx(err) {
 				service.recordError("save_event_retry", err, map[string]string{"event": event.String()})
 				time.Sleep(retryInterval)
 				continue

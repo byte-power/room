@@ -122,7 +122,7 @@ func upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue, t
 	var err error
 	for i := 0; i < tryTimes; i++ {
 		if err = _upsertRoomData(db, hashTag, key, value); err != nil {
-			if !isRetryErrorForUpdate(err) {
+			if !isRetryErrorForUpdateInTx(err) {
 				return err
 			}
 			continue
@@ -132,12 +132,15 @@ func upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue, t
 	return err
 }
 
-func isRetryErrorForUpdate(err error) bool {
+func isRetryErrorForUpdateInTx(err error) bool {
 	if errors.Is(err, errNoRowsUpdated) {
 		return true
 	}
 	var pgErr pg.Error
 	if errors.As(err, &pgErr) && pgErr.IntegrityViolation() {
+		return true
+	}
+	if errors.Is(err, pg.ErrTxDone) {
 		return true
 	}
 	return false
@@ -191,7 +194,7 @@ func upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]Re
 	var err error
 	for i := 0; i < tryTimes; i++ {
 		if err = _upsertRoomDataValue(db, hashTag, value); err != nil {
-			if !isRetryErrorForUpdate(err) {
+			if !isRetryErrorForUpdateInTx(err) {
 				return err
 			}
 			continue
@@ -201,16 +204,20 @@ func upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]Re
 	return err
 }
 
-func _upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]RedisValue) error {
+func _upsertRoomDataValue(dbCluster *base.DBCluster, hashTag string, value map[string]RedisValue) error {
 	currentTime := time.Now()
 	model := &roomDataModelV2{HashTag: hashTag}
-	query, err := db.Model(model)
+	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
 	if err != nil {
 		return err
 	}
-	err = query.WherePK().Select()
-	if err != nil {
-		if errors.Is(err, pg.ErrNoRows) {
+
+	err = db.RunInTransaction(context.TODO(), func(tx *pg.Tx) error {
+		err := tx.Model(model).Table(tableName).WherePK().Select()
+		if err != nil && !errors.Is(err, pg.ErrNoRows) {
+			return err
+		}
+		if err != nil && errors.Is(err, pg.ErrNoRows) {
 			model = &roomDataModelV2{
 				HashTag:   hashTag,
 				Value:     value,
@@ -218,28 +225,26 @@ func _upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]R
 				UpdatedAt: currentTime,
 				Version:   0,
 			}
-			query, err = db.Model(model)
-			if err != nil {
-				return err
-			}
-			_, err = query.Insert()
+			_, err = tx.Model(model).Table(tableName).Insert()
 			return err
 		}
-		return err
-	}
-	result, err := query.Set("value=?", value).
-		Set("updated_at=?", currentTime).
-		Set("version=?", model.Version+1).
-		WherePK().
-		Where("version=?", model.Version).
-		Update()
-	if err != nil {
-		return err
-	}
-	if result.RowsAffected() == 0 {
-		return errNoRowsUpdated
-	}
-	return nil
+
+		result, err := tx.Model(model).Table(tableName).
+			Set("value=?", value).
+			Set("updated_at=?", currentTime).
+			Set("version=?", model.Version+1).
+			WherePK().
+			Where("version=?", model.Version).
+			Update()
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errNoRowsUpdated
+		}
+		return nil
+	})
+	return err
 }
 
 func deleteRoomData(db *base.DBCluster, hashTag, key string) error {
@@ -613,7 +618,7 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 		return err
 	}
 	err = db.RunInTransaction(ctx, func(tx *pg.Tx) error {
-		err := tx.Model(model).Table(tableName).WherePK().For("UPDATE").Select()
+		err := tx.Model(model).Table(tableName).WherePK().Select()
 		if err != nil && !errors.Is(err, pg.ErrNoRows) {
 			return err
 		}
@@ -655,16 +660,12 @@ func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBClust
 		if err != nil {
 			return err
 		}
-		// This seems will not happen since use lock in `select for update`
 		if result.RowsAffected() != 1 {
-			return base.NewDBTxError(errNoRowsUpdated)
+			return errNoRowsUpdated
 		}
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, pg.ErrTxDone) {
-			return base.NewDBTxError(err)
-		}
 		return err
 	}
 	return nil

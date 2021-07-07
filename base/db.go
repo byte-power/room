@@ -182,28 +182,3 @@ func (d dbLogger) AfterQuery(ctx context.Context, queryEvent *pg.QueryEvent) err
 	}
 	return nil
 }
-
-var DBTxError = errors.New("database transaction error")
-
-type dbTxError struct {
-	err error
-}
-
-func NewDBTxError(err error) error {
-	return &dbTxError{err: err}
-}
-
-func (err *dbTxError) Error() string {
-	if err.err == nil {
-		return ""
-	}
-	return err.err.Error()
-}
-
-func (err *dbTxError) Unwrap() error {
-	return err.err
-}
-
-func (err *dbTxError) Is(target error) bool {
-	return errors.Is(target, DBTxError)
-}

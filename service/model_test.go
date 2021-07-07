@@ -355,7 +355,7 @@ func TestUpsertRoomData(t *testing.T) {
 	close(ch)
 	errorCount := 0
 	for err := range ch {
-		assert.True(t, isRetryErrorForUpdate(err))
+		assert.True(t, isRetryErrorForUpdateInTx(err))
 		errorCount += 1
 	}
 	m, _ = loadDataByID(db, hashTag)
