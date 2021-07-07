@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytepower_room/base"
-	"bytepower_room/utility"
 	"context"
 	"fmt"
 	"sync"
@@ -75,7 +74,7 @@ func TestLoadDataByID(t *testing.T) {
 	// load one item value row
 	hashTag = "hash_tag3"
 	k := "{hash_tag3}a"
-	v := RedisValue{Type: "string", Value: "abcd", SyncedTs: 1234567, ExpireTs: 12345678}
+	v := RedisValue{Type: "string", Value: "abcd", ExpireTs: 12345678}
 	value = map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -93,9 +92,9 @@ func TestLoadDataByID(t *testing.T) {
 	// load multiple items value row
 	hashTag = "hash_tag4"
 	k1 := "{hash_tag4}a"
-	v1 := RedisValue{Type: "string", Value: "abcd", SyncedTs: 1234567, ExpireTs: 12345678}
+	v1 := RedisValue{Type: "string", Value: "abcd", ExpireTs: 12345678}
 	k2 := "{hash_tag4}b"
-	v2 := RedisValue{Type: "string", Value: "xyz", SyncedTs: 1234567890, ExpireTs: currentTime.Unix() * 1000}
+	v2 := RedisValue{Type: "string", Value: "xyz", ExpireTs: currentTime.Unix() * 1000}
 	value = map[string]RedisValue{k1: v1, k2: v2}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -121,7 +120,7 @@ func TestLoadDataByIDWithContext(t *testing.T) {
 	// with background context
 	hashTag := "hash_tag_context_1"
 	k := fmt.Sprintf("{%s}a", hashTag)
-	v := RedisValue{Type: "string", Value: "abcd", SyncedTs: currentTsInMS, ExpireTs: currentTsInMS}
+	v := RedisValue{Type: "string", Value: "abcd", ExpireTs: currentTsInMS}
 	value := map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -139,7 +138,7 @@ func TestLoadDataByIDWithContext(t *testing.T) {
 	// with timeout context
 	hashTag = "hash_taag_context_2"
 	k = fmt.Sprintf("{%s}a", hashTag)
-	v = RedisValue{Type: "string", Value: "abcd", SyncedTs: currentTsInMS, ExpireTs: currentTsInMS}
+	v = RedisValue{Type: "string", Value: "abcd", ExpireTs: currentTsInMS}
 	value = map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -165,9 +164,8 @@ func TestRedisValue(t *testing.T) {
 
 	// test value without expiration
 	value = RedisValue{
-		Type:     "string",
-		Value:    "abcd",
-		SyncedTs: currentTs,
+		Type:  "string",
+		Value: "abcd",
 	}
 	assert.False(t, value.IsZero())
 	assert.False(t, value.IsExpired(currentTime))
@@ -179,7 +177,6 @@ func TestRedisValue(t *testing.T) {
 	value = RedisValue{
 		Type:     "string",
 		Value:    "abcd",
-		SyncedTs: currentTs,
 		ExpireTs: currentTs,
 	}
 	assert.False(t, value.IsZero())
@@ -192,7 +189,6 @@ func TestRedisValue(t *testing.T) {
 	value = RedisValue{
 		Type:     "string",
 		Value:    "abcd",
-		SyncedTs: currentTs,
 		ExpireTs: currentTs - 10,
 	}
 	assert.False(t, value.IsZero())
@@ -205,7 +201,6 @@ func TestRedisValue(t *testing.T) {
 	value = RedisValue{
 		Type:     "string",
 		Value:    "abcd",
-		SyncedTs: currentTs,
 		ExpireTs: currentTs + 10,
 	}
 	assert.False(t, value.IsZero())
@@ -242,13 +237,12 @@ func TestDeleteRoomWrittenRecordModel(t *testing.T) {
 
 func TestDeleteRoomData(t *testing.T) {
 	hashTag := "abc"
-	currentTs := utility.TimestampInMS(time.Now())
 	db := base.GetDBCluster()
 	defer testEmptyRoomDataRecordInDatabase(hashTag)
 	value := map[string]RedisValue{
-		"{abc}a":  {Type: "string", Value: "v", SyncedTs: currentTs},
-		"a{abc}b": {Type: "string", Value: "v", SyncedTs: currentTs},
-		"a{abc}c": {Type: "string", Value: "v", SyncedTs: currentTs},
+		"{abc}a":  {Type: "string", Value: "v"},
+		"a{abc}b": {Type: "string", Value: "v"},
+		"a{abc}c": {Type: "string", Value: "v"},
 	}
 	model := &roomDataModelV2{
 		HashTag: hashTag,
@@ -284,13 +278,12 @@ func TestDeleteRoomData(t *testing.T) {
 
 func TestUpsertRoomData(t *testing.T) {
 	hashTag := "abc"
-	currentTs := utility.TimestampInMS(time.Now())
 	db := base.GetDBCluster()
 	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
 	// upsert key in a not exist hash_tag record
 	key := "{abc}ab"
-	value := RedisValue{Type: "string", Value: "ab", SyncedTs: currentTs}
+	value := RedisValue{Type: "string", Value: "ab"}
 	err := _upsertRoomData(db, hashTag, key, value)
 	assert.Nil(t, err)
 	m, _ := loadDataByID(db, hashTag)
@@ -304,7 +297,7 @@ func TestUpsertRoomData(t *testing.T) {
 
 	// upsert key in an existed hash_tag record
 	key = "{abc}abc"
-	value = RedisValue{Type: "string", Value: "abc", SyncedTs: currentTs}
+	value = RedisValue{Type: "string", Value: "abc"}
 	err = _upsertRoomData(db, hashTag, key, value)
 	assert.Nil(t, err)
 	m, _ = loadDataByID(db, hashTag)
@@ -317,7 +310,7 @@ func TestUpsertRoomData(t *testing.T) {
 	assert.False(t, m.UpdatedAt.IsZero())
 
 	// upsert an existed key in an existed hash_tag record
-	value = RedisValue{Type: "string", Value: "abc_new", SyncedTs: currentTs}
+	value = RedisValue{Type: "string", Value: "abc_new"}
 	err = _upsertRoomData(db, hashTag, key, value)
 	assert.Nil(t, err)
 	m, _ = loadDataByID(db, hashTag)
@@ -337,7 +330,7 @@ func TestUpsertRoomData(t *testing.T) {
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("%d{%s}%d", i, hashTag, i)
 		value := fmt.Sprintf("%d", i)
-		values[key] = RedisValue{Type: "string", Value: value, SyncedTs: currentTs}
+		values[key] = RedisValue{Type: "string", Value: value}
 	}
 	ch := make(chan error, 100)
 	wg := sync.WaitGroup{}

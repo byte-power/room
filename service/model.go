@@ -24,7 +24,6 @@ var supportedRedisDataTypes = []string{stringType, listType, hashType, setType, 
 type RedisValue struct {
 	Type     string `json:"type"`
 	Value    string `json:"value"`
-	SyncedTs int64  `json:"synced_ts"`
 	ExpireTs int64  `json:"expire_ts"`
 }
 
@@ -59,8 +58,8 @@ func (v RedisValue) IsZero() bool {
 
 func (v RedisValue) String() string {
 	return fmt.Sprintf(
-		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
-		v.Type, v.Value, v.SyncedTs, v.ExpireTs)
+		"[RedisValue:type=%s,value=%s,expire_ts=%d]",
+		v.Type, v.Value, v.ExpireTs)
 }
 
 type roomDataModelV2 struct {

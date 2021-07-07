@@ -521,10 +521,7 @@ func getValueFromRedis(key string) (RedisValue, error) {
 		return RedisValue{}, nil
 	}
 
-	value := RedisValue{
-		Type: keyType, Value: keyValue,
-		SyncedTs: utility.TimestampInMS(currentTime),
-	}
+	value := RedisValue{Type: keyType, Value: keyValue}
 
 	if ttl > 0 {
 		value.ExpireTs = utility.TimestampInMS(currentTime.Add(ttl))

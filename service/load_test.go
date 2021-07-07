@@ -120,19 +120,18 @@ func testMergeMaps(m1, m2 map[string]RedisValue) map[string]RedisValue {
 func TestLoadKeyString(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
-	currentTs := utility.TimestampInMS(currentTime)
 	expireTimeValid := currentTime.Add(100 * time.Second)
 	expireTsValid := utility.TimestampInMS(expireTimeValid)
 	expireTimeInvalid := currentTime.Add(-100 * time.Second)
 	expireTsInvalid := utility.TimestampInMS(expireTimeInvalid)
 	validValue := map[string]RedisValue{
-		"{a}:string:expire1":  {Type: stringType, Value: "value1", SyncedTs: currentTs, ExpireTs: expireTsValid},
-		"{a}:string:expire2":  {Type: stringType, Value: "value2", SyncedTs: currentTs, ExpireTs: expireTsValid},
-		"{a}:string:noexpire": {Type: stringType, Value: "value_noexpire", SyncedTs: currentTs, ExpireTs: 0},
+		"{a}:string:expire1":  {Type: stringType, Value: "value1", ExpireTs: expireTsValid},
+		"{a}:string:expire2":  {Type: stringType, Value: "value2", ExpireTs: expireTsValid},
+		"{a}:string:noexpire": {Type: stringType, Value: "value_noexpire", ExpireTs: 0},
 	}
 	expireValue := map[string]RedisValue{
-		"{a}:string:expire3": {Type: stringType, Value: "value3", SyncedTs: currentTs, ExpireTs: expireTsInvalid},
-		"{a}:string:expire4": {Type: stringType, Value: "value4", SyncedTs: currentTs, ExpireTs: expireTsInvalid},
+		"{a}:string:expire3": {Type: stringType, Value: "value3", ExpireTs: expireTsInvalid},
+		"{a}:string:expire4": {Type: stringType, Value: "value4", ExpireTs: expireTsInvalid},
 	}
 	value := testMergeMaps(validValue, expireValue)
 
@@ -221,7 +220,7 @@ func TestLoadKeyList(t *testing.T) {
 		k := item.key
 		defer testEmptyKeysInRedis(k)
 		v := testGenerateListValue(item.count)
-		value[k] = RedisValue{Type: listType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: listType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
@@ -302,7 +301,7 @@ func TestLoadKeyHash(t *testing.T) {
 		defer testEmptyKeysInRedis(k)
 		v, h := testGenerateHashValue(item.count)
 		hashes[k] = h
-		value[k] = RedisValue{Type: hashType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: hashType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
@@ -381,7 +380,7 @@ func TestLoadKeySet(t *testing.T) {
 		defer testEmptyKeysInRedis(k)
 		v, s := testGenerateSetValue(item.count)
 		sets[k] = s
-		value[k] = RedisValue{Type: setType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: setType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
@@ -471,7 +470,7 @@ func TestLoadKeyZSet(t *testing.T) {
 		defer testEmptyKeysInRedis(k)
 		v, s := testGenerateZSetValue(item.count)
 		zsets[k] = s
-		value[k] = RedisValue{Type: zsetType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: zsetType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
