@@ -187,7 +187,6 @@ func testGenerateListValue(count int) string {
 func TestLoadKeyList(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
-	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -265,7 +264,6 @@ func testGenerateHashValue(count int) (string, map[string]string) {
 func TestLoadKeyHash(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
-	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -345,7 +343,6 @@ func testGenerateSetValue(count int) (string, []string) {
 func TestLoadKeySet(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
-	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
@@ -435,7 +432,6 @@ func testGenerateRandFloat(min, max float64) float64 {
 func TestLoadKeyZSet(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
-	currentTs := utility.TimestampInMS(currentTime)
 	testItems := []struct {
 		key   string
 		count int
