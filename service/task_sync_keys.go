@@ -3,7 +3,6 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -61,7 +60,7 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
 						err, "sync_room_data",
 						map[string]string{"hash_tag": model.HashTag, "keys": strings.Join(model.Keys, " ")},
 					)
-					if isRetryErrorForSync(err) {
+					if isRetryErrorForUpdateInTx(err) {
 						continue
 					}
 					return
@@ -101,8 +100,4 @@ func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string, tryTimes
 		return err
 	}
 	return nil
-}
-
-func isRetryErrorForSync(err error) bool {
-	return errors.Is(err, errNoRowsUpdated)
 }
