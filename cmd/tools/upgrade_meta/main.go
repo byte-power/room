@@ -109,7 +109,7 @@ func scanServer(server string, dryRun bool, ch chan<- Result, logger *log.Logger
 		Addr: server,
 	}
 	client := redis.NewClient(options)
-	keyPattern := "}:_m"
+	keyPattern := "*}:_m"
 	var count int64 = 100
 	result := Result{server: server}
 	var cursor uint64 = 0
@@ -158,8 +158,8 @@ loop:
 						break loop
 					}
 					logger.Printf("process key success %s, field %d\n", key, fieldCount)
-					result.processCount += 1
 				}
+				result.processCount += 1
 			} else {
 				result.skipCount += 1
 				logger.Printf("skip key %s\n", key)
@@ -208,7 +208,7 @@ func isMetaKey(key string) bool {
 	return suffix == "_m"
 }
 
-func processKey(client *redis.Client, key string, ts int64) (int, error) {
+func processKey(client *redis.Client, key string, ts int64) (int64, error) {
 	scriptSrc := `
 		if redis.call("hlen", KEYS[1]) ~= 1 then
 			return 0
@@ -220,7 +220,7 @@ func processKey(client *redis.Client, key string, ts int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return result.(int), nil
+	return result.(int64), nil
 }
 
 func loadAccessedRecordModelByID(db *base.DBCluster, hashTag string) (*roomAccessedRecordModelV2, error) {

@@ -56,14 +56,13 @@ func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
 type RedisValue struct {
 	Type     string `json:"type"`
 	Value    string `json:"value"`
-	SyncedTs int64  `json:"synced_ts"`
 	ExpireTs int64  `json:"expire_ts"`
 }
 
 func (v RedisValue) String() string {
 	return fmt.Sprintf(
-		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
-		v.Type, v.Value, v.SyncedTs, v.ExpireTs)
+		"[RedisValue:type=%s,value=%s,expire_ts=%d]",
+		v.Type, v.Value, v.ExpireTs)
 }
 
 type roomDataModelV2 struct {
@@ -117,8 +116,8 @@ func main() {
 	totalProcessCount := 0
 	totalErrorCount := 0
 	logger.Printf(
-		"start to process at %s, table_sharding_count=%d, table_prefix=%s\n",
-		startTime, roomDataTableShardingCount, roomDataTablePrefix)
+		"start to process at %s, dry_run=%t, table_sharding_count=%d, table_prefix=%s\n",
+		startTime, *dryRun, roomDataTableShardingCount, roomDataTablePrefix)
 	for index := 0; index < roomDataTableShardingCount; index++ {
 		startID := ""
 		errorCount := 0
