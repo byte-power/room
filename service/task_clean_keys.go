@@ -60,8 +60,16 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 						"hash_tag": model.HashTag,
 						"keys":     strings.Join(model.Keys, " "),
 					})
-				if errors.Is(err, ErrAccessAfterRecord) {
-					dep.Metric.MetricIncrease(fmt.Sprintf("%s.error.excluded_hash_tag", CleanKeysTaskName))
+				if errors.Is(err, ErrAccessAfterRecord) || isRetryErrorForUpdateInTx(err) {
+					recordTaskErrorV2(
+						dep.Logger, dep.Metric,
+						CleanKeysTaskName, err,
+						"clean_keys.conflict",
+						map[string]string{
+							"hash_tag": model.HashTag,
+							"keys":     strings.Join(model.Keys, " "),
+						},
+					)
 					excludedHashTags = append(excludedHashTags, model.HashTag)
 					continue
 				}
@@ -83,7 +91,6 @@ func cleanHashTagKeys(dep base.Dependency, model *roomHashTagKeys) error {
 	if err != nil {
 		return err
 	}
-	//TODO: return error may mean keys are accessed at the same time.
 	err = model.SetStatusAsCleaned(dep.DB, time.Now())
 	if err != nil {
 		return err
