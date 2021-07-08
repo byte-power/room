@@ -114,13 +114,16 @@ func scanServer(server string, dryRun bool, ch chan<- Result, logger *log.Logger
 	result := Result{server: server}
 	var cursor uint64 = 0
 	var stopCursor uint64 = 0
+	defer func() {
+		ch <- result
+		wg.Done()
+	}()
 	logger.Printf("start to scan redis %s\n", server)
 loop:
 	for {
 		keys, c, err := client.Scan(context.Background(), cursor, keyPattern, count).Result()
 		if err != nil {
 			result.err = err
-			ch <- result
 			logger.Printf("scan error %s\n", err.Error())
 			break loop
 		}
@@ -128,7 +131,6 @@ loop:
 			needToProcess, err := isKeyNeededToProcess(logger, client, key)
 			if err != nil {
 				result.err = err
-				ch <- result
 				logger.Printf("check need process error key %s error %s\n", key, err.Error())
 				break loop
 			}
@@ -138,7 +140,6 @@ loop:
 				model, err := loadAccessedRecordModelByID(db, hashTag)
 				if err != nil {
 					result.err = err
-					ch <- result
 					logger.Printf("load access record error hash_tag %s error %s\n", hashTag, err.Error())
 					break loop
 				}
@@ -153,7 +154,6 @@ loop:
 					fieldCount, err := processKey(client, key, ts)
 					if err != nil {
 						result.err = err
-						ch <- result
 						logger.Printf("process key %s error %s\n", key, err.Error())
 						break loop
 					}
@@ -167,13 +167,11 @@ loop:
 		}
 		logger.Printf("server %s scan cursor %d\n", server, c)
 		if c == stopCursor {
-			ch <- result
 			break loop
 		}
 		cursor = c
 		time.Sleep(100 * time.Millisecond)
 	}
-	wg.Done()
 }
 
 func isKeyNeededToProcess(logger *log.Logger, client *redis.Client, key string) (bool, error) {
