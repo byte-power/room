@@ -184,7 +184,7 @@ func isKeyNeededToProcess(logger *log.Logger, client *redis.Client, key string) 
 		return false, err
 	}
 	logger.Printf("get meta key value %s %+v\n", key, value)
-	if len(value) != 1 {
+	if len(value) == 4 {
 		return false, nil
 	}
 	status, ok := value["status"]
@@ -210,10 +210,10 @@ func isMetaKey(key string) bool {
 
 func processKey(client *redis.Client, key string, ts int64) (int64, error) {
 	scriptSrc := `
-		if redis.call("hlen", KEYS[1]) ~= 1 then
-			return 0
-		end
-		return redis.call("hset", KEYS[1], "at", ARGV[1], "wt", ARGV[1], "v", 0)
+		local at = redis.call("hsetnx", KEYS[1], "at", ARGV[1])
+		local wt = redis.call("hsetnx", KEYS[1], "wt", ARGV[1])
+		local version = redis.call("hsetnx", KEYS[1], "v", 0)
+		return at + wt + version
 	`
 	script := redis.NewScript(scriptSrc)
 	result, err := script.Run(context.TODO(), client, []string{key}, ts).Result()

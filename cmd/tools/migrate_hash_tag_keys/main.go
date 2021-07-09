@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-pg/pg/v10"
+	"github.com/go-redis/redis/v8"
 	"github.com/spf13/pflag"
 )
 
@@ -35,22 +37,6 @@ func (model *roomHashTagKeys) ShardingKey() string {
 
 func (model *roomHashTagKeys) GetTablePrefix() string {
 	return "room_hash_tag_keys"
-}
-
-type roomAccessedRecordModelV2 struct {
-	tableName struct{} `pg:"_"`
-
-	HashTag    string    `pg:"hash_tag,pk"`
-	AccessedAt time.Time `pg:"accessed_at"`
-	CreatedAt  time.Time `pg:"created_at"`
-}
-
-func (model *roomAccessedRecordModelV2) ShardingKey() string {
-	return model.HashTag
-}
-
-func (model *roomAccessedRecordModelV2) GetTablePrefix() string {
-	return "room_accessed_record_v2"
 }
 
 type RedisValue struct {
@@ -106,10 +92,10 @@ func main() {
 	if err := parseAndCheckCommandOptions(); err != nil {
 		logger.Fatalf("command options error %s\n", err)
 	}
-	if err := base.InitSyncService(*configPath); err != nil {
+	if err := base.InitBasicDependencies(*configPath); err != nil {
 		logger.Fatalf("init service error %s\n", err)
 	}
-	dep := base.GetTaskDependency()
+	dep := base.GetServerDependency()
 	roomDataTableShardingCount := dep.DB.GetShardingCount()
 	roomDataTablePrefix := (&roomDataModelV2{}).GetTablePrefix()
 	count := 100
@@ -128,12 +114,12 @@ func main() {
 				logger.Fatalf("load room data models error %s\n", err)
 			}
 			for _, roomDataModel := range roomDataModels {
-				err := processModel(logger, dep.DB, dep.AccessedRecordDB, roomDataModel, *dryRun)
+				isInsert, err := processModel(logger, dep.DB, dep.Redis, roomDataModel, *dryRun)
 				if err != nil {
 					logger.Printf("process error %s hash_tag %s\n", err, roomDataModel.HashTag)
 					errorCount++
 				} else {
-					logger.Printf("process success hash_tag %s\n", roomDataModel.HashTag)
+					logger.Printf("process success hash_tag %s, isInsert=%t\n", roomDataModel.HashTag, isInsert)
 					processCount++
 				}
 			}
@@ -171,118 +157,158 @@ func loadRoomDataModels(db *base.DBCluster, tablePrefix string, tableIndex int, 
 	return models, models[len(models)-1].HashTag, nil
 }
 
-func processModel(logger *log.Logger, db, accessedRecordDB *base.DBCluster, roomDataModel *roomDataModelV2, dryRun bool) error {
-	accessRecordModel, err := loadAccessedRecordModelByID(accessedRecordDB, roomDataModel.HashTag)
-	if err != nil {
-		return err
-	}
+func processModel(logger *log.Logger, db *base.DBCluster, redisClient *redis.ClusterClient, roomDataModel *roomDataModelV2, dryRun bool) (bool, error) {
+	isInsert := false
 	keys := make([]string, 0, len(roomDataModel.Value))
 	for key := range roomDataModel.Value {
 		keys = append(keys, key)
 	}
-	if accessRecordModel == nil || accessRecordModel.AccessedAt.IsZero() {
-		logger.Printf("skip hash_tag %s, accessed record not found\n", roomDataModel.HashTag)
-		return nil
+	metaKey := fmt.Sprintf("{%s}:_m", roomDataModel.HashTag)
+	result, err := redisClient.HMGet(context.TODO(), metaKey, "at", "wt").Result()
+	if err != nil {
+		return isInsert, err
 	}
-	accessedAt := accessRecordModel.AccessedAt
+	var accessedAt time.Time
+	var writtenAt time.Time
+	switch at := result[0].(type) {
+	case string:
+		accessedAt, err = convertMSStringToTime(at)
+		if err != nil {
+			return isInsert, err
+		}
+		accessedAt = accessedAt.Add(1 * time.Second)
+	case nil:
+		logger.Printf("accessed_at not found in meta error:%s\n", metaKey)
+		accessedAt = time.Now()
+	}
+	switch wt := result[1].(type) {
+	case string:
+		writtenAt, err = convertMSStringToTime(wt)
+		if err != nil {
+			return isInsert, err
+		}
+		writtenAt = writtenAt.Add(1 * time.Second)
+	case nil:
+		logger.Printf("written_at not found in meta error:%s\n", metaKey)
+		writtenAt = accessedAt
+	}
 
 	if !dryRun {
-		err = upsertHashTagKeysModel(logger, db, roomDataModel.HashTag, keys, accessedAt)
+		isInsert, err = upsertHashTagKeysModel(logger, db, roomDataModel.HashTag, keys, accessedAt, writtenAt)
 	}
-	return err
+	return isInsert, err
 }
 
-func loadAccessedRecordModelByID(db *base.DBCluster, hashTag string) (*roomAccessedRecordModelV2, error) {
-	model := &roomAccessedRecordModelV2{HashTag: hashTag}
-	query, err := db.Model(model)
+func convertMSStringToTime(s string) (time.Time, error) {
+	ts, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return nil, err
+		return time.Time{}, err
 	}
-	err = query.WherePK().Select()
-	if err != nil {
-		if errors.Is(err, pg.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return model, nil
+	seconds, nanoSeconds := utility.GetSecondsAndNanoSecondsFromTsInMs(ts)
+	return time.Unix(seconds, nanoSeconds), nil
 }
 
-func upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hashTag string, keys []string, t time.Time) error {
+func upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hashTag string, keys []string, accessedAt time.Time, writtenAt time.Time) (bool, error) {
 	retryTimes := 10
+	isInsert := false
 	for i := 0; i < retryTimes; i++ {
-		err := _upsertHashTagKeysModel(logger, dbCluster, hashTag, keys, t)
+		insert, err := _upsertHashTagKeysModel(logger, dbCluster, hashTag, keys, accessedAt, writtenAt)
 		if err != nil {
 			if isRetryError(err) {
 				logger.Printf("retry upsert hash_tag %s, error %s\n", hashTag, err.Error())
 				time.Sleep(50 * time.Millisecond)
 				continue
 			}
-			return err
+			return isInsert, err
 		}
-		logger.Printf("process success no dry run hash_tag %s\n", hashTag)
+		isInsert = insert
 		break
 	}
-	return nil
+	return isInsert, nil
 }
 
 func isRetryError(err error) bool {
-	return errors.Is(err, errNoRowsUpdated) || errors.Is(err, pg.ErrTxDone)
+	if errors.Is(err, errNoRowsUpdated) {
+		return true
+	}
+	var pgErr pg.Error
+	if errors.As(err, &pgErr) && pgErr.IntegrityViolation() {
+		return true
+	}
+	if errors.Is(err, pg.ErrTxDone) {
+		return true
+	}
+	return false
 }
 
-func _upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hashTag string, keys []string, t time.Time) error {
+func _upsertHashTagKeysModel(logger *log.Logger, dbCluster *base.DBCluster, hashTag string, keys []string, accessedAt, writtenAt time.Time) (bool, error) {
 	currentTime := time.Now()
+	isInsert := true
 	model := &roomHashTagKeys{HashTag: hashTag}
 	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
 	if err != nil {
-		return err
+		return false, err
 	}
 	err = db.RunInTransaction(context.TODO(), func(tx *pg.Tx) error {
-		err := tx.Model(model).Table(tableName).WherePK().For("UPDATE").Select()
+		err := tx.Model(model).Table(tableName).WherePK().Select()
 		if err != nil && !errors.Is(err, pg.ErrNoRows) {
 			return err
 		}
 		// Insert new row
 		if err != nil && errors.Is(err, pg.ErrNoRows) {
+			isInsert = true
 			model = &roomHashTagKeys{
 				HashTag:    hashTag,
 				Keys:       keys,
-				AccessedAt: t,
-				WrittenAt:  t,
+				AccessedAt: accessedAt,
+				WrittenAt:  writtenAt,
 				CreatedAt:  currentTime,
 				UpdatedAt:  currentTime,
-				SyncedAt:   t,
-				Status:     service.HashTagKeysStatusSynced,
+				Status:     service.HashTagKeysStatusNeedSynced,
 				Version:    0,
 			}
 			_, err = tx.Model(model).Table(tableName).Insert()
 			if err != nil {
 				return err
 			}
-			logger.Printf("insert hash_tag_keys record hash_tag %s\n", hashTag)
 			return err
 		}
-		// update
-		originKeys := model.Keys
-		model.Keys = utility.MergeStringSliceAndRemoveDuplicateItems(originKeys, keys)
-		model.UpdatedAt = currentTime
+
 		originVersion := model.Version
-		model.Version = originVersion + 1
-		if model.WrittenAt.IsZero() {
-			logger.Printf("update hash_tag_keys record hash_tag %s written_at %s\n", hashTag, t)
-			model.WrittenAt = t
-		}
-		model.AccessedAt = utility.GetLatestTime(model.AccessedAt, t)
+		model.Version = model.Version + 1
 		model.Status = service.HashTagKeysStatusNeedSynced
-		result, err := tx.Model(model).Table(tableName).WherePK().Where("version=?", originVersion).Update()
+		model.UpdatedAt = currentTime
+
+		toBeUpdatedColumns := []string{"version", "status", "updated_at"}
+
+		originKeys := model.Keys
+		newKeys := utility.MergeStringSliceAndRemoveDuplicateItems(originKeys, keys)
+		if len(originKeys) != len(newKeys) {
+			model.Keys = newKeys
+			toBeUpdatedColumns = append(toBeUpdatedColumns, "keys")
+		}
+
+		if model.AccessedAt.IsZero() {
+			model.AccessedAt = accessedAt
+			toBeUpdatedColumns = append(toBeUpdatedColumns, "accessed_at")
+		}
+		if model.WrittenAt.IsZero() {
+			model.WrittenAt = writtenAt
+			toBeUpdatedColumns = append(toBeUpdatedColumns, "written_at")
+		}
+
+		query := tx.Model(model).Table(tableName)
+		for _, column := range toBeUpdatedColumns {
+			query.Column(column)
+		}
+		result, err := query.WherePK().Where("version=?", originVersion).Update()
 		if err != nil {
 			return err
 		}
 		if result.RowsAffected() != 1 {
 			return errNoRowsUpdated
 		}
-		logger.Printf("update hash_tag_keys success hash_tag %s\n", hashTag)
 		return nil
 	})
-	return err
+	return isInsert, err
 }
