@@ -231,10 +231,11 @@ func (meta HashTagMetaInfo) UpdateAccessTime(accessTime time.Time, accessMode ba
 	}
 	_, err := meta.dep.Redis.TxPipelined(contextTODO, func(pipeliner redis.Pipeliner) error {
 		pipeliner.HSet(contextTODO, meta.metaKey, values)
-		// if accessMode == base.HashTagAccessModeRead {
-		// 	pipeliner.HSetNX(contextTODO, meta.metaKey, HashTagMetaInfoWriteTimeFieldName, utility.TimestampInMS(accessTime))
-		// }
-		pipeliner.HIncrBy(contextTODO, meta.metaKey, HashTagMetaInfoVersionFieldName, 1)
+		if accessMode == base.HashTagAccessModeWrite {
+			pipeliner.HIncrBy(contextTODO, meta.metaKey, HashTagMetaInfoVersionFieldName, 1)
+		} else {
+			pipeliner.HSetNX(contextTODO, meta.metaKey, HashTagMetaInfoVersionFieldName, 0)
+		}
 		return nil
 	})
 	return err
