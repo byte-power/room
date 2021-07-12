@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytepower_room/base"
-	"bytepower_room/base/log"
 	"bytepower_room/utility"
 	"context"
 	"errors"
@@ -22,93 +21,9 @@ const (
 
 var supportedRedisDataTypes = []string{stringType, listType, hashType, setType, zsetType}
 
-type roomDataModel struct {
-	tableName struct{} `pg:"_"`
-
-	Key       string    `pg:"key,pk"`
-	Type      string    `pg:"type"`
-	Value     string    `pg:"value,use_zero"`
-	Deleted   bool      `pg:"deleted"`
-	UpdatedAt time.Time `pg:"updated_at"`
-	SyncedAt  time.Time `pg:"synced_at"`
-	ExpireAt  time.Time `pg:"expire_at"`
-	CreatedAt time.Time `pg:"created_at"`
-	Version   int64     `pg:"version"`
-}
-
-func (model *roomDataModel) ShardingKey() string {
-	return model.Key
-}
-
-func (model *roomDataModel) GetTablePrefix() string {
-	return "room_data"
-}
-
-func (model *roomDataModel) IsExpired(t time.Time) bool {
-	if model.ExpireAt.IsZero() {
-		return false
-	}
-	return model.ExpireAt.Before(t)
-}
-
-func loadDataByKey(key string) (*roomDataModel, error) {
-	logger := base.GetServerLogger()
-	dbCluster := base.GetDBCluster()
-	model := &roomDataModel{Key: key}
-	query, err := dbCluster.Model(model)
-	if err != nil {
-		return nil, err
-	}
-	startTime := time.Now()
-	if err := query.WherePK().Where("deleted != ?", true).Select(); err != nil {
-		if errors.Is(err, pg.ErrNoRows) {
-			logger.Info(
-				"query database",
-				log.String("key", key),
-				log.String("duration", time.Since(startTime).String()))
-			return nil, nil
-		}
-		return nil, err
-	}
-	logger.Info(
-		"query database",
-		log.String("key", key),
-		log.String("duration", time.Since(startTime).String()))
-	return model, nil
-}
-
-type clusterRoomDataModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomDataModel
-}
-
-func getClusterModelsFromRoomDataModels(models ...*roomDataModel) ([]clusterRoomDataModel, error) {
-	db := base.GetDBCluster()
-	clusterModelsMap := make(map[string]clusterRoomDataModel)
-	for _, model := range models {
-		tableName, client, err := db.GetTableNameAndDBClientByModel(model)
-		if err != nil {
-			return nil, err
-		}
-		if origin, ok := clusterModelsMap[tableName]; ok {
-			origin.models = append(origin.models, model)
-			clusterModelsMap[tableName] = origin
-		} else {
-			clusterModelsMap[tableName] = clusterRoomDataModel{tableName: tableName, client: client, models: []*roomDataModel{model}}
-		}
-	}
-	clusterModels := make([]clusterRoomDataModel, 0, len(clusterModelsMap))
-	for _, clusterModel := range clusterModelsMap {
-		clusterModels = append(clusterModels, clusterModel)
-	}
-	return clusterModels, nil
-}
-
 type RedisValue struct {
 	Type     string `json:"type"`
 	Value    string `json:"value"`
-	SyncedTs int64  `json:"synced_ts"`
 	ExpireTs int64  `json:"expire_ts"`
 }
 
@@ -143,8 +58,8 @@ func (v RedisValue) IsZero() bool {
 
 func (v RedisValue) String() string {
 	return fmt.Sprintf(
-		"[RedisValue:type=%s,value=%s,synced_ts=%d,expire_ts=%d]",
-		v.Type, v.Value, v.SyncedTs, v.ExpireTs)
+		"[RedisValue:type=%s,value=%s,expire_ts=%d]",
+		v.Type, v.Value, v.ExpireTs)
 }
 
 type roomDataModelV2 struct {
@@ -206,7 +121,7 @@ func upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue, t
 	var err error
 	for i := 0; i < tryTimes; i++ {
 		if err = _upsertRoomData(db, hashTag, key, value); err != nil {
-			if !isRetryErrorForUpdate(err) {
+			if !isRetryErrorForUpdateInTx(err) {
 				return err
 			}
 			continue
@@ -216,12 +131,15 @@ func upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue, t
 	return err
 }
 
-func isRetryErrorForUpdate(err error) bool {
+func isRetryErrorForUpdateInTx(err error) bool {
 	if errors.Is(err, errNoRowsUpdated) {
 		return true
 	}
 	var pgErr pg.Error
 	if errors.As(err, &pgErr) && pgErr.IntegrityViolation() {
+		return true
+	}
+	if errors.Is(err, pg.ErrTxDone) {
 		return true
 	}
 	return false
@@ -269,6 +187,63 @@ func _upsertRoomData(db *base.DBCluster, hashTag, key string, value RedisValue) 
 		return errNoRowsUpdated
 	}
 	return nil
+}
+
+func upsertRoomDataValue(db *base.DBCluster, hashTag string, value map[string]RedisValue, tryTimes int) error {
+	var err error
+	for i := 0; i < tryTimes; i++ {
+		if err = _upsertRoomDataValue(db, hashTag, value); err != nil {
+			if !isRetryErrorForUpdateInTx(err) {
+				return err
+			}
+			continue
+		}
+		break
+	}
+	return err
+}
+
+func _upsertRoomDataValue(dbCluster *base.DBCluster, hashTag string, value map[string]RedisValue) error {
+	currentTime := time.Now()
+	model := &roomDataModelV2{HashTag: hashTag}
+	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
+	if err != nil {
+		return err
+	}
+
+	err = db.RunInTransaction(context.TODO(), func(tx *pg.Tx) error {
+		err := tx.Model(model).Table(tableName).WherePK().Select()
+		if err != nil && !errors.Is(err, pg.ErrNoRows) {
+			return err
+		}
+		if err != nil && errors.Is(err, pg.ErrNoRows) {
+			model = &roomDataModelV2{
+				HashTag:   hashTag,
+				Value:     value,
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
+				Version:   0,
+			}
+			_, err = tx.Model(model).Table(tableName).Insert()
+			return err
+		}
+
+		result, err := tx.Model(model).Table(tableName).
+			Set("value=?", value).
+			Set("updated_at=?", currentTime).
+			Set("version=?", model.Version+1).
+			WherePK().
+			Where("version=?", model.Version).
+			Update()
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return errNoRowsUpdated
+		}
+		return nil
+	})
+	return err
 }
 
 func deleteRoomData(db *base.DBCluster, hashTag, key string) error {
@@ -395,28 +370,6 @@ func getClusterModelsFromWrittenRecordModels(models ...*roomWrittenRecordModel) 
 		clusterModels = append(clusterModels, clusterModel)
 	}
 	return clusterModels, nil
-}
-
-type roomAccessedRecordModel struct {
-	tableName struct{} `pg:"_"`
-
-	Key        string    `pg:"key,pk"`
-	AccessedAt time.Time `pg:"accessed_at"`
-	CreatedAt  time.Time `pg:"created_at"`
-}
-
-func (model *roomAccessedRecordModel) ShardingKey() string {
-	return model.Key
-}
-
-func (model *roomAccessedRecordModel) GetTablePrefix() string {
-	return "room_accessed_record"
-}
-
-type clusterAccessedRecordModel struct {
-	tableName string
-	client    *pg.DB
-	models    []*roomAccessedRecordModel
 }
 
 type roomAccessedRecordModelV2 struct {
@@ -552,4 +505,204 @@ func getClusterModelsFromAccessedRecordModelsV2(models ...*roomAccessedRecordMod
 		clusterModels = append(clusterModels, clusterModel)
 	}
 	return clusterModels, nil
+}
+
+type HashTagKeysStatus string
+
+const (
+	HashTagKeysStatusNeedSynced HashTagKeysStatus = "need_synced"
+	HashTagKeysStatusSynced     HashTagKeysStatus = "synced"
+	HashTagKeysStatusCleaned    HashTagKeysStatus = "cleaned"
+)
+
+type roomHashTagKeys struct {
+	tableName struct{} `pg:"_"`
+
+	HashTag    string            `pg:"hash_tag,pk"`
+	Keys       []string          `pg:"keys,array"`
+	AccessedAt time.Time         `pg:"accessed_at"`
+	WrittenAt  time.Time         `pg:"written_at"`
+	SyncedAt   time.Time         `pg:"synced_at"`
+	CreatedAt  time.Time         `pg:"created_at"`
+	UpdatedAt  time.Time         `pg:"updated_at"`
+	Status     HashTagKeysStatus `pg:"status"`
+	Version    int64             `pg:"version"`
+}
+
+func (model *roomHashTagKeys) ShardingKey() string {
+	return model.HashTag
+}
+
+func (model *roomHashTagKeys) GetTablePrefix() string {
+	return "room_hash_tag_keys"
+}
+
+func (model *roomHashTagKeys) SetStatusAsSynced(db *base.DBCluster, t time.Time) error {
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	result, err := query.Set("status=?", HashTagKeysStatusSynced).
+		Set("synced_at=?", t).
+		Set("updated_at=?", t).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
+
+func (model *roomHashTagKeys) SetStatusAsCleaned(db *base.DBCluster, t time.Time) error {
+	query, err := db.Model(model)
+	if err != nil {
+		return err
+	}
+	result, err := query.Set("status=?", HashTagKeysStatusCleaned).
+		Set("updated_at=?", t).
+		Set("version=?", model.Version+1).
+		WherePK().
+		Where("version=?", model.Version).
+		Update()
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errNoRowsUpdated
+	}
+	return nil
+}
+
+func (model *roomHashTagKeys) updateFromEvent(event base.HashTagEvent) []string {
+	toBeUpdatedColumns := []string{}
+
+	originKeys := model.Keys
+	newKeys := utility.MergeStringSliceAndRemoveDuplicateItems(originKeys, event.Keys.ToSlice())
+	if len(originKeys) != len(newKeys) {
+		model.Keys = newKeys
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "keys")
+	}
+
+	if event.AccessTime.After(model.AccessedAt) {
+		model.AccessedAt = event.AccessTime
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "accessed_at")
+	}
+	if event.WriteTime.After(model.WrittenAt) {
+		model.WrittenAt = event.WriteTime
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "written_at")
+	}
+
+	var newStatus HashTagKeysStatus
+	if (len(originKeys) != len(newKeys)) || !event.WriteTime.IsZero() {
+		newStatus = HashTagKeysStatusNeedSynced
+	} else if model.Status == HashTagKeysStatusCleaned {
+		newStatus = HashTagKeysStatusSynced
+	}
+	if newStatus != "" && newStatus != model.Status {
+		model.Status = newStatus
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "status")
+	}
+	return toBeUpdatedColumns
+}
+
+func upsertHashTagKeysRecordByEvent(ctx context.Context, dbCluster *base.DBCluster, event base.HashTagEvent, currentTime time.Time) error {
+	model := &roomHashTagKeys{HashTag: event.HashTag}
+	tableName, db, err := dbCluster.GetTableNameAndDBClientByModel(model)
+	if err != nil {
+		return err
+	}
+	err = db.RunInTransaction(ctx, func(tx *pg.Tx) error {
+		err := tx.Model(model).Table(tableName).WherePK().Select()
+		if err != nil && !errors.Is(err, pg.ErrNoRows) {
+			return err
+		}
+		// Insert new row
+		if err != nil && errors.Is(err, pg.ErrNoRows) {
+			model = &roomHashTagKeys{
+				HashTag:    event.HashTag,
+				Keys:       event.Keys.ToSlice(),
+				AccessedAt: event.AccessTime,
+				CreatedAt:  currentTime,
+				UpdatedAt:  currentTime,
+				Version:    0,
+			}
+			if !event.WriteTime.IsZero() {
+				model.WrittenAt = event.WriteTime
+			}
+			if event.Keys.Len() == 0 && event.WriteTime.IsZero() {
+				model.Status = HashTagKeysStatusSynced
+			} else {
+				model.Status = HashTagKeysStatusNeedSynced
+			}
+			_, err = tx.Model(model).Table(tableName).Insert()
+			return err
+		}
+		// update
+		originVersion := model.Version
+		toBeUpdatedColumns := model.updateFromEvent(event)
+		if len(toBeUpdatedColumns) == 0 {
+			return nil
+		}
+		model.Version = model.Version + 1
+		model.UpdatedAt = currentTime
+		toBeUpdatedColumns = append(toBeUpdatedColumns, "version", "updated_at")
+		query := tx.Model(model).Table(tableName)
+		for _, column := range toBeUpdatedColumns {
+			query.Column(column)
+		}
+		result, err := query.WherePK().Where("version=?", originVersion).Update()
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() != 1 {
+			return errNoRowsUpdated
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type dbWhereCondition struct {
+	column    string
+	operator  string
+	parameter interface{}
+}
+
+func (condition dbWhereCondition) getConditionAndParameter() (string, interface{}) {
+	return fmt.Sprintf("%s %s", condition.column, condition.operator), condition.parameter
+}
+
+func loadHashTagKeysModelsByCondition(db *base.DBCluster, count int, conditions ...dbWhereCondition) ([]*roomHashTagKeys, error) {
+	shardingCount := db.GetShardingCount()
+	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
+	var models []*roomHashTagKeys
+	for index := 0; index < shardingCount; index++ {
+		query, err := db.Models(&models, tablePrefix, index)
+		if err != nil {
+			return nil, err
+		}
+		for _, condition := range conditions {
+			cond, parameter := condition.getConditionAndParameter()
+			query.Where(cond, parameter)
+		}
+		err = query.Limit(count).Select()
+		if err != nil {
+			if errors.Is(err, pg.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if len(models) > 0 {
+			return models, nil
+		}
+	}
+	return nil, nil
 }

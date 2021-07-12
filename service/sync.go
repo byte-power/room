@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"bytes"
 	"context"
@@ -73,12 +74,18 @@ func recordTaskErrorMetric(taskName string, reasons ...string) {
 	}
 }
 
-func logTaskStart(taskName string, startTime time.Time) {
+func logTaskStart(taskName string, startTime time.Time, pairs ...log.LogPair) {
 	logger := base.GetTaskLogger()
-	logger.Info(
-		"start task",
+	logPairs := []log.LogPair{
 		log.String("task", taskName),
 		log.String("start_time", startTime.String()),
+	}
+	for _, pair := range pairs {
+		logPairs = append(logPairs, pair)
+	}
+	logger.Info(
+		"start task",
+		logPairs...,
 	)
 }
 
@@ -303,7 +310,7 @@ func processAccessFile(content []byte) (map[string]time.Time, map[string]time.Ti
 		if event.AccessMode == base.KeyAccessModeWrite {
 			writtenMap[event.Key] = getLaterTime(writtenMap[event.Key], event.AccessTime)
 		}
-		hashTag := extractHashTagFromKey(event.Key)
+		hashTag := commands.ExtractHashTagFromKey(event.Key)
 		if hashTag != "" {
 			accessedMap[hashTag] = getLaterTime(accessedMap[hashTag], event.AccessTime)
 		}
@@ -360,7 +367,7 @@ func SyncKeysTask(upsertTryTimes int) error {
 		for _, model := range models {
 			time.Sleep(syncKeysIntervalDuration)
 			key := model.Key
-			hashTag, err := NewHashTag(extractHashTagFromKey(key), dep)
+			hashTag, err := NewHashTag(commands.ExtractHashTagFromKey(key), dep)
 			if err != nil {
 				if errors.Is(err, ErrEmptyHashTag) {
 					if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
@@ -391,7 +398,7 @@ func SyncKeysTask(upsertTryTimes int) error {
 			}
 			if status != HashTagStatusLoaded {
 				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
-				if err := Load(hashTag.Name()); err != nil {
+				if err := Load(hashTag.Name(), time.Now(), base.HashTagAccessModeRead); err != nil {
 					recordTaskError(
 						taskName, err, "load_hash_tag",
 						map[string]string{"hash_tag": hashTag.Name()},
@@ -514,10 +521,7 @@ func getValueFromRedis(key string) (RedisValue, error) {
 		return RedisValue{}, nil
 	}
 
-	value := RedisValue{
-		Type: keyType, Value: keyValue,
-		SyncedTs: utility.TimestampInMS(currentTime),
-	}
+	value := RedisValue{Type: keyType, Value: keyValue}
 
 	if ttl > 0 {
 		value.ExpireTs = utility.TimestampInMS(currentTime.Add(ttl))

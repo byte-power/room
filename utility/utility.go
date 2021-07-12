@@ -522,6 +522,14 @@ func (set *StringSet) Add(item string) {
 	set.m[item] = true
 }
 
+func (set *StringSet) AddItems(items ...string) {
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
+	for _, item := range items {
+		set.m[item] = true
+	}
+}
+
 func (set *StringSet) Remove(item string) {
 	set.mutex.Lock()
 	defer set.mutex.Unlock()
@@ -536,6 +544,8 @@ func (set *StringSet) Contains(item string) bool {
 
 func (set *StringSet) ToSlice() []string {
 	items := make([]string, 0, len(set.m))
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
 	for item := range set.m {
 		items = append(items, item)
 	}
@@ -546,6 +556,49 @@ func (set *StringSet) Len() int {
 	set.mutex.Lock()
 	defer set.mutex.Unlock()
 	return len(set.m)
+}
+
+func (set *StringSet) MarshalJSON() ([]byte, error) {
+	return json.Marshal(set.ToSlice())
+}
+
+func (set *StringSet) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	slice := make([]string, 0)
+	if err := json.Unmarshal(data, &slice); err != nil {
+		return err
+	}
+	*set = *NewStringSet(slice...)
+	return nil
+}
+
+func (set *StringSet) Copy() *StringSet {
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
+	m := make(map[string]bool, len(set.m))
+	for key, value := range set.m {
+		m[key] = value
+	}
+	return &StringSet{m: m, mutex: sync.Mutex{}}
+}
+
+func (set *StringSet) Merge(s *StringSet) {
+	slice := s.ToSlice()
+	set.mutex.Lock()
+	defer set.mutex.Unlock()
+	for _, item := range slice {
+		set.m[item] = true
+	}
+}
+
+func MergeStringSet(sets ...*StringSet) *StringSet {
+	set := NewStringSet([]string{}...)
+	for _, s := range sets {
+		set.AddItems(s.ToSlice()...)
+	}
+	return set
 }
 
 func IsTwoStringSliceEqual(s1, s2 []string) bool {
@@ -640,4 +693,29 @@ func SplitSliceBySize(slice []interface{}, size int) ([][]interface{}, error) {
 		slices = append(slices, s)
 	}
 	return slices, nil
+}
+
+func GetLatestTime(times ...time.Time) time.Time {
+	latestTime := time.Time{}
+	for _, t := range times {
+		if t.After(latestTime) {
+			latestTime = t
+		}
+	}
+	return latestTime
+}
+
+func MergeStringSliceAndRemoveDuplicateItems(slices ...[]string) []string {
+	return MergeStringSlicesToStringSet(slices...).ToSlice()
+}
+
+func MergeStringSlicesToStringSet(slices ...[]string) *StringSet {
+	if len(slices) == 0 {
+		return NewStringSet([]string{}...)
+	}
+	set := NewStringSet(slices[0]...)
+	for _, slice := range slices[1:] {
+		set.AddItems(slice...)
+	}
+	return set
 }

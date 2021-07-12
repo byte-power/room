@@ -43,12 +43,34 @@ func main() {
 		job.SetCoordinate(coordinator)
 	}
 
+	syncKeyTaskConfigV2 := base.GetServerConfig().SyncService.SyncKeyTaskV2
+	syncKeyTaskV2 := service.SyncKeysTaskName
+	if !syncKeyTaskConfigV2.Off {
+		job, err := task.Periodic(syncKeyTaskV2, service.SyncKeysTaskV2, syncKeyTaskConfigV2.UpSertTryTimes, syncKeyTaskConfigV2.NoWrittenDuration).EveryMinutes(syncKeyTaskConfigV2.IntervalMinutes).AtSecondInMinute(20)
+		if err != nil {
+			panic(err)
+		}
+		job.SetCoordinate(coordinator)
+	}
+
 	cleanKeyTaskConfig := base.GetServerConfig().SyncService.CleanKeyTask
 	cleanKeyTask := "clean_keys"
 	if !cleanKeyTaskConfig.Off {
 		cleanKeyTaskInterval := cleanKeyTaskConfig.IntervalMinutes
 		inactiveDuration := cleanKeyTaskConfig.InactiveDuration
 		job, err := task.Periodic(cleanKeyTask, service.CleanKeysTask, inactiveDuration).EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
+		if err != nil {
+			panic(err)
+		}
+		job.SetCoordinate(coordinator)
+	}
+
+	cleanKeyTaskConfigV2 := base.GetServerConfig().SyncService.CleanKeyTaskV2
+	cleanKeyTaskV2 := service.CleanKeysTaskName
+	if !cleanKeyTaskConfigV2.Off {
+		cleanKeyTaskInterval := cleanKeyTaskConfigV2.IntervalMinutes
+		inactiveDuration := cleanKeyTaskConfigV2.InactiveDuration
+		job, err := task.Periodic(cleanKeyTaskV2, service.CleanKeysTaskV2, inactiveDuration).EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}

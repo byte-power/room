@@ -233,6 +233,28 @@ func (command *commonCommand) argsToInterfaceSlice() []interface{} {
 	return args
 }
 
+func GetCommnadKeysAccessMode(command Commander) base.HashTagAccessMode {
+	if len(command.WriteKeys()) > 0 {
+		return base.HashTagAccessModeWrite
+	}
+	return base.HashTagAccessModeRead
+}
+
+func CheckAndGetCommandKeysHashTag(command Commander) (string, error) {
+	hashTag := ""
+	for _, key := range append(command.ReadKeys(), command.WriteKeys()...) {
+		tag := ExtractHashTagFromKey(key)
+		if tag == "" {
+			return "", errCommandKeyNoHashTag
+		}
+		if hashTag != "" && tag != hashTag {
+			return "", errCommnandKeysMultipleHashTags
+		}
+		hashTag = tag
+	}
+	return hashTag, nil
+}
+
 func ParseCommand(args []string) (Commander, error) {
 	if len(args) == 0 {
 		return nil, errEmptyCommand
@@ -254,6 +276,18 @@ func ExecuteCommand(command Commander) RESPData {
 	}
 
 	return convertCmdResultToRESPData(cmd)
+}
+
+func ExtractHashTagFromKey(key string) string {
+	leftBraceIndex := strings.Index(key, "{")
+	if leftBraceIndex == -1 {
+		return ""
+	}
+	rightBraceIndex := strings.Index(key[leftBraceIndex:], "}")
+	if rightBraceIndex > 1 {
+		return key[leftBraceIndex+1 : leftBraceIndex+rightBraceIndex]
+	}
+	return ""
 }
 
 func convertCmdResultToRESPData(cmd redis.Cmder) RESPData {

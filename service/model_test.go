@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytepower_room/base"
-	"bytepower_room/utility"
 	"context"
 	"fmt"
 	"sync"
@@ -75,7 +74,7 @@ func TestLoadDataByID(t *testing.T) {
 	// load one item value row
 	hashTag = "hash_tag3"
 	k := "{hash_tag3}a"
-	v := RedisValue{Type: "string", Value: "abcd", SyncedTs: 1234567, ExpireTs: 12345678}
+	v := RedisValue{Type: "string", Value: "abcd", ExpireTs: 12345678}
 	value = map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -93,9 +92,9 @@ func TestLoadDataByID(t *testing.T) {
 	// load multiple items value row
 	hashTag = "hash_tag4"
 	k1 := "{hash_tag4}a"
-	v1 := RedisValue{Type: "string", Value: "abcd", SyncedTs: 1234567, ExpireTs: 12345678}
+	v1 := RedisValue{Type: "string", Value: "abcd", ExpireTs: 12345678}
 	k2 := "{hash_tag4}b"
-	v2 := RedisValue{Type: "string", Value: "xyz", SyncedTs: 1234567890, ExpireTs: currentTime.Unix() * 1000}
+	v2 := RedisValue{Type: "string", Value: "xyz", ExpireTs: currentTime.Unix() * 1000}
 	value = map[string]RedisValue{k1: v1, k2: v2}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -121,7 +120,7 @@ func TestLoadDataByIDWithContext(t *testing.T) {
 	// with background context
 	hashTag := "hash_tag_context_1"
 	k := fmt.Sprintf("{%s}a", hashTag)
-	v := RedisValue{Type: "string", Value: "abcd", SyncedTs: currentTsInMS, ExpireTs: currentTsInMS}
+	v := RedisValue{Type: "string", Value: "abcd", ExpireTs: currentTsInMS}
 	value := map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -139,7 +138,7 @@ func TestLoadDataByIDWithContext(t *testing.T) {
 	// with timeout context
 	hashTag = "hash_taag_context_2"
 	k = fmt.Sprintf("{%s}a", hashTag)
-	v = RedisValue{Type: "string", Value: "abcd", SyncedTs: currentTsInMS, ExpireTs: currentTsInMS}
+	v = RedisValue{Type: "string", Value: "abcd", ExpireTs: currentTsInMS}
 	value = map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
@@ -165,9 +164,8 @@ func TestRedisValue(t *testing.T) {
 
 	// test value without expiration
 	value = RedisValue{
-		Type:     "string",
-		Value:    "abcd",
-		SyncedTs: currentTs,
+		Type:  "string",
+		Value: "abcd",
 	}
 	assert.False(t, value.IsZero())
 	assert.False(t, value.IsExpired(currentTime))
@@ -179,7 +177,6 @@ func TestRedisValue(t *testing.T) {
 	value = RedisValue{
 		Type:     "string",
 		Value:    "abcd",
-		SyncedTs: currentTs,
 		ExpireTs: currentTs,
 	}
 	assert.False(t, value.IsZero())
@@ -192,7 +189,6 @@ func TestRedisValue(t *testing.T) {
 	value = RedisValue{
 		Type:     "string",
 		Value:    "abcd",
-		SyncedTs: currentTs,
 		ExpireTs: currentTs - 10,
 	}
 	assert.False(t, value.IsZero())
@@ -205,7 +201,6 @@ func TestRedisValue(t *testing.T) {
 	value = RedisValue{
 		Type:     "string",
 		Value:    "abcd",
-		SyncedTs: currentTs,
 		ExpireTs: currentTs + 10,
 	}
 	assert.False(t, value.IsZero())
@@ -242,13 +237,12 @@ func TestDeleteRoomWrittenRecordModel(t *testing.T) {
 
 func TestDeleteRoomData(t *testing.T) {
 	hashTag := "abc"
-	currentTs := utility.TimestampInMS(time.Now())
 	db := base.GetDBCluster()
 	defer testEmptyRoomDataRecordInDatabase(hashTag)
 	value := map[string]RedisValue{
-		"{abc}a":  {Type: "string", Value: "v", SyncedTs: currentTs},
-		"a{abc}b": {Type: "string", Value: "v", SyncedTs: currentTs},
-		"a{abc}c": {Type: "string", Value: "v", SyncedTs: currentTs},
+		"{abc}a":  {Type: "string", Value: "v"},
+		"a{abc}b": {Type: "string", Value: "v"},
+		"a{abc}c": {Type: "string", Value: "v"},
 	}
 	model := &roomDataModelV2{
 		HashTag: hashTag,
@@ -284,13 +278,12 @@ func TestDeleteRoomData(t *testing.T) {
 
 func TestUpsertRoomData(t *testing.T) {
 	hashTag := "abc"
-	currentTs := utility.TimestampInMS(time.Now())
 	db := base.GetDBCluster()
 	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
 	// upsert key in a not exist hash_tag record
 	key := "{abc}ab"
-	value := RedisValue{Type: "string", Value: "ab", SyncedTs: currentTs}
+	value := RedisValue{Type: "string", Value: "ab"}
 	err := _upsertRoomData(db, hashTag, key, value)
 	assert.Nil(t, err)
 	m, _ := loadDataByID(db, hashTag)
@@ -304,7 +297,7 @@ func TestUpsertRoomData(t *testing.T) {
 
 	// upsert key in an existed hash_tag record
 	key = "{abc}abc"
-	value = RedisValue{Type: "string", Value: "abc", SyncedTs: currentTs}
+	value = RedisValue{Type: "string", Value: "abc"}
 	err = _upsertRoomData(db, hashTag, key, value)
 	assert.Nil(t, err)
 	m, _ = loadDataByID(db, hashTag)
@@ -317,7 +310,7 @@ func TestUpsertRoomData(t *testing.T) {
 	assert.False(t, m.UpdatedAt.IsZero())
 
 	// upsert an existed key in an existed hash_tag record
-	value = RedisValue{Type: "string", Value: "abc_new", SyncedTs: currentTs}
+	value = RedisValue{Type: "string", Value: "abc_new"}
 	err = _upsertRoomData(db, hashTag, key, value)
 	assert.Nil(t, err)
 	m, _ = loadDataByID(db, hashTag)
@@ -337,7 +330,7 @@ func TestUpsertRoomData(t *testing.T) {
 	for i := 0; i < count; i++ {
 		key := fmt.Sprintf("%d{%s}%d", i, hashTag, i)
 		value := fmt.Sprintf("%d", i)
-		values[key] = RedisValue{Type: "string", Value: value, SyncedTs: currentTs}
+		values[key] = RedisValue{Type: "string", Value: value}
 	}
 	ch := make(chan error, 100)
 	wg := sync.WaitGroup{}
@@ -355,10 +348,115 @@ func TestUpsertRoomData(t *testing.T) {
 	close(ch)
 	errorCount := 0
 	for err := range ch {
-		assert.True(t, isRetryErrorForUpdate(err))
+		assert.True(t, isRetryErrorForUpdateInTx(err))
 		errorCount += 1
 	}
 	m, _ = loadDataByID(db, hashTag)
 	assert.Equal(t, count-1-errorCount, m.Version)
 	assert.Equal(t, count-errorCount, len(m.Value))
+}
+
+func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
+	db := base.GetDBCluster()
+
+	// insert row with read event
+	hashTag := "abc"
+	defer testEmptyHashTagKeysRecordInDB(hashTag)
+	keys := []string{"{abc}a", "{abc}b", "{abc}a", "{abc}c", "{abc}b", "{abc}d"}
+	uniqueKeys := []string{"{abc}a", "{abc}b", "{abc}c", "{abc}d"}
+	currentTime := time.Now()
+	eventTime, _ := time.Parse("2006-01-02 15:04:05", "2021-06-25 11:30:25")
+	event, _ := base.NewHashTagEvent(hashTag, keys, base.HashTagAccessModeRead, eventTime)
+	err := upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ := loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model := models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, uniqueKeys, model.Keys)
+	assert.True(t, model.WrittenAt.IsZero())
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(0), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.Equal(model.CreatedAt))
+
+	// insert row with write event
+	hashTag = "def"
+	defer testEmptyHashTagKeysRecordInDB(hashTag)
+	keys = []string{"{def}a", "{def}b", "{def}a", "{def}c", "{def}b", "{def}d"}
+	uniqueKeys = []string{"{def}a", "{def}b", "{def}c", "{def}d"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 12:35:20")
+	event, _ = base.NewHashTagEvent(hashTag, keys, base.HashTagAccessModeWrite, eventTime)
+	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model = models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, uniqueKeys, model.Keys)
+	assert.True(t, model.WrittenAt.Equal(event.AccessTime))
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(0), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.Equal(model.CreatedAt))
+
+	hashTag = "xyz"
+	defer testEmptyHashTagKeysRecordInDB(hashTag)
+	keys = []string{"{xyz}a", "{xyz}b", "{xyz}a", "{xyz}c"}
+	uniqueKeys = []string{"{xyz}a", "{xyz}b", "{xyz}c"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 13:42:30")
+	event, _ = base.NewHashTagEvent(hashTag, keys, base.HashTagAccessModeRead, eventTime)
+	_ = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+
+	// update row with read keys
+	newKeys := []string{"{xyz}x", "{xyz}y", "{xyz}z", "{xyz}a", "{xyz}b", "{xyz}z"}
+	uniqueNewKeys := []string{"{xyz}x", "{xyz}y", "{xyz}z"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 13:43:25")
+	event, _ = base.NewHashTagEvent(hashTag, newKeys, base.HashTagAccessModeRead, eventTime)
+	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model = models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, append(uniqueKeys, uniqueNewKeys...), model.Keys)
+	assert.True(t, model.WrittenAt.IsZero())
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(1), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.After(model.CreatedAt))
+
+	// update row with write keys
+	newKeys2 := []string{"{xyz}n", "{xyz}m", "{xyz}m", "{xyz}a", "{xyz}b", "{xyz}z", "{xyz}x"}
+	uniqueNewKeys2 := []string{"{xyz}m", "{xyz}n"}
+	currentTime = time.Now()
+	eventTime, _ = time.Parse("2006-01-02 15:04:05", "2021-06-25 13:53:45")
+	event, _ = base.NewHashTagEvent(hashTag, newKeys2, base.HashTagAccessModeWrite, eventTime)
+	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
+	assert.Nil(t, err)
+
+	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	assert.Equal(t, 1, len(models))
+	model = models[0]
+	assert.Equal(t, hashTag, model.HashTag)
+	assert.ElementsMatch(t, append(append(uniqueKeys, uniqueNewKeys...), uniqueNewKeys2...), model.Keys)
+	assert.True(t, model.WrittenAt.Equal(event.AccessTime))
+	assert.True(t, model.AccessedAt.Equal(event.AccessTime))
+	assert.True(t, model.SyncedAt.IsZero())
+	assert.Equal(t, HashTagKeysStatusNeedSynced, model.Status)
+	assert.Equal(t, int64(2), model.Version)
+	assert.True(t, currentTime.Equal(model.UpdatedAt))
+	assert.True(t, currentTime.After(model.CreatedAt))
 }

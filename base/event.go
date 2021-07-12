@@ -12,9 +12,7 @@ import (
 )
 
 var (
-	ErrEventKeyEmpty        = errors.New("key is empty")
-	ErrEventAccessModeEmpty = errors.New("access_mode is empty")
-	ErrEventAccessTimeEmpty = errors.New("access_time is empty")
+	ErrEventKeyEmpty = errors.New("key is empty")
 )
 
 type KeyAccessMode string
@@ -60,7 +58,6 @@ type EventServiceConfig struct {
 
 const (
 	defaultEventServiceWorker          = 2
-	defaultEventServiceBufferLimit     = 16 * 1024 * 1024 // 16M
 	defaultEventServiceBulkSize        = 50
 	defaultEventServiceProcessInterval = "5m"
 	defaultWorkerDrainDuration         = "3s"
@@ -134,11 +131,10 @@ func NewEventService(config EventServiceConfig, logger *log.Logger) (*EventServi
 	logger.Info(
 		"new event service",
 		log.String("config", fmt.Sprintf("%+v", config)))
-	server.startWorkers()
 	return server, nil
 }
 
-func (service *EventService) startWorkers() {
+func (service *EventService) Run() {
 	rand.Seed(time.Now().UnixNano())
 	for i := 0; i < service.config.EventBuffer.WorkerCount; i++ {
 		// add a random duration between [50, 100) ms, avoid workers to report events at the same time.

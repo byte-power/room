@@ -460,7 +460,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	assert.Equal(t, "", value.Type)
 	assert.Equal(t, "", value.Value)
 	assert.Equal(t, int64(0), value.ExpireTs)
-	assert.Equal(t, int64(0), value.SyncedTs)
 
 	// get a string key
 	key = "{b}string"
@@ -473,7 +472,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	assert.Equal(t, stringType, value.Type)
 	assert.Equal(t, stringValue, value.Value)
 	assert.Equal(t, int64(0), value.ExpireTs)
-	assert.Greater(t, value.SyncedTs, int64(0))
 
 	// get a string key with expiration
 	key = "{b}string2"
@@ -485,7 +483,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	assert.Equal(t, stringType, value.Type)
 	assert.Equal(t, stringValue, value.Value)
 	assert.Greater(t, value.ExpireTs, int64(0))
-	assert.Greater(t, value.SyncedTs, int64(0))
 
 	// get a list key
 	key = "{b}list"
@@ -501,7 +498,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	assert.Equal(t, listValue, v)
 
 	assert.Equal(t, int64(0), value.ExpireTs)
-	assert.Greater(t, value.SyncedTs, int64(0))
 
 	// get a set key
 	key = "{b}set"
@@ -520,7 +516,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	}
 
 	assert.Equal(t, int64(0), value.ExpireTs)
-	assert.Greater(t, value.SyncedTs, int64(0))
 
 	// get a hash key
 	key = "{b}hash"
@@ -541,7 +536,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	}
 
 	assert.Equal(t, int64(0), value.ExpireTs)
-	assert.Greater(t, value.SyncedTs, int64(0))
 
 	// get a zset key, with expiration
 	key = "{b}zset"
@@ -571,7 +565,6 @@ func TestGetValueFromRedis(t *testing.T) {
 	}
 
 	assert.Greater(t, value.ExpireTs, int64(0))
-	assert.Greater(t, value.SyncedTs, int64(0))
 }
 
 func TestIsValueEqual(t *testing.T) {
