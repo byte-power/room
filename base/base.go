@@ -23,7 +23,7 @@ var loggers map[string]*log.Logger
 var serverConfig Config
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-func InitBasicDependencies(configPath string) error {
+func initBasicDependencies(configPath string) error {
 	config, err := NewConfigFromFile(configPath)
 	if err != nil {
 		return err
@@ -58,12 +58,6 @@ func InitBasicDependencies(configPath string) error {
 	rdsCluster.AddHook(redisHook)
 	redisCluster = rdsCluster
 
-	databaseCluster, err := NewDBClusterFromConfig(config.DBCluster, GetServerLogger(), GetMetricService())
-	if err != nil {
-		return err
-	}
-	dbCluster = databaseCluster
-
 	d, err := time.ParseDuration(serverConfig.LoadKey.RawRetryInterval)
 	if err != nil {
 		return err
@@ -79,9 +73,15 @@ func InitBasicDependencies(configPath string) error {
 }
 
 func InitRoomService(configPath string) error {
-	if err := InitBasicDependencies(configPath); err != nil {
+	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
+
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetServerLogger(), GetMetricService())
+	if err != nil {
+		return err
+	}
+	dbCluster = databaseCluster
 
 	hashTagEventSrv, err := NewHashTagEventService(serverConfig.HashTagEventService, loggers["server"], metricService)
 	if err != nil {
@@ -103,7 +103,7 @@ func areAllRequiredLoggersConfigured(loggers map[string]map[string]interface{}) 
 }
 
 func InitSyncService(configPath string) error {
-	if err := InitBasicDependencies(configPath); err != nil {
+	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
 	syncServiceConfig := GetServerConfig().SyncService
@@ -112,6 +112,12 @@ func InitSyncService(configPath string) error {
 		return err
 	}
 	taskMetricService = metric
+
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetTaskLogger(), GetTaskMetricService())
+	if err != nil {
+		return err
+	}
+	dbCluster = databaseCluster
 
 	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster, GetTaskLogger(), GetTaskMetricService())
 	if err != nil {
@@ -147,7 +153,7 @@ func InitSyncService(configPath string) error {
 }
 
 func InitCollectEventService(configPath string) error {
-	if err := InitBasicDependencies(configPath); err != nil {
+	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
 	metricConfig := GetServerConfig().CollectEventServiceMetric
@@ -156,6 +162,12 @@ func InitCollectEventService(configPath string) error {
 		return err
 	}
 	collectEventMetricService = metric
+
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetCollectEventLogger(), GetCollectEventMetricService())
+	if err != nil {
+		return err
+	}
+	dbCluster = databaseCluster
 	return nil
 }
 

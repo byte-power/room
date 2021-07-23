@@ -92,7 +92,7 @@ func main() {
 	if err := parseAndCheckCommandOptions(); err != nil {
 		logger.Fatalf("command options error %s\n", err)
 	}
-	if err := base.InitBasicDependencies(*configPath); err != nil {
+	if err := base.InitRoomService(*configPath); err != nil {
 		logger.Fatalf("init service error %s\n", err)
 	}
 	dep := base.GetServerDependency()

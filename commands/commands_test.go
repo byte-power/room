@@ -15,7 +15,7 @@ import (
 
 func TestMain(m *testing.M) {
 	configFile := "../cmd/config.yaml"
-	if err := base.InitBasicDependencies(configFile); err != nil {
+	if err := base.InitRoomService(configFile); err != nil {
 		panic(err)
 	}
 	code := m.Run()
