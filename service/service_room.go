@@ -291,18 +291,6 @@ func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {
 }
 
 func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
-	eventService := base.GetEventService()
-	for _, key := range command.ReadKeys() {
-		if err := eventService.SendReadEvent(key, time.Now()); err != nil {
-			return err
-		}
-	}
-	for _, key := range command.WriteKeys() {
-		if err := eventService.SendWriteEvent(key, time.Now()); err != nil {
-			return err
-		}
-	}
-
 	hashTagEventService := base.GetHashTagEventService()
 	hashTag, err := commands.CheckAndGetCommandKeysHashTag(command)
 	if err != nil {

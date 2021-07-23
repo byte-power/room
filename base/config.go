@@ -20,7 +20,6 @@ type Config struct {
 	Server                    RoomServerConfig                  `yaml:"room_server"`
 	RedisCluster              RedisClusterConfig                `yaml:"redis_cluster"`
 	DBCluster                 DBClusterConfig                   `yaml:"db_cluster"`
-	EventService              EventServiceConfig                `yaml:"event_service"`
 	HashTagEventService       HashTagEventServiceConfig         `yaml:"hash_tag_event_service"`
 	Metric                    MetricConfig                      `yaml:"metric"`
 	Log                       map[string]map[string]interface{} `yaml:"log"`

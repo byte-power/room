@@ -15,7 +15,6 @@ var redisCluster *redis.ClusterClient
 var dbCluster *DBCluster
 var writtenRecordDBCluster *DBCluster
 var accessedRecordDBCluster *DBCluster
-var eventService *EventService
 var hashTagEventService *HashTagEventService
 var metricService *MetricClient
 var taskMetricService *MetricClient
@@ -83,12 +82,6 @@ func InitRoomService(configPath string) error {
 	if err := InitBasicDependencies(configPath); err != nil {
 		return err
 	}
-
-	event, err := NewEventService(serverConfig.EventService, loggers["server"])
-	if err != nil {
-		return err
-	}
-	eventService = event
 
 	hashTagEventSrv, err := NewHashTagEventService(serverConfig.HashTagEventService, loggers["server"], metricService)
 	if err != nil {
@@ -182,10 +175,6 @@ func GetAccessedRecordDBCluster() *DBCluster {
 	return accessedRecordDBCluster
 }
 
-func GetEventService() *EventService {
-	return eventService
-}
-
 func GetHashTagEventService() *HashTagEventService {
 	return hashTagEventService
 }
@@ -219,12 +208,10 @@ func GetServerConfig() Config {
 }
 
 func StartServices() {
-	eventService.Run()
 	hashTagEventService.Run()
 }
 
 func StopServices() {
-	eventService.Stop()
 	hashTagEventService.Stop()
 }
 
