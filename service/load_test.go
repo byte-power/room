@@ -752,7 +752,7 @@ func TestHashTagMetaUpdateAccessTime(t *testing.T) {
 	assert.Equal(t, 3, len(result))
 	assert.Equal(t, HashTagStatusLoaded, result[HashTagMetaInfoStatusFieldName])
 	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoAccessTimeFieldName])
-	assert.Equal(t, "1", result[HashTagMetaInfoVersionFieldName])
+	assert.Equal(t, "0", result[HashTagMetaInfoVersionFieldName])
 
 	// update status, at, version, wt field
 	hashTag = "xyz"
