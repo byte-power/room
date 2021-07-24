@@ -11,13 +11,14 @@ const (
 	metricLoadKeyError                = "error.loadkey"
 	metricLoadKeyRetryError           = "error.loadkey.retry"
 	metricLoadKeyFromDBError          = "error.loadkey.db"
-	metricLoadKeyFromDBNotFoundError  = "error.loadkey.db.not_found"
 	metricLoadKeyIntoRedisError       = "error.loadkey.redis"
 	metricLoadKeyCheckNeedToLoadError = "error.loadkey.check_need_to_load"
 
 	metricLoadKeySuccess                  = "loadkey.success"
 	metricLoadKeySuccessDuration          = "loadkey.duration"
 	metricLoadKeyFromDBSuccess            = "loadkey.db.success"
+	metricLoadKeyFromDBNotFound           = "loadkey.db.not_found"
+	metricLoadKeyFromDBNotFoundDuration   = "loadkey.db.not_found.duration"
 	metricLoadKeyIntoRedisSuccess         = "loadkey.redis.success"
 	metricLoadKeyIntoRedisSuccessDuration = "loadkey.redis.success.duration"
 )
@@ -78,12 +79,9 @@ func recordLoadDBError(logger *log.Logger, hashTag string, duration time.Duratio
 	)
 }
 
-func recordLoadDBRecordNotFound(logger *log.Logger, metric *base.MetricClient, hashTag string) {
-	logger.Error(
-		metricLoadKeyFromDBNotFoundError,
-		log.String("hash_tag", hashTag),
-	)
-	metric.MetricIncrease(metricLoadKeyFromDBNotFoundError)
+func recordLoadDBRecordNotFound(metric *base.MetricClient, hashTag string, duration time.Duration) {
+	metric.MetricIncrease(metricLoadKeyFromDBNotFound)
+	metric.MetricTimeDuration(metricLoadKeyFromDBNotFoundDuration, duration)
 }
 
 func recordLoadIntoRedisError(logger *log.Logger, metric *base.MetricClient, hashTag string, duration time.Duration, count int, err error) {

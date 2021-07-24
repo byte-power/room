@@ -75,7 +75,7 @@ func (input testInsertRoomDataInput) check() error {
 func testSetMetaKeyCleaned(hashTag string) {
 	client := base.GetRedisCluster()
 	metaKey := getHashTagMetaKey(hashTag)
-	client.HSet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName, HashTagStatusCleaned)
+	client.Del(context.TODO(), metaKey)
 }
 
 func TestLoadKeyNotExist(t *testing.T) {
@@ -558,8 +558,8 @@ func TestHashTagCleanKeys(t *testing.T) {
 	assert.Nil(t, err)
 	metaKey := getHashTagMetaKey(tag)
 	defer dep.Redis.Del(context.TODO(), metaKey)
-	status, _ := dep.Redis.HGet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName).Result()
-	assert.Equal(t, HashTagStatusCleaned, status)
+	_, err = dep.Redis.HGet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName).Result()
+	assert.Equal(t, redis.Nil, err)
 	for _, key := range keys {
 		existed, _ := dep.Redis.Exists(context.TODO(), key).Result()
 		assert.Equal(t, int64(0), existed)

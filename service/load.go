@@ -28,7 +28,6 @@ const (
 	loadAndSaveStepSize = 100
 
 	HashTagStatusLoaded                = "L"
-	HashTagStatusCleaned               = "C"
 	HashTagStatusNotExisted            = "N"
 	HashTagMetaInfoStatusFieldName     = "status"
 	HashTagMetaInfoAccessTimeFieldName = "at"
@@ -103,13 +102,7 @@ func (tag HashTag) NeedToLoad() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if status == HashTagStatusLoaded {
-		return false, nil
-	}
-	if status == HashTagStatusNotExisted {
-		return false, nil
-	}
-	return true, nil
+	return status != HashTagStatusLoaded, nil
 }
 
 func (tag HashTag) Load(timeout time.Duration) (bool, int, error) {
@@ -141,11 +134,11 @@ func (tag HashTag) loadKeys(ctx context.Context) (int, error) {
 		recordLoadDBError(tag.dep.Logger, tag.name, time.Since(startTime), err)
 		return count, err
 	}
-	recordLoadDBSuccess(tag.dep.Logger, tag.name, time.Since(startTime))
 	if model == nil {
-		recordLoadDBRecordNotFound(tag.dep.Logger, tag.dep.Metric, tag.name)
+		recordLoadDBRecordNotFound(tag.dep.Metric, tag.name, time.Since(startTime))
 		return count, nil
 	}
+	recordLoadDBSuccess(tag.dep.Logger, tag.name, time.Since(startTime))
 	startTime = time.Now()
 	for key, value := range model.Value {
 		if err := loadKeyToRedis(ctx, tag.dep.Redis, key, value); err != nil {
@@ -242,9 +235,7 @@ func (meta HashTagMetaInfo) UpdateAccessTime(accessTime time.Time, accessMode ba
 }
 
 func (meta HashTagMetaInfo) SetAsCleaned() error {
-	_, err := meta.dep.Redis.HSet(
-		contextTODO, meta.metaKey, HashTagMetaInfoStatusFieldName,
-		HashTagStatusCleaned).Result()
+	_, err := meta.dep.Redis.Del(contextTODO, meta.metaKey).Result()
 	return err
 }
 
