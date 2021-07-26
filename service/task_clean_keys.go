@@ -49,9 +49,11 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 		if len(models) == 0 {
 			break
 		}
-		processCount := 0
+		processHashTagCount := 0
+		processKeyCount := 0
 		for _, model := range models {
-			if err = cleanHashTagKeys(dep, model); err != nil {
+			keyCount, err := cleanHashTagKeys(dep, model)
+			if err != nil {
 				recordTaskErrorV2(
 					dep.Logger, dep.Metric,
 					CleanKeysTaskName, err,
@@ -75,25 +77,37 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 				}
 				return
 			}
-			processCount = processCount + 1
+			processHashTagCount = processHashTagCount + 1
+			processKeyCount = processKeyCount + int(keyCount)
 		}
-		dep.Logger.Info("clean_keys", log.String("task", CleanKeysTaskName), log.Int("count", processCount))
-		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_hashtag.count", CleanKeysTaskName), processCount)
+		dep.Logger.Info(
+			"clean_keys",
+			log.String("task", CleanKeysTaskName),
+			log.Int("hash_tag_count", processHashTagCount),
+			log.Int("key_count", processKeyCount),
+		)
+		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_hashtag.count", CleanKeysTaskName), processHashTagCount)
+		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_key.count", CleanKeysTaskName), processKeyCount)
 	}
 }
 
-func cleanHashTagKeys(dep base.Dependency, model *roomHashTagKeys) error {
+func cleanHashTagKeys(dep base.Dependency, model *roomHashTagKeys) (int64, error) {
 	tag, err := NewHashTag(model.HashTag, dep)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	err = tag.CleanKeysV2(model.AccessedAt, model.Keys...)
+	n, err := tag.CleanKeysV2(model.AccessedAt, model.Keys...)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	err = model.SetStatusAsCleaned(dep.DB, time.Now())
 	if err != nil {
-		return err
+		dep.Logger.Error(
+			"clean_keys.set_hash_tag_keys_model_status",
+			log.String("hash_tag", model.HashTag),
+			log.String("keys", strings.Join(model.Keys, " ")),
+			log.Error(err))
+		return 0, err
 	}
-	return nil
+	return n, nil
 }

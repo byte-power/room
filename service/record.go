@@ -16,6 +16,8 @@ const (
 
 	metricLoadKeySuccess                  = "loadkey.success"
 	metricLoadKeySuccessDuration          = "loadkey.duration"
+	metricLoadKeySuccessNoKeys            = "loadkey.success.nokeys"
+	metricLoadKeySuccessNoKeysDuration    = "loadkey.nokeys.duration"
 	metricLoadKeyFromDBSuccess            = "loadkey.db.success"
 	metricLoadKeyFromDBNotFound           = "loadkey.db.not_found"
 	metricLoadKeyFromDBNotFoundDuration   = "loadkey.db.not_found.duration"
@@ -53,13 +55,18 @@ func recordLoadKeyCheckNeedToLoadError(logger *log.Logger, metric *base.MetricCl
 }
 
 func recordLoadKeySuccess(logger *log.Logger, metric *base.MetricClient, hashTag string, duration time.Duration, count int) {
-	logger.Info(
-		metricLoadKeySuccess,
-		log.String("hash_tag", hashTag),
-		log.Int("count", count),
-		log.String("duration", duration.String()))
-	metric.MetricIncrease(metricLoadKeySuccess)
-	metric.MetricTimeDuration(metricLoadKeySuccessDuration, duration)
+	if count > 0 {
+		logger.Info(
+			metricLoadKeySuccess,
+			log.String("hash_tag", hashTag),
+			log.Int("count", count),
+			log.String("duration", duration.String()))
+		metric.MetricIncrease(metricLoadKeySuccess)
+		metric.MetricTimeDuration(metricLoadKeySuccessDuration, duration)
+	} else {
+		metric.MetricIncrease(metricLoadKeySuccessNoKeys)
+		metric.MetricTimeDuration(metricLoadKeySuccessNoKeysDuration, duration)
+	}
 }
 
 func recordLoadDBSuccess(logger *log.Logger, hashTag string, duration time.Duration) {

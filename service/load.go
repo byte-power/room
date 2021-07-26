@@ -70,27 +70,33 @@ func (tag HashTag) CleanKeys(keys ...string) error {
 		return err
 	}
 	defer tag.releaseLoadLock()
-	if err := tag.meta.SetAsCleaned(); err != nil {
+	err := tag.meta.SetAsCleaned()
+	if err != nil {
 		return err
 	}
-	_, err := tag.dep.Redis.Del(contextTODO, keys...).Result()
+	if len(keys) > 0 {
+		_, err = tag.dep.Redis.Del(contextTODO, keys...).Result()
+	}
 	return err
 }
 
-func (tag HashTag) CleanKeysV2(accessedAt time.Time, keys ...string) error {
+func (tag HashTag) CleanKeysV2(accessedAt time.Time, keys ...string) (int64, error) {
+	var n int64 = 0
 	if err := tag.acquireLoadLock(); err != nil {
-		return err
+		return n, err
 	}
 	defer tag.releaseLoadLock()
 	t, err := tag.meta.GetAccessTime()
 	if t.After(accessedAt) {
-		return ErrAccessAfterRecord
+		return n, ErrAccessAfterRecord
 	}
 	if err := tag.meta.SetAsCleaned(); err != nil {
-		return err
+		return n, err
 	}
-	_, err = tag.dep.Redis.Del(contextTODO, keys...).Result()
-	return err
+	if len(keys) > 0 {
+		n, err = tag.dep.Redis.Del(contextTODO, keys...).Result()
+	}
+	return n, err
 }
 
 func (tag HashTag) GetLoadStatus() (string, error) {
