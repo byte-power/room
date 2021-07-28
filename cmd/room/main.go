@@ -15,7 +15,7 @@ import (
 
 var configPath = pflag.StringP("config", "c", "config.yaml", "config file path")
 var version = pflag.BoolP("version", "v", false, "room version")
-var roomVersion = "1.1.0"
+var roomVersion = "1.2.0"
 
 func main() {
 	pflag.Parse()
