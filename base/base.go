@@ -15,14 +15,15 @@ var redisCluster *redis.ClusterClient
 var dbCluster *DBCluster
 var writtenRecordDBCluster *DBCluster
 var accessedRecordDBCluster *DBCluster
-var eventService *EventService
+var hashTagEventService *HashTagEventService
 var metricService *MetricClient
 var taskMetricService *MetricClient
+var collectEventMetricService *MetricClient
 var loggers map[string]*log.Logger
 var serverConfig Config
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
-func InitServices(configPath string) error {
+func initBasicDependencies(configPath string) error {
 	config, err := NewConfigFromFile(configPath)
 	if err != nil {
 		return err
@@ -57,17 +58,6 @@ func InitServices(configPath string) error {
 	rdsCluster.AddHook(redisHook)
 	redisCluster = rdsCluster
 
-	databaseCluster, err := NewDBClusterFromConfig(config.DBCluster, GetServerLogger(), GetMetricService())
-	if err != nil {
-		return err
-	}
-	dbCluster = databaseCluster
-
-	event, err := NewEventService(config.EventService, loggers["server"])
-	if err != nil {
-		return nil
-	}
-	eventService = event
 	d, err := time.ParseDuration(serverConfig.LoadKey.RawRetryInterval)
 	if err != nil {
 		return err
@@ -82,6 +72,26 @@ func InitServices(configPath string) error {
 	return nil
 }
 
+func InitRoomService(configPath string) error {
+	if err := initBasicDependencies(configPath); err != nil {
+		return err
+	}
+
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetServerLogger(), GetMetricService())
+	if err != nil {
+		return err
+	}
+	dbCluster = databaseCluster
+
+	hashTagEventSrv, err := NewHashTagEventService(serverConfig.HashTagEventService, loggers["server"], metricService)
+	if err != nil {
+		return err
+	}
+	hashTagEventService = hashTagEventSrv
+
+	return nil
+}
+
 func areAllRequiredLoggersConfigured(loggers map[string]map[string]interface{}) bool {
 	requiredLoggerNames := []string{"server", "task"}
 	for _, name := range requiredLoggerNames {
@@ -93,7 +103,7 @@ func areAllRequiredLoggersConfigured(loggers map[string]map[string]interface{}) 
 }
 
 func InitSyncService(configPath string) error {
-	if err := InitServices(configPath); err != nil {
+	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
 	syncServiceConfig := GetServerConfig().SyncService
@@ -102,6 +112,12 @@ func InitSyncService(configPath string) error {
 		return err
 	}
 	taskMetricService = metric
+
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetTaskLogger(), GetTaskMetricService())
+	if err != nil {
+		return err
+	}
+	dbCluster = databaseCluster
 
 	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster, GetTaskLogger(), GetTaskMetricService())
 	if err != nil {
@@ -113,12 +129,45 @@ func InitSyncService(configPath string) error {
 		return err
 	}
 	accessedRecordDBCluster = accessedRecordCluster
+
+	rawNoWrittenDuration := syncServiceConfig.SyncKeyTaskV2.RawNoWrittenDuration
+	duration, err := time.ParseDuration(rawNoWrittenDuration)
+	if err != nil {
+		return err
+	}
+	serverConfig.SyncService.SyncKeyTaskV2.NoWrittenDuration = duration
+
 	rawInactiveDuration := syncServiceConfig.CleanKeyTask.RawInactiveDuration
-	duration, err := time.ParseDuration(rawInactiveDuration)
+	duration, err = time.ParseDuration(rawInactiveDuration)
 	if err != nil {
 		return err
 	}
 	serverConfig.SyncService.CleanKeyTask.InactiveDuration = duration
+	rawInactiveDuration = syncServiceConfig.CleanKeyTaskV2.RawInactiveDuration
+	duration, err = time.ParseDuration(rawInactiveDuration)
+	if err != nil {
+		return err
+	}
+	serverConfig.SyncService.CleanKeyTaskV2.InactiveDuration = duration
+	return nil
+}
+
+func InitCollectEventService(configPath string) error {
+	if err := initBasicDependencies(configPath); err != nil {
+		return err
+	}
+	metricConfig := GetServerConfig().CollectEventServiceMetric
+	metric, err := InitMetric(metricConfig)
+	if err != nil {
+		return err
+	}
+	collectEventMetricService = metric
+
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetCollectEventLogger(), GetCollectEventMetricService())
+	if err != nil {
+		return err
+	}
+	dbCluster = databaseCluster
 	return nil
 }
 
@@ -138,8 +187,8 @@ func GetAccessedRecordDBCluster() *DBCluster {
 	return accessedRecordDBCluster
 }
 
-func GetEventService() *EventService {
-	return eventService
+func GetHashTagEventService() *HashTagEventService {
+	return hashTagEventService
 }
 
 func GetMetricService() *MetricClient {
@@ -154,16 +203,28 @@ func GetTaskLogger() *log.Logger {
 	return loggers["task"]
 }
 
+func GetCollectEventLogger() *log.Logger {
+	return loggers["collect_event"]
+}
+
 func GetTaskMetricService() *MetricClient {
 	return taskMetricService
+}
+
+func GetCollectEventMetricService() *MetricClient {
+	return collectEventMetricService
 }
 
 func GetServerConfig() Config {
 	return serverConfig
 }
 
+func StartServices() {
+	hashTagEventService.Run()
+}
+
 func StopServices() {
-	eventService.Stop()
+	hashTagEventService.Stop()
 }
 
 const (
@@ -230,7 +291,6 @@ type Dependency struct {
 	WrittenRecordDB  *DBCluster
 	Logger           *log.Logger
 	Metric           *MetricClient
-	Event            *EventService
 }
 
 var (
@@ -238,7 +298,6 @@ var (
 	ErrDepDBNull     = errors.New("db service is null")
 	ErrDepLoggerNull = errors.New("logger is null")
 	ErrDepMetricNull = errors.New("metric service is null")
-	ErrDepEventNull  = errors.New("event service is null")
 )
 
 func (dep Dependency) Check() error {
@@ -254,9 +313,6 @@ func (dep Dependency) Check() error {
 	if dep.Metric == nil {
 		return ErrDepMetricNull
 	}
-	if dep.Event == nil {
-		return ErrDepEventNull
-	}
 	return nil
 }
 
@@ -268,7 +324,6 @@ func GetServerDependency() Dependency {
 		WrittenRecordDB:  GetWrittenRecordDBCluster(),
 		Logger:           GetServerLogger(),
 		Metric:           GetMetricService(),
-		Event:            GetEventService(),
 	}
 }
 
@@ -280,6 +335,5 @@ func GetTaskDependency() Dependency {
 		WrittenRecordDB:  GetWrittenRecordDBCluster(),
 		Logger:           GetTaskLogger(),
 		Metric:           GetTaskMetricService(),
-		Event:            GetEventService(),
 	}
 }

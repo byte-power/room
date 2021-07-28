@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"context"
 	"math"
@@ -31,7 +32,7 @@ func TestMain(m *testing.M) {
 
 func testEmptyKeysInRedis(keys ...string) {
 	for _, key := range keys {
-		hashTag := extractHashTagFromKey(key)
+		hashTag := commands.ExtractHashTagFromKey(key)
 		metaKey := getHashTagMetaKey(hashTag)
 		base.GetRedisCluster().Del(contextTODO, key, metaKey)
 	}
@@ -40,6 +41,13 @@ func testEmptyKeysInRedis(keys ...string) {
 func testEmptyRoomDataRecordInDatabase(hashTag string) {
 	db := base.GetDBCluster()
 	model := &roomDataModelV2{HashTag: hashTag}
+	query, _ := db.Model(model)
+	query.WherePK().ForceDelete()
+}
+
+func testEmptyHashTagKeysRecordInDB(hashTag string) {
+	db := base.GetDBCluster()
+	model := &roomHashTagKeys{HashTag: hashTag}
 	query, _ := db.Model(model)
 	query.WherePK().ForceDelete()
 }
@@ -67,14 +75,15 @@ func (input testInsertRoomDataInput) check() error {
 func testSetMetaKeyCleaned(hashTag string) {
 	client := base.GetRedisCluster()
 	metaKey := getHashTagMetaKey(hashTag)
-	client.HSet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName, HashTagStatusCleaned)
+	client.Del(context.TODO(), metaKey)
 }
 
 func TestLoadKeyNotExist(t *testing.T) {
 	hashTag := "a"
+	currentTime := time.Now()
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -111,19 +120,18 @@ func testMergeMaps(m1, m2 map[string]RedisValue) map[string]RedisValue {
 func TestLoadKeyString(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
-	currentTs := utility.TimestampInMS(currentTime)
 	expireTimeValid := currentTime.Add(100 * time.Second)
 	expireTsValid := utility.TimestampInMS(expireTimeValid)
 	expireTimeInvalid := currentTime.Add(-100 * time.Second)
 	expireTsInvalid := utility.TimestampInMS(expireTimeInvalid)
 	validValue := map[string]RedisValue{
-		"{a}:string:expire1":  {Type: stringType, Value: "value1", SyncedTs: currentTs, ExpireTs: expireTsValid},
-		"{a}:string:expire2":  {Type: stringType, Value: "value2", SyncedTs: currentTs, ExpireTs: expireTsValid},
-		"{a}:string:noexpire": {Type: stringType, Value: "value_noexpire", SyncedTs: currentTs, ExpireTs: 0},
+		"{a}:string:expire1":  {Type: stringType, Value: "value1", ExpireTs: expireTsValid},
+		"{a}:string:expire2":  {Type: stringType, Value: "value2", ExpireTs: expireTsValid},
+		"{a}:string:noexpire": {Type: stringType, Value: "value_noexpire", ExpireTs: 0},
 	}
 	expireValue := map[string]RedisValue{
-		"{a}:string:expire3": {Type: stringType, Value: "value3", SyncedTs: currentTs, ExpireTs: expireTsInvalid},
-		"{a}:string:expire4": {Type: stringType, Value: "value4", SyncedTs: currentTs, ExpireTs: expireTsInvalid},
+		"{a}:string:expire3": {Type: stringType, Value: "value3", ExpireTs: expireTsInvalid},
+		"{a}:string:expire4": {Type: stringType, Value: "value4", ExpireTs: expireTsInvalid},
 	}
 	value := testMergeMaps(validValue, expireValue)
 
@@ -136,7 +144,7 @@ func TestLoadKeyString(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	// load data
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -154,7 +162,7 @@ func TestLoadKeyString(t *testing.T) {
 		}
 	}
 
-	for key, _ := range expireValue {
+	for key := range expireValue {
 		_, err := client.Get(testContextTODO, key).Result()
 		assert.Equal(t, redis.Nil, err)
 	}
@@ -178,7 +186,7 @@ func testGenerateListValue(count int) string {
 
 func TestLoadKeyList(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
 	testItems := []struct {
 		key   string
 		count int
@@ -211,13 +219,13 @@ func TestLoadKeyList(t *testing.T) {
 		k := item.key
 		defer testEmptyKeysInRedis(k)
 		v := testGenerateListValue(item.count)
-		value[k] = RedisValue{Type: listType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: listType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -255,7 +263,7 @@ func testGenerateHashValue(count int) (string, map[string]string) {
 
 func TestLoadKeyHash(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
 	testItems := []struct {
 		key   string
 		count int
@@ -291,13 +299,13 @@ func TestLoadKeyHash(t *testing.T) {
 		defer testEmptyKeysInRedis(k)
 		v, h := testGenerateHashValue(item.count)
 		hashes[k] = h
-		value[k] = RedisValue{Type: hashType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: hashType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -334,7 +342,7 @@ func testGenerateSetValue(count int) (string, []string) {
 
 func TestLoadKeySet(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
 	testItems := []struct {
 		key   string
 		count int
@@ -369,13 +377,13 @@ func TestLoadKeySet(t *testing.T) {
 		defer testEmptyKeysInRedis(k)
 		v, s := testGenerateSetValue(item.count)
 		sets[k] = s
-		value[k] = RedisValue{Type: setType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: setType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -423,7 +431,7 @@ func testGenerateRandFloat(min, max float64) float64 {
 
 func TestLoadKeyZSet(t *testing.T) {
 	hashTag := "a"
-	currentTs := utility.TimestampInMS(time.Now())
+	currentTime := time.Now()
 	testItems := []struct {
 		key   string
 		count int
@@ -458,13 +466,13 @@ func TestLoadKeyZSet(t *testing.T) {
 		defer testEmptyKeysInRedis(k)
 		v, s := testGenerateZSetValue(item.count)
 		zsets[k] = s
-		value[k] = RedisValue{Type: zsetType, Value: v, SyncedTs: currentTs, ExpireTs: 0}
+		value[k] = RedisValue{Type: zsetType, Value: v, ExpireTs: 0}
 	}
 
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag)
+	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -491,34 +499,6 @@ func TestLoadKeyZSet(t *testing.T) {
 
 	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
-}
-
-func TestExtractHashTagFromKey(t *testing.T) {
-	cases := []struct {
-		key     string
-		hashTag string
-	}{
-		{"a", ""},
-		{"", ""},
-		{"a}{", ""},
-		{"{}a", ""},
-		{"{a}", "a"},
-		{"{ab}", "ab"},
-		{"{a}b", "a"},
-		{"{ab}c", "ab"},
-		{"{ab}c{d}", "ab"},
-		{"x{ab}c{d}", "ab"},
-		{"a{b}", "b"},
-		{"a{bc}", "bc"},
-		{"a{bc}d", "bc"},
-		{"}{ab}cab", "ab"},
-		{"{}{abc}xy", ""},
-		{"{{abc}}xy", "{abc"},
-	}
-	for _, c := range cases {
-		hashTag := extractHashTagFromKey(c.key)
-		assert.Equal(t, c.hashTag, hashTag)
-	}
 }
 
 func TestHashTagLockRequireAndRelease(t *testing.T) {
@@ -578,8 +558,8 @@ func TestHashTagCleanKeys(t *testing.T) {
 	assert.Nil(t, err)
 	metaKey := getHashTagMetaKey(tag)
 	defer dep.Redis.Del(context.TODO(), metaKey)
-	status, _ := dep.Redis.HGet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName).Result()
-	assert.Equal(t, HashTagStatusCleaned, status)
+	_, err = dep.Redis.HGet(context.TODO(), metaKey, HashTagMetaInfoStatusFieldName).Result()
+	assert.Equal(t, redis.Nil, err)
 	for _, key := range keys {
 		existed, _ := dep.Redis.Exists(context.TODO(), key).Result()
 		assert.Equal(t, int64(0), existed)
@@ -746,7 +726,8 @@ func TestLoadZsetToRedis(t *testing.T) {
 }
 
 func TestHashTagLoadWithTimeout(t *testing.T) {
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Nanosecond)
+	defer cancel()
 	time.Sleep(10 * time.Nanosecond)
 
 	tag := "abc"
@@ -755,4 +736,50 @@ func TestHashTagLoadWithTimeout(t *testing.T) {
 	count, err := hashTag.loadKeys(ctx)
 	assert.Equal(t, context.DeadlineExceeded, err)
 	assert.Equal(t, 0, count)
+}
+
+func TestHashTagMetaUpdateAccessTime(t *testing.T) {
+	dep := base.GetServerDependency()
+	// update status, at, version field
+	hashTag := "abc"
+	meta, _ := NewHashTagMetaInfo(hashTag, dep)
+	defer testEmptyKeysInRedis(meta.metaKey)
+	accessTime := time.Now()
+	accessTs := utility.TimestampInMS(accessTime)
+	err := meta.UpdateAccessTime(accessTime, base.HashTagAccessModeRead)
+	assert.Nil(t, err)
+	result, _ := dep.Redis.HGetAll(context.TODO(), meta.metaKey).Result()
+	assert.Equal(t, 3, len(result))
+	assert.Equal(t, HashTagStatusLoaded, result[HashTagMetaInfoStatusFieldName])
+	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoAccessTimeFieldName])
+	assert.Equal(t, "0", result[HashTagMetaInfoVersionFieldName])
+
+	// update status, at, version, wt field
+	hashTag = "xyz"
+	meta, _ = NewHashTagMetaInfo(hashTag, dep)
+	defer testEmptyKeysInRedis(meta.metaKey)
+	accessTime = time.Now()
+	accessTs = utility.TimestampInMS(accessTime)
+	err = meta.UpdateAccessTime(accessTime, base.HashTagAccessModeWrite)
+	assert.Nil(t, err)
+	result, _ = dep.Redis.HGetAll(context.TODO(), meta.metaKey).Result()
+	assert.Equal(t, 4, len(result))
+	assert.Equal(t, HashTagStatusLoaded, result[HashTagMetaInfoStatusFieldName])
+	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoAccessTimeFieldName])
+	assert.Equal(t, fmt.Sprintf("%d", accessTs), result[HashTagMetaInfoWriteTimeFieldName])
+	assert.Equal(t, "1", result[HashTagMetaInfoVersionFieldName])
+}
+
+func TestHashTagMetaGetAccessTime(t *testing.T) {
+	dep := base.GetServerDependency()
+	hashTag := "abc"
+	meta, _ := NewHashTagMetaInfo(hashTag, dep)
+	defer testEmptyKeysInRedis(meta.metaKey)
+	accessTime := time.Now()
+	accessTs := utility.TimestampInMS(accessTime)
+	_ = meta.UpdateAccessTime(accessTime, base.HashTagAccessModeRead)
+
+	lastAccessTime, err := meta.GetAccessTime()
+	assert.Nil(t, err)
+	assert.Equal(t, accessTs, lastAccessTime.UnixNano()/1000/1000)
 }

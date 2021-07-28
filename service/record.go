@@ -3,19 +3,24 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"fmt"
 	"time"
 )
 
 const (
-	metricLoadKeyError               = "error.loadkey"
-	metricLoadKeyRetryError          = "error.loadkey.retry"
-	metricLoadKeyFromDBError         = "error.loadkey.db"
-	metricLoadKeyFromDBNotFoundError = "error.loadkey.db.not_found"
-	metricLoadKeyIntoRedisError      = "error.loadkey.redis"
+	metricLoadKeyError                = "error.loadkey"
+	metricLoadKeyRetryError           = "error.loadkey.retry"
+	metricLoadKeyFromDBError          = "error.loadkey.db"
+	metricLoadKeyIntoRedisError       = "error.loadkey.redis"
+	metricLoadKeyCheckNeedToLoadError = "error.loadkey.check_need_to_load"
 
 	metricLoadKeySuccess                  = "loadkey.success"
 	metricLoadKeySuccessDuration          = "loadkey.duration"
+	metricLoadKeySuccessNoKeys            = "loadkey.success.nokeys"
+	metricLoadKeySuccessNoKeysDuration    = "loadkey.nokeys.duration"
 	metricLoadKeyFromDBSuccess            = "loadkey.db.success"
+	metricLoadKeyFromDBNotFound           = "loadkey.db.not_found"
+	metricLoadKeyFromDBNotFoundDuration   = "loadkey.db.not_found.duration"
 	metricLoadKeyIntoRedisSuccess         = "loadkey.redis.success"
 	metricLoadKeyIntoRedisSuccessDuration = "loadkey.redis.success.duration"
 )
@@ -40,14 +45,28 @@ func recordLoadKeyRetryError(logger *log.Logger, metric *base.MetricClient, hash
 	metric.MetricIncrease(metricLoadKeyRetryError)
 }
 
-func recordLoadKeySuccess(logger *log.Logger, metric *base.MetricClient, hashTag string, duration time.Duration, count int) {
-	logger.Info(
-		metricLoadKeySuccess,
+func recordLoadKeyCheckNeedToLoadError(logger *log.Logger, metric *base.MetricClient, hashTag string, err error) {
+	logger.Error(
+		metricLoadKeyCheckNeedToLoadError,
 		log.String("hash_tag", hashTag),
-		log.Int("count", count),
-		log.String("duration", duration.String()))
-	metric.MetricIncrease(metricLoadKeySuccess)
-	metric.MetricTimeDuration(metricLoadKeySuccessDuration, duration)
+		log.Error(err),
+	)
+	metric.MetricIncrease(metricLoadKeyCheckNeedToLoadError)
+}
+
+func recordLoadKeySuccess(logger *log.Logger, metric *base.MetricClient, hashTag string, duration time.Duration, count int) {
+	if count > 0 {
+		logger.Info(
+			metricLoadKeySuccess,
+			log.String("hash_tag", hashTag),
+			log.Int("count", count),
+			log.String("duration", duration.String()))
+		metric.MetricIncrease(metricLoadKeySuccess)
+		metric.MetricTimeDuration(metricLoadKeySuccessDuration, duration)
+	} else {
+		metric.MetricIncrease(metricLoadKeySuccessNoKeys)
+		metric.MetricTimeDuration(metricLoadKeySuccessNoKeysDuration, duration)
+	}
 }
 
 func recordLoadDBSuccess(logger *log.Logger, hashTag string, duration time.Duration) {
@@ -67,12 +86,9 @@ func recordLoadDBError(logger *log.Logger, hashTag string, duration time.Duratio
 	)
 }
 
-func recordLoadDBRecordNotFound(logger *log.Logger, metric *base.MetricClient, hashTag string) {
-	logger.Error(
-		metricLoadKeyFromDBNotFoundError,
-		log.String("hash_tag", hashTag),
-	)
-	metric.MetricIncrease(metricLoadKeyFromDBNotFoundError)
+func recordLoadDBRecordNotFound(metric *base.MetricClient, hashTag string, duration time.Duration) {
+	metric.MetricIncrease(metricLoadKeyFromDBNotFound)
+	metric.MetricTimeDuration(metricLoadKeyFromDBNotFoundDuration, duration)
 }
 
 func recordLoadIntoRedisError(logger *log.Logger, metric *base.MetricClient, hashTag string, duration time.Duration, count int, err error) {
@@ -95,4 +111,61 @@ func recordLoadIntoRedisSuccess(logger *log.Logger, metric *base.MetricClient, h
 	)
 	metric.MetricIncrease(metricLoadKeyIntoRedisSuccess)
 	metric.MetricTimeDuration(metricLoadKeyIntoRedisSuccessDuration, duration)
+}
+
+func recordTaskErrorV2(logger *log.Logger, metric *base.MetricClient, taskName string, err error, reason string, ctxInfo map[string]string) {
+	recordTaskErrorLog2(logger, taskName, err, reason, ctxInfo)
+	recordTaskErrorMetric2(metric, taskName, reason)
+}
+
+func recordTaskErrorLog2(logger *log.Logger, taskName string, err error, reason string, ctxInfo map[string]string) {
+	logPairs := make([]log.LogPair, 0)
+	logPairs = append(logPairs, log.String("task", taskName))
+	if reason != "" {
+		logPairs = append(logPairs, log.String("reason", reason))
+	}
+	for key, value := range ctxInfo {
+		logPairs = append(logPairs, log.String(key, value))
+	}
+	if err != nil {
+		logPairs = append(logPairs, log.Error(err))
+	}
+	logger.Error("task error", logPairs...)
+}
+
+func recordTaskErrorMetric2(metric *base.MetricClient, taskName string, reasons ...string) {
+	metricName := fmt.Sprintf("%s.error", taskName)
+	metric.MetricIncrease(metricName)
+	for _, reason := range reasons {
+		errorMetricName := fmt.Sprintf("%s.%s", metricName, reason)
+		metric.MetricIncrease(errorMetricName)
+	}
+}
+
+func recordTaskSuccessV2(logger *log.Logger, metric *base.MetricClient, taskName string, d time.Duration) {
+	recordTaskSuccessLogV2(logger, taskName, d)
+	recordTaskSuccessMetricV2(metric, taskName, d)
+}
+
+func recordTaskSuccessLogV2(logger *log.Logger, taskName string, d time.Duration) {
+	logger.Info(
+		"task success",
+		log.String("task", taskName),
+		log.String("duration", d.String()),
+	)
+}
+
+func recordTaskSuccessMetricV2(metric *base.MetricClient, taskName string, d time.Duration) {
+	metricName := fmt.Sprintf("%s.success", taskName)
+	metric.MetricIncrease(metricName)
+	if d != time.Duration(0) {
+		durationMetricName := fmt.Sprintf("%s.duration", metricName)
+		metric.MetricTimeDuration(durationMetricName, d)
+	}
+}
+
+func recordTaskSuccessInfo(logger *log.Logger, metric *base.MetricClient, taskName string, info string, count int) {
+	metricName := fmt.Sprintf("%s.success.%s", taskName, info)
+	logger.Info(metricName, log.Int("count", count))
+	metric.MetricCount(metricName, count)
 }

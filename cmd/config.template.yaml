@@ -28,24 +28,30 @@ log:
     task:
       console:
         level: debug
+    collect_event:
+      console:
+        level: debug
 
 
 metric:
   prefix: "bytepower_room.service"
   host: "127.0.0.1:8125"
 
-# vector, collect access information
-event_service:
-  tcp:
-    dsn: "127.0.0.1:7006"
-    timeout: 3
-    write_timeout: 0
-  event_buffer:
-    buffer_limit: 1024
-    worker_count: 3
-    worker_process_bulk_size: 50
-    worker_process_interval: 1m
-    worker_drain_duration: 5s
+
+hash_tag_event_service:
+  event_report:
+    url: "http://127.0.0.1:8080/events"
+    request_timeout: "3ms"
+    request_max_event: 10
+    request_max_wait_duration: "5s"
+    request_worker_count: 3
+    request_conn_keep_alive_interval: "30s"
+    request_idle_conn_timeout: "90s"
+    request_max_conn: 100
+  agg_interval : "1m"
+  buffer_limit: 10240000
+  monitor_interval: "15s"
+
 
 load_key:
   retry_times: 5
@@ -89,6 +95,25 @@ db_cluster:
 
         start_index: 2
         end_index: 4
+
+collect_event:
+  buffer_limit: 10240000
+  monitor_interval: "15s"
+  server:
+    url: "127.0.0.1:8080"
+    read_timeout_ms: 1000
+    write_timeout_ms: 1000
+    idle_timeout_ms: 1000
+  save_event:
+    retry_times: 3
+    retry_interval_ms: 20
+    timeout_ms: 2000
+    worker_count: 2
+
+collect_event_metric:
+    prefix: "bytepower_room.collect_event"
+    host: "127.0.0.1:8125"
+
 sync:
   metric:
     prefix: "bytepower_room.task"
@@ -192,6 +217,16 @@ sync:
     upsert_try_times: 3
     off: false
   clean_key_task:
+    interval_minutes: 10
+    # Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
+    inactive_duration: 2h
+    off: false
+  sync_key_task_v2:
+    interval_minutes: 5
+    upsert_try_times: 3
+    no_written_duration: 1h
+    off: false
+  clean_key_task_v2:
     interval_minutes: 10
     # Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
     inactive_duration: 2h

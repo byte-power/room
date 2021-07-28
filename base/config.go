@@ -16,22 +16,24 @@ import (
 )
 
 type Config struct {
-	Name         string                            `yaml:"name"`
-	Server       RoomServerConfig                  `yaml:"room_server"`
-	RedisCluster RedisClusterConfig                `yaml:"redis_cluster"`
-	DBCluster    DBClusterConfig                   `yaml:"db_cluster"`
-	EventService EventServiceConfig                `yaml:"event_service"`
-	Metric       MetricConfig                      `yaml:"metric"`
-	Log          map[string]map[string]interface{} `yaml:"log"`
-	LoadKey      LoadKeyConfig                     `yaml:"load_key"`
-	SyncService  SyncServiceConfig                 `yaml:"sync"`
+	Name                      string                            `yaml:"name"`
+	Server                    RoomServerConfig                  `yaml:"room_server"`
+	RedisCluster              RedisClusterConfig                `yaml:"redis_cluster"`
+	DBCluster                 DBClusterConfig                   `yaml:"db_cluster"`
+	HashTagEventService       HashTagEventServiceConfig         `yaml:"hash_tag_event_service"`
+	Metric                    MetricConfig                      `yaml:"metric"`
+	Log                       map[string]map[string]interface{} `yaml:"log"`
+	LoadKey                   LoadKeyConfig                     `yaml:"load_key"`
+	SyncService               SyncServiceConfig                 `yaml:"sync"`
+	CollectEventService       CollectEventServiceConfig         `yaml:"collect_event"`
+	CollectEventServiceMetric MetricConfig                      `yaml:"collect_event_metric"`
 }
 
 func (config Config) check() error {
 	if config.Name == "" {
 		return errors.New("config.name should not be empty")
 	}
-	if err := config.Server.check(); err != nil {
+	if err := config.Server.Check(); err != nil {
 		return fmt.Errorf("config.%w", err)
 	}
 	if err := config.RedisCluster.check(); err != nil {
@@ -52,6 +54,9 @@ func (config Config) check() error {
 	if err := config.SyncService.check(); err != nil {
 		return fmt.Errorf("config.%w", err)
 	}
+	if err := config.CollectEventService.check(); err != nil {
+		return fmt.Errorf("config.%w", err)
+	}
 	return nil
 }
 
@@ -60,7 +65,7 @@ type RoomServerConfig struct {
 	PProfURL string `yaml:"pprof_url"`
 }
 
-func (config RoomServerConfig) check() error {
+func (config RoomServerConfig) Check() error {
 	if config.URL == "" {
 		return errors.New("room_service.url should not be empty")
 	}
@@ -299,7 +304,9 @@ type SyncServiceConfig struct {
 	Coordinator             CoordinatorConfig    `yaml:"coordinator"`
 	SyncRecordTask          SyncRecordTaskConfig `yaml:"sync_record_task"`
 	SyncKeyTask             SyncKeyTaskConfig    `yaml:"sync_key_task"`
+	SyncKeyTaskV2           SyncKeyTaskConfig    `yaml:"sync_key_task_v2"`
 	CleanKeyTask            CleanKeyTaskConfig   `yaml:"clean_key_task"`
+	CleanKeyTaskV2          CleanKeyTaskConfig   `yaml:"clean_key_task_v2"`
 }
 
 func (config SyncServiceConfig) check() error {
@@ -327,7 +334,13 @@ func (config SyncServiceConfig) check() error {
 	if err := config.SyncKeyTask.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
+	if err := config.SyncKeyTaskV2.check(); err != nil {
+		return fmt.Errorf("sync.%w", err)
+	}
 	if err := config.CleanKeyTask.check(); err != nil {
+		return fmt.Errorf("sync.%w", err)
+	}
+	if err := config.CleanKeyTaskV2.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
 	return nil
@@ -428,6 +441,9 @@ type SyncKeyTaskConfig struct {
 	IntervalMinutes int  `yaml:"interval_minutes"`
 	Off             bool `yaml:"off"`
 	UpSertTryTimes  int  `yaml:"upsert_try_times"`
+
+	RawNoWrittenDuration string `yaml:"no_written_duration"`
+	NoWrittenDuration    time.Duration
 }
 
 func (config SyncKeyTaskConfig) check() error {
@@ -441,9 +457,10 @@ func (config SyncKeyTaskConfig) check() error {
 }
 
 type CleanKeyTaskConfig struct {
-	IntervalMinutes     int    `yaml:"interval_minutes"`
+	IntervalMinutes int  `yaml:"interval_minutes"`
+	Off             bool `yaml:"off"`
+
 	RawInactiveDuration string `yaml:"inactive_duration"`
-	Off                 bool   `yaml:"off"`
 	InactiveDuration    time.Duration
 }
 
@@ -453,6 +470,94 @@ func (config CleanKeyTaskConfig) check() error {
 	}
 	if config.RawInactiveDuration == "" {
 		return errors.New("clean_key_task.inactive_duration should not be empty")
+	}
+	return nil
+}
+
+type CollectEventServiceConfig struct {
+	Server    CollectEventServiceServerConfig    `yaml:"server"`
+	SaveEvent CollectEventServiceSaveEventConfig `yaml:"save_event"`
+
+	BufferLimit int `yaml:"buffer_limit"`
+
+	RawMonitorInterval string `yaml:"monitor_interval"`
+	MonitorInterval    time.Duration
+}
+
+func (config CollectEventServiceConfig) check() error {
+	prefix := "collect_event"
+	if err := config.Server.check(); err != nil {
+		return fmt.Errorf("%s.%w", prefix, err)
+	}
+	if err := config.SaveEvent.check(); err != nil {
+		return fmt.Errorf("%s.%w", prefix, err)
+	}
+	if config.BufferLimit <= 0 {
+		return fmt.Errorf("%s.buffer_limit is %d, it should be greater than 0", prefix, config.BufferLimit)
+	}
+	if config.RawMonitorInterval == "" {
+		return fmt.Errorf("%s.monitor_interval should not be empty", prefix)
+	}
+	return nil
+}
+
+func (config *CollectEventServiceConfig) Init() error {
+	prefix := "collect_event"
+	if err := config.check(); err != nil {
+		return err
+	}
+
+	duration, err := time.ParseDuration(config.RawMonitorInterval)
+	if err != nil {
+		return fmt.Errorf("%s.monitor_interval is inavlid %w", prefix, err)
+	}
+	config.MonitorInterval = duration
+	return nil
+}
+
+type CollectEventServiceServerConfig struct {
+	URL            string `yaml:"url"`
+	ReadTimeoutMS  int    `yaml:"read_timeout_ms"`
+	WriteTimeoutMS int    `yaml:"write_timeout_ms"`
+	IdleTimeoutMS  int    `yaml:"idle_timeout_ms"`
+}
+
+func (config CollectEventServiceServerConfig) check() error {
+	if config.URL == "" {
+		return errors.New("service.url should not be empty")
+	}
+	if config.ReadTimeoutMS <= 0 {
+		return fmt.Errorf("service.read_timeout_ms is %d, it should be greater than 0", config.ReadTimeoutMS)
+	}
+	if config.WriteTimeoutMS <= 0 {
+		return fmt.Errorf("service.write_timeout_ms is %d, it should be greater than 0", config.WriteTimeoutMS)
+	}
+	if config.IdleTimeoutMS <= 0 {
+		return fmt.Errorf("service.idle_timeout_ms is %d, it should be greater than 0", config.IdleTimeoutMS)
+	}
+	return nil
+}
+
+type CollectEventServiceSaveEventConfig struct {
+	RetryTimes      int `yaml:"retry_times"`
+	RetryIntervalMS int `yaml:"retry_interval_ms"`
+	TimeoutMS       int `yaml:"timeout_ms"`
+	WorkerCount     int `yaml:"worker_count"`
+}
+
+func (config CollectEventServiceSaveEventConfig) check() error {
+	prefix := "save_event"
+	if config.RetryTimes <= 0 {
+		return fmt.Errorf("%s.retry_times is %d, it should be greater than 0", prefix, config.RetryTimes)
+	}
+	if config.RetryIntervalMS <= 0 {
+		return fmt.Errorf("%s.retry_interval_ms is %d, it should be greater than 0", prefix, config.RetryIntervalMS)
+	}
+	if config.TimeoutMS <= 0 {
+		return fmt.Errorf("%s.timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
+	}
+	if config.WorkerCount <= 0 {
+		return fmt.Errorf("%s.worker_count is %d, it should be greater than 0", prefix, config.WorkerCount)
 	}
 	return nil
 }
