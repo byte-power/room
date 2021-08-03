@@ -86,8 +86,8 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 			log.Int("hash_tag_count", processHashTagCount),
 			log.Int("key_count", processKeyCount),
 		)
-		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_hashtag.count", CleanKeysTaskName), processHashTagCount)
-		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_key.count", CleanKeysTaskName), processKeyCount)
+		dep.Metric.MetricCount(fmt.Sprintf("%s.success.clean_hashtag", CleanKeysTaskName), processHashTagCount)
+		dep.Metric.MetricCount(fmt.Sprintf("%s.success.clean_key", CleanKeysTaskName), processKeyCount)
 	}
 }
 
