@@ -64,7 +64,7 @@ func main() {
 	if err := base.InitRoomService(*configPath); err != nil {
 		logger.Fatalf("init service error %s\n", err)
 	}
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	roomDataTableShardingCount := db.GetShardingCount()
 	roomDataTablePrefix := (&roomDataModelV2{}).GetTablePrefix()
 	count := 100

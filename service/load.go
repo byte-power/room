@@ -258,11 +258,10 @@ func (meta HashTagMetaInfo) GetAccessTime() (time.Time, error) {
 	return time.Unix(seconds, nanoSeconds), nil
 }
 
-func Load(tagName string, accessTime time.Time, accessMode base.HashTagAccessMode) error {
+func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode base.HashTagAccessMode) error {
 	if tagName == "" {
 		return nil
 	}
-	dep := base.GetServerDependency()
 	hashTag, err := NewHashTag(tagName, dep)
 	if err != nil {
 		return err

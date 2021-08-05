@@ -12,7 +12,9 @@ import (
 )
 
 var redisCluster *redis.ClusterClient
-var dbCluster *DBCluster
+var serviceDBCluster *DBCluster
+var taskDBCluster *DBCluster
+var collectEventDBCluster *DBCluster
 var writtenRecordDBCluster *DBCluster
 var accessedRecordDBCluster *DBCluster
 var hashTagEventService *HashTagEventService
@@ -76,12 +78,16 @@ func InitRoomService(configPath string) error {
 	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
+	logger := GetServerLogger()
 
-	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetServerLogger(), GetMetricService())
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.ServiceDBCluster)
 	if err != nil {
 		return err
 	}
-	dbCluster = databaseCluster
+	queryHook := dbLogger{logger: logger, metricClient: GetMetricService(), durationMetricKey: serviceDBQueryDurationMetricKey}
+	databaseCluster.AddQueryHook(queryHook)
+	logger.Info("init room service database cluster", log.String("cluster", databaseCluster.String()))
+	serviceDBCluster = databaseCluster
 
 	hashTagEventSrv, err := NewHashTagEventService(serverConfig.HashTagEventService, loggers["server"], metricService)
 	if err != nil {
@@ -106,6 +112,7 @@ func InitSyncService(configPath string) error {
 	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
+	logger := GetTaskLogger()
 	syncServiceConfig := GetServerConfig().SyncService
 	metric, err := InitMetric(syncServiceConfig.Metric)
 	if err != nil {
@@ -113,21 +120,31 @@ func InitSyncService(configPath string) error {
 	}
 	taskMetricService = metric
 
-	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetTaskLogger(), GetTaskMetricService())
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.TaskDBCluster)
 	if err != nil {
 		return err
 	}
-	dbCluster = databaseCluster
+	queryHook := dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: taskDBQueryDurationMetricKey}
+	databaseCluster.AddQueryHook(queryHook)
+	logger.Info("init task database cluster", log.String("cluster", databaseCluster.String()))
+	taskDBCluster = databaseCluster
 
-	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster, GetTaskLogger(), GetTaskMetricService())
+	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster)
 	if err != nil {
 		return err
 	}
+	queryHook = dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: writtenRecordDBQueryDurationMetricKey}
+	databaseCluster.AddQueryHook(queryHook)
+	logger.Info("init written record database cluster", log.String("cluster", writtenRecordCluster.String()))
 	writtenRecordDBCluster = writtenRecordCluster
-	accessedRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.AccessedRecordDBCluster, GetTaskLogger(), GetTaskMetricService())
+
+	accessedRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.AccessedRecordDBCluster)
 	if err != nil {
 		return err
 	}
+	queryHook = dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: AccessedRecordDBQueryDurationMetricKey}
+	databaseCluster.AddQueryHook(queryHook)
+	logger.Info("init accessed record database cluster", log.String("cluster", accessedRecordCluster.String()))
 	accessedRecordDBCluster = accessedRecordCluster
 
 	rawNoWrittenDuration := syncServiceConfig.SyncKeyTaskV2.RawNoWrittenDuration
@@ -156,6 +173,7 @@ func InitCollectEventService(configPath string) error {
 	if err := initBasicDependencies(configPath); err != nil {
 		return err
 	}
+	logger := GetCollectEventLogger()
 	metricConfig := GetServerConfig().CollectEventServiceMetric
 	metric, err := InitMetric(metricConfig)
 	if err != nil {
@@ -163,11 +181,17 @@ func InitCollectEventService(configPath string) error {
 	}
 	collectEventMetricService = metric
 
-	databaseCluster, err := NewDBClusterFromConfig(serverConfig.DBCluster, GetCollectEventLogger(), GetCollectEventMetricService())
+	databaseCluster, err := NewDBClusterFromConfig(serverConfig.CollectEventDBCluster)
 	if err != nil {
 		return err
 	}
-	dbCluster = databaseCluster
+	queryHook := dbLogger{
+		logger:            logger,
+		metricClient:      GetCollectEventMetricService(),
+		durationMetricKey: collectEventDBQueryDurationMetricKey}
+	databaseCluster.AddQueryHook(queryHook)
+	logger.Info("init collect event service database cluster", log.String("cluster", databaseCluster.String()))
+	collectEventDBCluster = databaseCluster
 	return nil
 }
 
@@ -175,8 +199,16 @@ func GetRedisCluster() *redis.ClusterClient {
 	return redisCluster
 }
 
-func GetDBCluster() *DBCluster {
-	return dbCluster
+func GetServiceDBCluster() *DBCluster {
+	return serviceDBCluster
+}
+
+func GetTaskDBCluster() *DBCluster {
+	return taskDBCluster
+}
+
+func GetCollectEventDBCluster() *DBCluster {
+	return collectEventDBCluster
 }
 
 func GetWrittenRecordDBCluster() *DBCluster {
@@ -285,12 +317,10 @@ func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []red
 }
 
 type Dependency struct {
-	Redis            *redis.ClusterClient
-	DB               *DBCluster
-	AccessedRecordDB *DBCluster
-	WrittenRecordDB  *DBCluster
-	Logger           *log.Logger
-	Metric           *MetricClient
+	Redis  *redis.ClusterClient
+	DB     *DBCluster
+	Logger *log.Logger
+	Metric *MetricClient
 }
 
 var (
@@ -318,22 +348,27 @@ func (dep Dependency) Check() error {
 
 func GetServerDependency() Dependency {
 	return Dependency{
-		Redis:            GetRedisCluster(),
-		DB:               GetDBCluster(),
-		AccessedRecordDB: GetAccessedRecordDBCluster(),
-		WrittenRecordDB:  GetWrittenRecordDBCluster(),
-		Logger:           GetServerLogger(),
-		Metric:           GetMetricService(),
+		Redis:  GetRedisCluster(),
+		DB:     GetServiceDBCluster(),
+		Logger: GetServerLogger(),
+		Metric: GetMetricService(),
 	}
 }
 
 func GetTaskDependency() Dependency {
 	return Dependency{
-		Redis:            GetRedisCluster(),
-		DB:               GetDBCluster(),
-		AccessedRecordDB: GetAccessedRecordDBCluster(),
-		WrittenRecordDB:  GetWrittenRecordDBCluster(),
-		Logger:           GetTaskLogger(),
-		Metric:           GetTaskMetricService(),
+		Redis:  GetRedisCluster(),
+		DB:     GetTaskDBCluster(),
+		Logger: GetTaskLogger(),
+		Metric: GetTaskMetricService(),
+	}
+}
+
+func GetCollectEventDependency() Dependency {
+	return Dependency{
+		Redis:  GetRedisCluster(),
+		DB:     GetCollectEventDBCluster(),
+		Logger: GetCollectEventLogger(),
+		Metric: GetCollectEventMetricService(),
 	}
 }

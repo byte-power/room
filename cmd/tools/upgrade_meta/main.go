@@ -170,7 +170,7 @@ loop:
 			break loop
 		}
 		cursor = c
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

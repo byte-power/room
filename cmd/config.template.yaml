@@ -57,9 +57,83 @@ load_key:
   retry_times: 5
   retry_interval: "2ms"
   load_timeout: "2000ms"
-    
+
 # 用于同步数据的后端数据库
-db_cluster:
+service_db_cluster:
+    sharding_count: 5
+    shardings:
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 0
+        end_index: 1
+
+      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 2
+        end_index: 4
+
+task_db_cluster:
+    sharding_count: 5
+    shardings:
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 0
+        end_index: 1
+
+      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 2
+        end_index: 4
+
+collect_event_db_cluster:
     sharding_count: 5
     shardings:
       - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
