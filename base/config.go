@@ -446,9 +446,10 @@ func (config SyncRecordTaskConfig) check() error {
 }
 
 type SyncKeyTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
-	UpSertTryTimes  int  `yaml:"upsert_try_times"`
+	IntervalMinutes    int  `yaml:"interval_minutes"`
+	Off                bool `yaml:"off"`
+	UpSertTryTimes     int  `yaml:"upsert_try_times"`
+	RateLimitPerSecond int  `yaml:"rate_limit_per_second"`
 
 	RawNoWrittenDuration string `yaml:"no_written_duration"`
 	NoWrittenDuration    time.Duration
@@ -465,8 +466,9 @@ func (config SyncKeyTaskConfig) check() error {
 }
 
 type CleanKeyTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
+	IntervalMinutes    int  `yaml:"interval_minutes"`
+	Off                bool `yaml:"off"`
+	RateLimitPerSecond int  `yaml:"rate_limit_per_second"`
 
 	RawInactiveDuration string `yaml:"inactive_duration"`
 	InactiveDuration    time.Duration

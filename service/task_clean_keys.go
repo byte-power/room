@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-pg/pg/v10"
+	"go.uber.org/ratelimit"
 )
 
 const CleanKeysTaskName = "clean_keys_v2"
@@ -16,9 +17,14 @@ const CleanKeysTaskName = "clean_keys_v2"
 // find keys to clean
 // select * from table where status != "cleaned" and accessed_at < ?;
 // update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"
-func CleanKeysTaskV2(inactiveDuration time.Duration) {
+func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
-	logTaskStart(CleanKeysTaskName, startTime, log.String("inactive_duration", inactiveDuration.String()))
+	logTaskStart(
+		CleanKeysTaskName,
+		startTime,
+		log.String("inactive_duration", inactiveDuration.String()),
+		log.Int("limit", rateLimitPerSecond),
+	)
 
 	count := 100
 	accessedAt := startTime.Add(-inactiveDuration)
@@ -30,6 +36,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 		}
 	}()
 	excludedHashTags := make([]string, 0)
+	ratelimitBucket := ratelimit.New(rateLimitPerSecond)
 	for {
 		conditions := []dbWhereCondition{
 			{column: "status", operator: "=?", parameter: HashTagKeysStatusSynced},
@@ -52,6 +59,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 		processHashTagCount := 0
 		processKeyCount := 0
 		for _, model := range models {
+			ratelimitBucket.Take()
 			keyCount, err := cleanHashTagKeys(dep, model)
 			if err != nil {
 				recordTaskErrorV2(

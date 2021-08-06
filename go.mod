@@ -12,6 +12,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.6.1
 	github.com/tidwall/redcon v1.4.0
+	go.uber.org/ratelimit v0.2.0
 	go.uber.org/zap v1.16.0
 	golang.org/x/tools v0.0.0-20201022035929-9cf592e881e9 // indirect
 	gopkg.in/alexcesaro/statsd.v2 v2.0.0
