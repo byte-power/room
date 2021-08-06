@@ -37,6 +37,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 	}()
 	excludedHashTags := make([]string, 0)
 	ratelimitBucket := ratelimit.New(rateLimitPerSecond)
+	tableIndex := 0
 	for {
 		conditions := []dbWhereCondition{
 			{column: "status", operator: "=?", parameter: HashTagKeysStatusSynced},
@@ -45,7 +46,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 		if len(excludedHashTags) > 0 {
 			conditions = append(conditions, dbWhereCondition{column: "hash_tag", operator: "not in (?)", parameter: pg.In(excludedHashTags)})
 		}
-		models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, conditions...)
+		index, models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, tableIndex, conditions...)
 		if loadErr != nil {
 			recordTaskErrorV2(
 				dep.Logger, dep.Metric, CleanKeysTaskName,
@@ -56,6 +57,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 		if len(models) == 0 {
 			break
 		}
+		tableIndex = index
 		processHashTagCount := 0
 		processKeyCount := 0
 		for _, model := range models {
@@ -88,11 +90,17 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 			processHashTagCount = processHashTagCount + 1
 			processKeyCount = processKeyCount + int(keyCount)
 		}
+		conditionStrs := make([]string, 0, len(conditions))
+		for _, cond := range conditions {
+			conditionStrs = append(conditionStrs, cond.string())
+		}
 		dep.Logger.Info(
 			"clean_keys",
 			log.String("task", CleanKeysTaskName),
 			log.Int("hash_tag_count", processHashTagCount),
 			log.Int("key_count", processKeyCount),
+			log.Int("table_index", tableIndex),
+			log.String("condition", strings.Join(conditionStrs, " and ")),
 		)
 		dep.Metric.MetricCount(fmt.Sprintf("%s.success.clean_hashtag", CleanKeysTaskName), processHashTagCount)
 		dep.Metric.MetricCount(fmt.Sprintf("%s.success.clean_key", CleanKeysTaskName), processKeyCount)

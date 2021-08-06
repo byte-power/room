@@ -680,14 +680,18 @@ func (condition dbWhereCondition) getConditionAndParameter() (string, interface{
 	return fmt.Sprintf("%s %s", condition.column, condition.operator), condition.parameter
 }
 
-func loadHashTagKeysModelsByCondition(db *base.DBCluster, count int, conditions ...dbWhereCondition) ([]*roomHashTagKeys, error) {
+func (condition dbWhereCondition) string() string {
+	return fmt.Sprintf("%s%s%v", condition.column, condition.operator, condition.parameter)
+}
+
+func loadHashTagKeysModelsByCondition(db *base.DBCluster, count int, startIndex int, conditions ...dbWhereCondition) (int, []*roomHashTagKeys, error) {
 	shardingCount := db.GetShardingCount()
 	tablePrefix := (&roomHashTagKeys{}).GetTablePrefix()
 	var models []*roomHashTagKeys
-	for index := 0; index < shardingCount; index++ {
+	for index := startIndex; index < shardingCount; index++ {
 		query, err := db.Models(&models, tablePrefix, index)
 		if err != nil {
-			return nil, err
+			return 0, nil, err
 		}
 		for _, condition := range conditions {
 			cond, parameter := condition.getConditionAndParameter()
@@ -698,11 +702,11 @@ func loadHashTagKeysModelsByCondition(db *base.DBCluster, count int, conditions 
 			if errors.Is(err, pg.ErrNoRows) {
 				continue
 			}
-			return nil, err
+			return 0, nil, err
 		}
 		if len(models) > 0 {
-			return models, nil
+			return index, models, nil
 		}
 	}
-	return nil, nil
+	return shardingCount, nil, nil
 }
