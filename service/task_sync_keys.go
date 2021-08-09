@@ -80,7 +80,7 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLim
 			}
 			dep.Logger.Info(
 				"sync_keys",
-				log.String("task", CleanKeysTaskName),
+				log.String("task", SyncKeysTaskName),
 				log.Int("count", processCount),
 				log.Int("table_index", tableIndex),
 				log.String("condition", strings.Join(conditionStrs, " and ")),
