@@ -92,10 +92,10 @@ func main() {
 	if err := parseAndCheckCommandOptions(); err != nil {
 		logger.Fatalf("command options error %s\n", err)
 	}
-	if err := base.InitRoomService(*configPath); err != nil {
+	if err := base.InitSyncService(*configPath); err != nil {
 		logger.Fatalf("init service error %s\n", err)
 	}
-	dep := base.GetServerDependency()
+	dep := base.GetTaskDependency()
 	roomDataTableShardingCount := dep.DB.GetShardingCount()
 	roomDataTablePrefix := (&roomDataModelV2{}).GetTablePrefix()
 	count := 100
