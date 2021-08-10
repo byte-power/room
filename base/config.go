@@ -19,7 +19,9 @@ type Config struct {
 	Name                      string                            `yaml:"name"`
 	Server                    RoomServerConfig                  `yaml:"room_server"`
 	RedisCluster              RedisClusterConfig                `yaml:"redis_cluster"`
-	DBCluster                 DBClusterConfig                   `yaml:"db_cluster"`
+	ServiceDBCluster          DBClusterConfig                   `yaml:"service_db_cluster"`
+	TaskDBCluster             DBClusterConfig                   `yaml:"task_db_cluster"`
+	CollectEventDBCluster     DBClusterConfig                   `yaml:"collect_event_db_cluster"`
 	HashTagEventService       HashTagEventServiceConfig         `yaml:"hash_tag_event_service"`
 	Metric                    MetricConfig                      `yaml:"metric"`
 	Log                       map[string]map[string]interface{} `yaml:"log"`
@@ -39,8 +41,14 @@ func (config Config) check() error {
 	if err := config.RedisCluster.check(); err != nil {
 		return fmt.Errorf("config.%w", err)
 	}
-	if err := config.DBCluster.check(); err != nil {
-		return fmt.Errorf("config.%w", err)
+	if err := config.ServiceDBCluster.check(); err != nil {
+		return fmt.Errorf("config.service_db_cluster.%w", err)
+	}
+	if err := config.TaskDBCluster.check(); err != nil {
+		return fmt.Errorf("config.task_db_cluster.%w", err)
+	}
+	if err := config.CollectEventDBCluster.check(); err != nil {
+		return fmt.Errorf("config.collect_event_db_cluster.%w", err)
 	}
 	if err := config.Metric.check(); err != nil {
 		return fmt.Errorf("config.%w", err)
@@ -162,11 +170,11 @@ type DBClusterConfig struct {
 
 func (config DBClusterConfig) check() error {
 	if config.ShardingCount <= 0 {
-		return errors.New("db_cluster.sharding_count should be greater than 0")
+		return errors.New("sharding_count should be greater than 0")
 	}
 	for _, sharding := range config.Shardings {
 		if err := sharding.check(); err != nil {
-			return fmt.Errorf("db_cluster.shardings.%w", err)
+			return fmt.Errorf("shardings.%w", err)
 		}
 	}
 	return nil
@@ -314,10 +322,10 @@ func (config SyncServiceConfig) check() error {
 		return fmt.Errorf("sync.%w", err)
 	}
 	if err := config.WrittenRecordDBCluster.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
+		return fmt.Errorf("sync.written_record_db_cluster.%w", err)
 	}
 	if err := config.AccessedRecordDBCluster.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
+		return fmt.Errorf("sync.accessed_record_db_cluster.%w", err)
 	}
 	if err := config.SQS.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
@@ -438,9 +446,10 @@ func (config SyncRecordTaskConfig) check() error {
 }
 
 type SyncKeyTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
-	UpSertTryTimes  int  `yaml:"upsert_try_times"`
+	IntervalMinutes    int  `yaml:"interval_minutes"`
+	Off                bool `yaml:"off"`
+	UpSertTryTimes     int  `yaml:"upsert_try_times"`
+	RateLimitPerSecond int  `yaml:"rate_limit_per_second"`
 
 	RawNoWrittenDuration string `yaml:"no_written_duration"`
 	NoWrittenDuration    time.Duration
@@ -457,8 +466,9 @@ func (config SyncKeyTaskConfig) check() error {
 }
 
 type CleanKeyTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
+	IntervalMinutes    int  `yaml:"interval_minutes"`
+	Off                bool `yaml:"off"`
+	RateLimitPerSecond int  `yaml:"rate_limit_per_second"`
 
 	RawInactiveDuration string `yaml:"inactive_duration"`
 	InactiveDuration    time.Duration

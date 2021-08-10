@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.uber.org/ratelimit"
 )
 
 const SyncKeysTaskName = "sync_keys_v2"
@@ -13,12 +15,13 @@ const SyncKeysTaskName = "sync_keys_v2"
 // find keys to sync
 // select * from table where status = "syncing";
 // update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
+func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
 	logTaskStart(
 		SyncKeysTaskName, startTime,
 		log.Int("upsert_try_times", upsertTryTimes),
 		log.String("no_written_duration", noWrittenDuration.String()),
+		log.Int("limit", rateLimitPerSecond),
 	)
 
 	count := 1000
@@ -29,6 +32,7 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
 			recordTaskSuccess(SyncKeysTaskName, time.Since(startTime))
 		}
 	}()
+	ratelimitBucket := ratelimit.New(rateLimitPerSecond)
 	writtenAt := startTime.Add(-noWrittenDuration)
 	conditions := [][]dbWhereCondition{
 		{
@@ -40,8 +44,9 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
 		},
 	}
 	for _, condition := range conditions {
+		tableIndex := 0
 		for {
-			models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, condition...)
+			index, models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, tableIndex, condition...)
 			// dbWhereCondition{column: "status", operator: "=?", parameter: HashTagKeysStatusNeedSynced},
 			// dbWhereCondition{column: "written_at", operator: "<=?", parameter: writtenAt})
 			if loadErr != nil {
@@ -52,8 +57,10 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
 			if len(models) == 0 {
 				break
 			}
+			tableIndex = index
 			processCount := 0
 			for _, model := range models {
+				ratelimitBucket.Take()
 				if err = syncRoomData(dep.DB, model, time.Now(), upsertTryTimes); err != nil {
 					recordTaskErrorV2(
 						dep.Logger, dep.Metric, SyncKeysTaskName,
@@ -67,9 +74,19 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration) {
 				}
 				processCount += 1
 			}
+			conditionStrs := make([]string, 0, len(condition))
+			for _, cond := range condition {
+				conditionStrs = append(conditionStrs, cond.string())
+			}
+			dep.Logger.Info(
+				"sync_keys",
+				log.String("task", SyncKeysTaskName),
+				log.Int("count", processCount),
+				log.Int("table_index", tableIndex),
+				log.String("condition", strings.Join(conditionStrs, " and ")),
+			)
 			metricName := fmt.Sprintf("%s.success.sync_hash_tag", SyncKeysTaskName)
 			dep.Metric.MetricCount(metricName, processCount)
-			dep.Logger.Info(metricName, log.Int("count", processCount))
 		}
 	}
 }

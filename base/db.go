@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"strings"
 	"time"
 
 	"github.com/go-pg/pg/v10"
@@ -27,19 +28,30 @@ type dbClient struct {
 	client     *pg.DB
 }
 
+func (client dbClient) string() string {
+	options := *client.client.Options()
+	options.Password = ""
+	return fmt.Sprintf(
+		"start_index=%d, end_index=%d, options=%+v",
+		client.startIndex,
+		client.endIndex,
+		options,
+	)
+}
+
 type Model interface {
 	ShardingKey() string
 	GetTablePrefix() string
 }
 
-func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metricClient *MetricClient) (*DBCluster, error) {
+func NewDBClusterFromConfig(config DBClusterConfig) (*DBCluster, error) {
 	shardingCount := config.ShardingCount
 	if shardingCount <= 0 {
 		return nil, errors.New("sharding_count should be greater than 0")
 	}
 	dbCluster := &DBCluster{shardingCount: shardingCount, clients: make([]dbClient, 0)}
 	for _, cfg := range config.Shardings {
-		client, err := newDBClient(cfg, logger, metricClient)
+		client, err := newDBClient(cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -50,14 +62,12 @@ func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metricCl
 	return dbCluster, nil
 }
 
-func newDBClient(config DBConfig, logger *log.Logger, metricClient *MetricClient) (*pg.DB, error) {
+func newDBClient(config DBConfig) (*pg.DB, error) {
 	opt, err := initDBOption(config)
 	if err != nil {
 		return nil, err
 	}
 	client := pg.Connect(opt)
-	client.AddQueryHook(dbLogger{logger: logger, metricClient: metricClient})
-	logger.Info("initialize db client", log.String("options", fmt.Sprintf("%+v", *opt)))
 	return client, nil
 }
 
@@ -100,6 +110,20 @@ func initDBOption(config DBConfig) (*pg.Options, error) {
 		opt.IdleCheckFrequency = time.Duration(config.Connection.IdleCheckFrequencySeconds) * time.Second
 	}
 	return opt, nil
+}
+
+func (dbCluster *DBCluster) AddQueryHook(hook pg.QueryHook) {
+	for _, client := range dbCluster.clients {
+		client.client.AddQueryHook(hook)
+	}
+}
+
+func (dbCluster *DBCluster) String() string {
+	clientStrings := make([]string, 0, len(dbCluster.clients))
+	for _, client := range dbCluster.clients {
+		clientStrings = append(clientStrings, client.string())
+	}
+	return fmt.Sprintf("sharding_count:%d, clients=[%s]", dbCluster.shardingCount, strings.Join(clientStrings, " "))
 }
 
 func (dbCluster *DBCluster) Model(model Model) (*orm.Query, error) {
@@ -152,13 +176,18 @@ func getTableIndex(shardingKey string, shardingCount int) int {
 }
 
 const (
-	dbQueryStartTimeContextKey = "query_start_time"
-	dbQueryDurationMetricKey   = "database.query.duration"
+	dbQueryStartTimeContextKey             = "query_start_time"
+	serviceDBQueryDurationMetricKey        = "service.database.query.duration"
+	taskDBQueryDurationMetricKey           = "task.database.query.duration"
+	writtenRecordDBQueryDurationMetricKey  = "task.write.database.query.duration"
+	AccessedRecordDBQueryDurationMetricKey = "task.access.database.query.duration"
+	collectEventDBQueryDurationMetricKey   = "collect_event.database.query.duration"
 )
 
 type dbLogger struct {
-	logger       *log.Logger
-	metricClient *MetricClient
+	logger            *log.Logger
+	metricClient      *MetricClient
+	durationMetricKey string
 }
 
 func (d dbLogger) BeforeQuery(ctx context.Context, queryEvent *pg.QueryEvent) (context.Context, error) {
@@ -174,11 +203,11 @@ func (d dbLogger) AfterQuery(ctx context.Context, queryEvent *pg.QueryEvent) err
 	if startTime, ok := ctx.Value(dbQueryStartTimeContextKey).(time.Time); ok {
 		duration := time.Since(startTime)
 		d.logger.Debug(
-			"execute database query",
+			d.durationMetricKey,
 			log.String("query", string(query)),
 			log.String("duration", duration.String()),
 		)
-		d.metricClient.MetricTimeDuration(dbQueryDurationMetricKey, duration)
+		d.metricClient.MetricTimeDuration(d.durationMetricKey, duration)
 	}
 	return nil
 }

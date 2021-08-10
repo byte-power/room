@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-pg/pg/v10"
+	"go.uber.org/ratelimit"
 )
 
 const CleanKeysTaskName = "clean_keys_v2"
@@ -16,9 +17,14 @@ const CleanKeysTaskName = "clean_keys_v2"
 // find keys to clean
 // select * from table where status != "cleaned" and accessed_at < ?;
 // update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"
-func CleanKeysTaskV2(inactiveDuration time.Duration) {
+func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
-	logTaskStart(CleanKeysTaskName, startTime, log.String("inactive_duration", inactiveDuration.String()))
+	logTaskStart(
+		CleanKeysTaskName,
+		startTime,
+		log.String("inactive_duration", inactiveDuration.String()),
+		log.Int("limit", rateLimitPerSecond),
+	)
 
 	count := 100
 	accessedAt := startTime.Add(-inactiveDuration)
@@ -30,6 +36,8 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 		}
 	}()
 	excludedHashTags := make([]string, 0)
+	ratelimitBucket := ratelimit.New(rateLimitPerSecond)
+	tableIndex := 0
 	for {
 		conditions := []dbWhereCondition{
 			{column: "status", operator: "=?", parameter: HashTagKeysStatusSynced},
@@ -38,21 +46,27 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 		if len(excludedHashTags) > 0 {
 			conditions = append(conditions, dbWhereCondition{column: "hash_tag", operator: "not in (?)", parameter: pg.In(excludedHashTags)})
 		}
-		models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, conditions...)
+		index, models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, tableIndex, conditions...)
 		if loadErr != nil {
+			err = loadErr
 			recordTaskErrorV2(
 				dep.Logger, dep.Metric, CleanKeysTaskName,
-				loadErr, "load_hash_tag_keys", nil)
-			err = loadErr
+				err, "load_hash_tag_keys", nil)
 			return
 		}
 		if len(models) == 0 {
 			break
 		}
+		if tableIndex < index {
+			excludedHashTags = make([]string, 0)
+			tableIndex = index
+		}
 		processHashTagCount := 0
 		processKeyCount := 0
 		for _, model := range models {
-			keyCount, err := cleanHashTagKeys(dep, model)
+			ratelimitBucket.Take()
+			keyCount, cleanKeysErr := cleanHashTagKeys(dep, model)
+			err = cleanKeysErr
 			if err != nil {
 				recordTaskErrorV2(
 					dep.Logger, dep.Metric,
@@ -62,7 +76,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 						"hash_tag": model.HashTag,
 						"keys":     strings.Join(model.Keys, " "),
 					})
-				if errors.Is(err, ErrAccessAfterRecord) || isRetryErrorForUpdateInTx(err) {
+				if errors.Is(err, ErrAccessAfterRecord) || errors.Is(err, errLoadKeysLockFailed) || isRetryErrorForUpdateInTx(err) {
 					recordTaskErrorV2(
 						dep.Logger, dep.Metric,
 						CleanKeysTaskName, err,
@@ -80,14 +94,20 @@ func CleanKeysTaskV2(inactiveDuration time.Duration) {
 			processHashTagCount = processHashTagCount + 1
 			processKeyCount = processKeyCount + int(keyCount)
 		}
+		conditionStrs := make([]string, 0, len(conditions))
+		for _, cond := range conditions {
+			conditionStrs = append(conditionStrs, cond.string())
+		}
 		dep.Logger.Info(
 			"clean_keys",
 			log.String("task", CleanKeysTaskName),
 			log.Int("hash_tag_count", processHashTagCount),
 			log.Int("key_count", processKeyCount),
+			log.Int("table_index", tableIndex),
+			log.String("condition", strings.Join(conditionStrs, " and ")),
 		)
-		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_hashtag.count", CleanKeysTaskName), processHashTagCount)
-		dep.Metric.MetricCount(fmt.Sprintf("%s.clean_key.count", CleanKeysTaskName), processKeyCount)
+		dep.Metric.MetricCount(fmt.Sprintf("%s.success.clean_hashtag", CleanKeysTaskName), processHashTagCount)
+		dep.Metric.MetricCount(fmt.Sprintf("%s.success.clean_key", CleanKeysTaskName), processKeyCount)
 	}
 }
 

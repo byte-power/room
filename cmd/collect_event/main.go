@@ -22,11 +22,9 @@ func main() {
 	if err := base.InitCollectEventService(*configPath); err != nil {
 		panic(err)
 	}
+	dep := base.GetCollectEventDependency()
 	config := base.GetServerConfig().CollectEventService
-	logger := base.GetCollectEventLogger()
-	metric := base.GetCollectEventMetricService()
-	db := base.GetDBCluster()
-	collectEventService, err := service.NewCollectEventService(config, logger, metric, db)
+	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric, dep.DB)
 	if err != nil {
 		panic(err)
 	}
@@ -37,10 +35,10 @@ func main() {
 
 	sig := <-signalCh
 
-	logger.Info(
+	dep.Logger.Info(
 		fmt.Sprintf("signal received, closing %s ...", service.CollectEventServiceName),
 		log.String("signal", sig.String()))
 
 	collectEventService.Stop()
-	logger.Info(fmt.Sprintf("close %s success", service.CollectEventServiceName))
+	dep.Logger.Info(fmt.Sprintf("close %s success", service.CollectEventServiceName))
 }

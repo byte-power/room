@@ -39,7 +39,7 @@ func testCleanDataInDB(db *base.DBCluster, hashTags ...string) {
 }
 
 func TestLoadDataByID(t *testing.T) {
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 
 	// load not existed row
 	hashTag := "hash_tag_not_exist"
@@ -113,7 +113,7 @@ func TestLoadDataByID(t *testing.T) {
 }
 
 func TestLoadDataByIDWithContext(t *testing.T) {
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	currentTime := time.Now()
 	currentTsInMS := currentTime.Unix() * 1000
 
@@ -237,7 +237,7 @@ func TestDeleteRoomWrittenRecordModel(t *testing.T) {
 
 func TestDeleteRoomData(t *testing.T) {
 	hashTag := "abc"
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	defer testEmptyRoomDataRecordInDatabase(hashTag)
 	value := map[string]RedisValue{
 		"{abc}a":  {Type: "string", Value: "v"},
@@ -278,7 +278,7 @@ func TestDeleteRoomData(t *testing.T) {
 
 func TestUpsertRoomData(t *testing.T) {
 	hashTag := "abc"
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	defer testEmptyRoomDataRecordInDatabase(hashTag)
 
 	// upsert key in a not exist hash_tag record
@@ -357,7 +357,7 @@ func TestUpsertRoomData(t *testing.T) {
 }
 
 func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 
 	// insert row with read event
 	hashTag := "abc"
@@ -370,7 +370,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err := upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ := loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	_, models, _ := loadHashTagKeysModelsByCondition(db, 100, 0, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model := models[0]
 	assert.Equal(t, hashTag, model.HashTag)
@@ -394,7 +394,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	_, models, _ = loadHashTagKeysModelsByCondition(db, 100, 0, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model = models[0]
 	assert.Equal(t, hashTag, model.HashTag)
@@ -425,7 +425,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	_, models, _ = loadHashTagKeysModelsByCondition(db, 100, 0, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model = models[0]
 	assert.Equal(t, hashTag, model.HashTag)
@@ -447,7 +447,7 @@ func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
 	err = upsertHashTagKeysRecordByEvent(context.TODO(), db, event, currentTime)
 	assert.Nil(t, err)
 
-	models, _ = loadHashTagKeysModelsByCondition(db, 100, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
+	_, models, _ = loadHashTagKeysModelsByCondition(db, 100, 0, dbWhereCondition{column: "hash_tag", operator: "=?", parameter: hashTag})
 	assert.Equal(t, 1, len(models))
 	model = models[0]
 	assert.Equal(t, hashTag, model.HashTag)

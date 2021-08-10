@@ -370,7 +370,7 @@ func SyncKeysTask(upsertTryTimes int) error {
 			hashTag, err := NewHashTag(commands.ExtractHashTagFromKey(key), dep)
 			if err != nil {
 				if errors.Is(err, ErrEmptyHashTag) {
-					if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+					if err := deleteRoomWrittenRecordModel(base.GetWrittenRecordDBCluster(), key, model.WrittenAt); err != nil {
 						recordTaskError(
 							taskName, err, "delete_written_record",
 							map[string]string{
@@ -398,7 +398,7 @@ func SyncKeysTask(upsertTryTimes int) error {
 			}
 			if status != HashTagStatusLoaded {
 				recordTaskError(taskName, nil, "load_status_not_loaded", map[string]string{"key": model.Key})
-				if err := Load(hashTag.Name(), time.Now(), base.HashTagAccessModeRead); err != nil {
+				if err := Load(dep, hashTag.Name(), time.Now(), base.HashTagAccessModeRead); err != nil {
 					recordTaskError(
 						taskName, err, "load_hash_tag",
 						map[string]string{"hash_tag": hashTag.Name()},
@@ -444,7 +444,7 @@ func SyncKeysTask(upsertTryTimes int) error {
 				}
 				updatedCount += 1
 			}
-			if err := deleteRoomWrittenRecordModel(dep.WrittenRecordDB, key, model.WrittenAt); err != nil {
+			if err := deleteRoomWrittenRecordModel(base.GetWrittenRecordDBCluster(), key, model.WrittenAt); err != nil {
 				recordTaskError(
 					taskName, err, "delete_written_record",
 					map[string]string{

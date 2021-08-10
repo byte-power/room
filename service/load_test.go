@@ -23,6 +23,9 @@ var testContextTODO = context.TODO()
 
 func TestMain(m *testing.M) {
 	configFile := "../cmd/config.yaml"
+	if err := base.InitRoomService(configFile); err != nil {
+		panic(err)
+	}
 	if err := base.InitSyncService(configFile); err != nil {
 		panic(err)
 	}
@@ -39,14 +42,14 @@ func testEmptyKeysInRedis(keys ...string) {
 }
 
 func testEmptyRoomDataRecordInDatabase(hashTag string) {
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, _ := db.Model(model)
 	query.WherePK().ForceDelete()
 }
 
 func testEmptyHashTagKeysRecordInDB(hashTag string) {
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	model := &roomHashTagKeys{HashTag: hashTag}
 	query, _ := db.Model(model)
 	query.WherePK().ForceDelete()
@@ -83,7 +86,7 @@ func TestLoadKeyNotExist(t *testing.T) {
 	currentTime := time.Now()
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
-	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -99,7 +102,7 @@ func TestLoadKeyNotExist(t *testing.T) {
 }
 
 func testInsertRoomData(hashTag string, value map[string]RedisValue) *roomDataModelV2 {
-	db := base.GetDBCluster()
+	db := base.GetServiceDBCluster()
 	model := &roomDataModelV2{HashTag: hashTag, Value: value}
 	query, _ := db.Model(model)
 	query.Returning("*").Insert()
@@ -144,7 +147,7 @@ func TestLoadKeyString(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	// load data
-	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -225,7 +228,7 @@ func TestLoadKeyList(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -305,7 +308,7 @@ func TestLoadKeyHash(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -383,7 +386,7 @@ func TestLoadKeySet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()
@@ -472,7 +475,7 @@ func TestLoadKeyZSet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
-	err := Load(hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	client := base.GetRedisCluster()

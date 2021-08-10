@@ -46,7 +46,11 @@ func main() {
 	syncKeyTaskConfigV2 := base.GetServerConfig().SyncService.SyncKeyTaskV2
 	syncKeyTaskV2 := service.SyncKeysTaskName
 	if !syncKeyTaskConfigV2.Off {
-		job, err := task.Periodic(syncKeyTaskV2, service.SyncKeysTaskV2, syncKeyTaskConfigV2.UpSertTryTimes, syncKeyTaskConfigV2.NoWrittenDuration).EveryMinutes(syncKeyTaskConfigV2.IntervalMinutes).AtSecondInMinute(20)
+		upsertTryTimes := syncKeyTaskConfigV2.UpSertTryTimes
+		noWrittenDuration := syncKeyTaskConfigV2.NoWrittenDuration
+		rateLimitPerSecond := syncKeyTaskConfigV2.RateLimitPerSecond
+		job, err := task.Periodic(syncKeyTaskV2, service.SyncKeysTaskV2, upsertTryTimes, noWrittenDuration, rateLimitPerSecond).
+			EveryMinutes(syncKeyTaskConfigV2.IntervalMinutes).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}
@@ -70,7 +74,9 @@ func main() {
 	if !cleanKeyTaskConfigV2.Off {
 		cleanKeyTaskInterval := cleanKeyTaskConfigV2.IntervalMinutes
 		inactiveDuration := cleanKeyTaskConfigV2.InactiveDuration
-		job, err := task.Periodic(cleanKeyTaskV2, service.CleanKeysTaskV2, inactiveDuration).EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
+		rateLimtPerSecond := cleanKeyTaskConfigV2.RateLimitPerSecond
+		job, err := task.Periodic(cleanKeyTaskV2, service.CleanKeysTaskV2, inactiveDuration, rateLimtPerSecond).
+			EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}

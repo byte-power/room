@@ -223,7 +223,7 @@ func preProcessCommand(command commands.Commander, accessTime time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err := Load(hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
+	if err := Load(base.GetServerDependency(), hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
 		logger.Error(
 			"load hash_tag error",
 			log.String("command", command.String()),
