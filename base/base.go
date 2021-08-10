@@ -134,7 +134,7 @@ func InitSyncService(configPath string) error {
 		return err
 	}
 	queryHook = dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: writtenRecordDBQueryDurationMetricKey}
-	databaseCluster.AddQueryHook(queryHook)
+	writtenRecordCluster.AddQueryHook(queryHook)
 	logger.Info("init written record database cluster", log.String("cluster", writtenRecordCluster.String()))
 	writtenRecordDBCluster = writtenRecordCluster
 
@@ -143,7 +143,7 @@ func InitSyncService(configPath string) error {
 		return err
 	}
 	queryHook = dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: AccessedRecordDBQueryDurationMetricKey}
-	databaseCluster.AddQueryHook(queryHook)
+	accessedRecordCluster.AddQueryHook(queryHook)
 	logger.Info("init accessed record database cluster", log.String("cluster", accessedRecordCluster.String()))
 	accessedRecordDBCluster = accessedRecordCluster
 
