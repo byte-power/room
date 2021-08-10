@@ -48,21 +48,25 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 		}
 		index, models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, tableIndex, conditions...)
 		if loadErr != nil {
+			err = loadErr
 			recordTaskErrorV2(
 				dep.Logger, dep.Metric, CleanKeysTaskName,
-				loadErr, "load_hash_tag_keys", nil)
-			err = loadErr
+				err, "load_hash_tag_keys", nil)
 			return
 		}
 		if len(models) == 0 {
 			break
 		}
-		tableIndex = index
+		if tableIndex < index {
+			excludedHashTags = make([]string, 0)
+			tableIndex = index
+		}
 		processHashTagCount := 0
 		processKeyCount := 0
 		for _, model := range models {
 			ratelimitBucket.Take()
-			keyCount, err := cleanHashTagKeys(dep, model)
+			keyCount, cleanKeysErr := cleanHashTagKeys(dep, model)
+			err = cleanKeysErr
 			if err != nil {
 				recordTaskErrorV2(
 					dep.Logger, dep.Metric,
@@ -72,7 +76,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 						"hash_tag": model.HashTag,
 						"keys":     strings.Join(model.Keys, " "),
 					})
-				if errors.Is(err, ErrAccessAfterRecord) || isRetryErrorForUpdateInTx(err) {
+				if errors.Is(err, ErrAccessAfterRecord) || errors.Is(err, errLoadKeysLockFailed) || isRetryErrorForUpdateInTx(err) {
 					recordTaskErrorV2(
 						dep.Logger, dep.Metric,
 						CleanKeysTaskName, err,
