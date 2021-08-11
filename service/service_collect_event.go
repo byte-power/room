@@ -6,6 +6,7 @@ import (
 	"context"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 
 	"errors"
@@ -144,7 +145,13 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 		err := upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
 		if err != nil {
 			if isRetryErrorForUpdateInTx(err) {
-				service.recordError("save_event_retry", err, map[string]string{"event": event.String()})
+				service.recordError(
+					"save_event_retry",
+					err,
+					map[string]string{
+						"event":       event.String(),
+						"retry_times": strconv.Itoa(i),
+					})
 				time.Sleep(retryInterval)
 				continue
 			}
