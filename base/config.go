@@ -9,9 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"gopkg.in/yaml.v2"
 )
 
@@ -326,32 +323,6 @@ func (config SyncServiceConfig) check() error {
 	return nil
 }
 
-type AWSSessionConfig struct {
-	Region          string `yaml:"region"`
-	AccessKeyID     string `yaml:"aws_access_key_id"`
-	SecretAccessKey string `yaml:"aws_secret_access_key"`
-}
-
-func (config AWSSessionConfig) check() error {
-	if config.Region == "" {
-		return errors.New("aws_session.region should not be empty")
-	}
-	if config.AccessKeyID == "" {
-		return errors.New("aws_session.aws_access_key_id should not be empty")
-	}
-	if config.SecretAccessKey == "" {
-		return errors.New("aws_session.aws_secret_access_key should not be empty")
-	}
-	return nil
-}
-
-func NewAWSSession(config AWSSessionConfig) (*session.Session, error) {
-	return session.NewSession(&aws.Config{
-		Region:      aws.String(config.Region),
-		Credentials: credentials.NewStaticCredentials(config.AccessKeyID, config.SecretAccessKey, ""),
-	})
-}
-
 type CoordinatorConfig struct {
 	Name  string   `yaml:"name"`
 	Addrs []string `yaml:"addrs"`
@@ -363,18 +334,6 @@ func (config CoordinatorConfig) check() error {
 	}
 	if len(config.Addrs) == 0 {
 		return errors.New("coordinator.addrs should not be empty")
-	}
-	return nil
-}
-
-type SyncRecordTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
-}
-
-func (config SyncRecordTaskConfig) check() error {
-	if config.IntervalMinutes <= 0 {
-		return fmt.Errorf("sync_record_task.interval_minutes is %d, it should be greater than 0", config.IntervalMinutes)
 	}
 	return nil
 }
