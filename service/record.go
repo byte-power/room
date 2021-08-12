@@ -169,3 +169,42 @@ func recordTaskSuccessInfo(logger *log.Logger, metric *base.MetricClient, taskNa
 	logger.Info(metricName, log.Int("count", count))
 	metric.MetricCount(metricName, count)
 }
+
+func recordTaskSuccess(taskName string, d time.Duration) {
+	recordTaskSuccessLog(taskName, d)
+	recordTaskSuccessMetric(taskName, d)
+}
+
+func recordTaskSuccessLog(taskName string, d time.Duration) {
+	logger := base.GetTaskLogger()
+	logger.Info(
+		"task success",
+		log.String("task", taskName),
+		log.String("duration", d.String()),
+	)
+}
+
+func recordTaskSuccessMetric(taskName string, d time.Duration) {
+	metric := base.GetTaskMetricService()
+	metricName := fmt.Sprintf("%s.success", taskName)
+	metric.MetricIncrease(metricName)
+	if d != time.Duration(0) {
+		durationMetricName := fmt.Sprintf("%s.duration", metricName)
+		metric.MetricTimeDuration(durationMetricName, d)
+	}
+}
+
+func logTaskStart(taskName string, startTime time.Time, pairs ...log.LogPair) {
+	logger := base.GetTaskLogger()
+	logPairs := []log.LogPair{
+		log.String("task", taskName),
+		log.String("start_time", startTime.String()),
+	}
+	for _, pair := range pairs {
+		logPairs = append(logPairs, pair)
+	}
+	logger.Info(
+		"start task",
+		logPairs...,
+	)
+}
