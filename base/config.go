@@ -9,9 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"gopkg.in/yaml.v2"
 )
 
@@ -304,116 +301,24 @@ func (config LoadKeyConfig) GetLoadTimeout() time.Duration {
 }
 
 type SyncServiceConfig struct {
-	Metric                  MetricConfig         `yaml:"metric"`
-	WrittenRecordDBCluster  DBClusterConfig      `yaml:"written_record_db_cluster"`
-	AccessedRecordDBCluster DBClusterConfig      `yaml:"accessed_record_db_cluster"`
-	SQS                     SQSConfig            `yaml:"sqs"`
-	S3                      S3Config             `yaml:"s3"`
-	Coordinator             CoordinatorConfig    `yaml:"coordinator"`
-	SyncRecordTask          SyncRecordTaskConfig `yaml:"sync_record_task"`
-	SyncKeyTask             SyncKeyTaskConfig    `yaml:"sync_key_task"`
-	SyncKeyTaskV2           SyncKeyTaskConfig    `yaml:"sync_key_task_v2"`
-	CleanKeyTask            CleanKeyTaskConfig   `yaml:"clean_key_task"`
-	CleanKeyTaskV2          CleanKeyTaskConfig   `yaml:"clean_key_task_v2"`
+	Metric         MetricConfig       `yaml:"metric"`
+	Coordinator    CoordinatorConfig  `yaml:"coordinator"`
+	SyncKeyTaskV2  SyncKeyTaskConfig  `yaml:"sync_key_task_v2"`
+	CleanKeyTaskV2 CleanKeyTaskConfig `yaml:"clean_key_task_v2"`
 }
 
 func (config SyncServiceConfig) check() error {
 	if err := config.Metric.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
-	if err := config.WrittenRecordDBCluster.check(); err != nil {
-		return fmt.Errorf("sync.written_record_db_cluster.%w", err)
-	}
-	if err := config.AccessedRecordDBCluster.check(); err != nil {
-		return fmt.Errorf("sync.accessed_record_db_cluster.%w", err)
-	}
-	if err := config.SQS.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
-	}
-	if err := config.S3.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
-	}
 	if err := config.Coordinator.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
-	}
-	if err := config.SyncRecordTask.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
-	}
-	if err := config.SyncKeyTask.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
 	if err := config.SyncKeyTaskV2.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
 	}
-	if err := config.CleanKeyTask.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
-	}
 	if err := config.CleanKeyTaskV2.check(); err != nil {
 		return fmt.Errorf("sync.%w", err)
-	}
-	return nil
-}
-
-type SQSConfig struct {
-	Queue                    string           `yaml:"queue"`
-	MaxReceivedMessages      int64            `yaml:"max_received_messages"`
-	VisibilityTimeoutSeconds int64            `yaml:"visibility_timeout_seconds"`
-	WaitTimeSeconds          int64            `yaml:"wait_time_seconds"`
-	Session                  AWSSessionConfig `yaml:",inline"`
-}
-
-func (config SQSConfig) check() error {
-	if config.Queue == "" {
-		return errors.New("sqs.queue should not be empty")
-	}
-	if config.MaxReceivedMessages <= 0 {
-		return fmt.Errorf("sqs.max_received_messages=%d, should be greater than 0", config.MaxReceivedMessages)
-	}
-	if config.VisibilityTimeoutSeconds <= 0 {
-		return fmt.Errorf("sqs.visibility_timeout_seconds=%d, should be greater than 0", config.VisibilityTimeoutSeconds)
-	}
-	if config.WaitTimeSeconds <= 0 {
-		return fmt.Errorf("sqs.wait_time_seconds=%d, should be greater than 0", config.WaitTimeSeconds)
-	}
-	if err := config.Session.check(); err != nil {
-		return fmt.Errorf("sqs.%w", err)
-	}
-	return nil
-}
-
-type AWSSessionConfig struct {
-	Region          string `yaml:"region"`
-	AccessKeyID     string `yaml:"aws_access_key_id"`
-	SecretAccessKey string `yaml:"aws_secret_access_key"`
-}
-
-func (config AWSSessionConfig) check() error {
-	if config.Region == "" {
-		return errors.New("aws_session.region should not be empty")
-	}
-	if config.AccessKeyID == "" {
-		return errors.New("aws_session.aws_access_key_id should not be empty")
-	}
-	if config.SecretAccessKey == "" {
-		return errors.New("aws_session.aws_secret_access_key should not be empty")
-	}
-	return nil
-}
-
-func NewAWSSession(config AWSSessionConfig) (*session.Session, error) {
-	return session.NewSession(&aws.Config{
-		Region:      aws.String(config.Region),
-		Credentials: credentials.NewStaticCredentials(config.AccessKeyID, config.SecretAccessKey, ""),
-	})
-}
-
-type S3Config struct {
-	Session AWSSessionConfig `yaml:",inline"`
-}
-
-func (config S3Config) check() error {
-	if err := config.Session.check(); err != nil {
-		return fmt.Errorf("s3.%w", err)
 	}
 	return nil
 }
@@ -429,18 +334,6 @@ func (config CoordinatorConfig) check() error {
 	}
 	if len(config.Addrs) == 0 {
 		return errors.New("coordinator.addrs should not be empty")
-	}
-	return nil
-}
-
-type SyncRecordTaskConfig struct {
-	IntervalMinutes int  `yaml:"interval_minutes"`
-	Off             bool `yaml:"off"`
-}
-
-func (config SyncRecordTaskConfig) check() error {
-	if config.IntervalMinutes <= 0 {
-		return fmt.Errorf("sync_record_task.interval_minutes is %d, it should be greater than 0", config.IntervalMinutes)
 	}
 	return nil
 }

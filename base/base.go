@@ -15,8 +15,6 @@ var redisCluster *redis.ClusterClient
 var serviceDBCluster *DBCluster
 var taskDBCluster *DBCluster
 var collectEventDBCluster *DBCluster
-var writtenRecordDBCluster *DBCluster
-var accessedRecordDBCluster *DBCluster
 var hashTagEventService *HashTagEventService
 var metricService *MetricClient
 var taskMetricService *MetricClient
@@ -129,24 +127,6 @@ func InitSyncService(configPath string) error {
 	logger.Info("init task database cluster", log.String("cluster", databaseCluster.String()))
 	taskDBCluster = databaseCluster
 
-	writtenRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.WrittenRecordDBCluster)
-	if err != nil {
-		return err
-	}
-	queryHook = dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: writtenRecordDBQueryDurationMetricKey}
-	writtenRecordCluster.AddQueryHook(queryHook)
-	logger.Info("init written record database cluster", log.String("cluster", writtenRecordCluster.String()))
-	writtenRecordDBCluster = writtenRecordCluster
-
-	accessedRecordCluster, err := NewDBClusterFromConfig(syncServiceConfig.AccessedRecordDBCluster)
-	if err != nil {
-		return err
-	}
-	queryHook = dbLogger{logger: logger, metricClient: GetTaskMetricService(), durationMetricKey: AccessedRecordDBQueryDurationMetricKey}
-	accessedRecordCluster.AddQueryHook(queryHook)
-	logger.Info("init accessed record database cluster", log.String("cluster", accessedRecordCluster.String()))
-	accessedRecordDBCluster = accessedRecordCluster
-
 	rawNoWrittenDuration := syncServiceConfig.SyncKeyTaskV2.RawNoWrittenDuration
 	duration, err := time.ParseDuration(rawNoWrittenDuration)
 	if err != nil {
@@ -154,13 +134,7 @@ func InitSyncService(configPath string) error {
 	}
 	serverConfig.SyncService.SyncKeyTaskV2.NoWrittenDuration = duration
 
-	rawInactiveDuration := syncServiceConfig.CleanKeyTask.RawInactiveDuration
-	duration, err = time.ParseDuration(rawInactiveDuration)
-	if err != nil {
-		return err
-	}
-	serverConfig.SyncService.CleanKeyTask.InactiveDuration = duration
-	rawInactiveDuration = syncServiceConfig.CleanKeyTaskV2.RawInactiveDuration
+	rawInactiveDuration := syncServiceConfig.CleanKeyTaskV2.RawInactiveDuration
 	duration, err = time.ParseDuration(rawInactiveDuration)
 	if err != nil {
 		return err
@@ -209,14 +183,6 @@ func GetTaskDBCluster() *DBCluster {
 
 func GetCollectEventDBCluster() *DBCluster {
 	return collectEventDBCluster
-}
-
-func GetWrittenRecordDBCluster() *DBCluster {
-	return writtenRecordDBCluster
-}
-
-func GetAccessedRecordDBCluster() *DBCluster {
-	return accessedRecordDBCluster
 }
 
 func GetHashTagEventService() *HashTagEventService {

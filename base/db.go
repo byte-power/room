@@ -13,10 +13,6 @@ import (
 	"github.com/go-pg/pg/v10/orm"
 )
 
-const (
-	defaultDBConnMaxRetries = 5
-)
-
 type DBCluster struct {
 	clients       []dbClient
 	shardingCount int
@@ -176,12 +172,10 @@ func getTableIndex(shardingKey string, shardingCount int) int {
 }
 
 const (
-	dbQueryStartTimeContextKey             = "query_start_time"
-	serviceDBQueryDurationMetricKey        = "service.database.query.duration"
-	taskDBQueryDurationMetricKey           = "task.database.query.duration"
-	writtenRecordDBQueryDurationMetricKey  = "task.write.database.query.duration"
-	AccessedRecordDBQueryDurationMetricKey = "task.access.database.query.duration"
-	collectEventDBQueryDurationMetricKey   = "collect_event.database.query.duration"
+	dbQueryStartTimeContextKey           = "query_start_time"
+	serviceDBQueryDurationMetricKey      = "service.database.query.duration"
+	taskDBQueryDurationMetricKey         = "task.database.query.duration"
+	collectEventDBQueryDurationMetricKey = "collect_event.database.query.duration"
 )
 
 type dbLogger struct {

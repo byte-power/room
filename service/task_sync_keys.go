@@ -3,10 +3,14 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"bytepower_room/utility"
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"go.uber.org/ratelimit"
 )
 
@@ -117,4 +121,121 @@ func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string, tryTimes
 		return err
 	}
 	return nil
+}
+
+const redisKeyNotExist = "none"
+
+func getValueFromRedis(key string) (RedisValue, error) {
+	redisClient := base.GetRedisCluster()
+	currentTime := time.Now()
+
+	// Get redis key type.
+	keyType, err := redisClient.Type(contextTODO, key).Result()
+	if err != nil {
+		return RedisValue{}, err
+	}
+	if keyType == redisKeyNotExist {
+		return RedisValue{}, nil
+	}
+
+	keyValue, err := serializeValue(keyType, key)
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return RedisValue{}, nil
+		}
+		return RedisValue{}, err
+	}
+
+	ttl, err := redisClient.PTTL(contextTODO, key).Result()
+	if err != nil {
+		return RedisValue{}, err
+	}
+	// Key does not exist.
+	if ttl == -2 {
+		return RedisValue{}, nil
+	}
+
+	value := RedisValue{Type: keyType, Value: keyValue}
+
+	if ttl > 0 {
+		value.ExpireTs = utility.TimestampInMS(currentTime.Add(ttl))
+	}
+	return value, nil
+}
+
+func serializeValue(keyType, key string) (string, error) {
+	value, err := getValueByKeyFromRedis(keyType, key)
+	if err != nil {
+		return "", err
+	}
+	switch keyType {
+	case stringType:
+		return value[0], nil
+	default:
+		v, err := json.Marshal(value)
+		if err != nil {
+			return "", err
+		}
+		return string(v), nil
+	}
+}
+
+func getValueByKeyFromRedis(keyType, key string) ([]string, error) {
+	redisClient := base.GetRedisCluster()
+	var result []string
+	var err error
+	switch keyType {
+	case stringType:
+		value, stringErr := redisClient.Get(contextTODO, key).Result()
+		err = stringErr
+		result = []string{value}
+	case listType, hashType, zsetType, setType:
+		result, err = serializeNonStringValue(key, keyType)
+	default:
+		err = fmt.Errorf("not supported key type: %s", keyType)
+	}
+	return result, err
+}
+
+func serializeNonStringValue(key, keyType string) ([]string, error) {
+	redisClient := base.GetRedisCluster()
+	// list type
+	if keyType == listType {
+		items, err := redisClient.LRange(contextTODO, key, 0, -1).Result()
+		if err != nil {
+			return nil, err
+		}
+		return items, nil
+	}
+
+	// set, hash, zset type
+	var scanStep int64 = 100
+	var scan func(context.Context, string, uint64, string, int64) *redis.ScanCmd
+	if keyType == hashType {
+		scan = redisClient.HScan
+	} else if keyType == setType {
+		scan = redisClient.SScan
+	} else if keyType == zsetType {
+		scan = redisClient.ZScan
+	} else {
+		return nil, fmt.Errorf("data type %s is not supported", keyType)
+	}
+
+	var items []string
+	var cursor uint64 = 0
+	for {
+		itemsInScan, c, err := scan(contextTODO, key, cursor, "", scanStep).Result()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, itemsInScan...)
+		cursor = c
+		if cursor == 0 {
+			break
+		}
+	}
+	if len(items) == 0 {
+		return items, redis.Nil
+	}
+	return items, nil
 }

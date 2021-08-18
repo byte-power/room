@@ -23,25 +23,6 @@ func main() {
 	}
 	coordinatorConfig := base.GetServerConfig().SyncService.Coordinator
 	coordinator := task.NewCoordinatorFromRedisCluster(coordinatorConfig.Name, coordinatorConfig.Addrs)
-	syncRecordTaskConfig := base.GetServerConfig().SyncService.SyncRecordTask
-	syncRecordTask := "sync_records"
-	if !syncRecordTaskConfig.Off {
-		job, err := task.Periodic(syncRecordTask, service.SyncRecordsTask).EveryMinutes(syncRecordTaskConfig.IntervalMinutes).AtSecondInMinute(20)
-		if err != nil {
-			panic(err)
-		}
-		job.SetCoordinate(coordinator)
-	}
-
-	syncKeyTaskConfig := base.GetServerConfig().SyncService.SyncKeyTask
-	syncKeyTask := "sync_keys"
-	if !syncKeyTaskConfig.Off {
-		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask, syncKeyTaskConfig.UpSertTryTimes).EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
-		if err != nil {
-			panic(err)
-		}
-		job.SetCoordinate(coordinator)
-	}
 
 	syncKeyTaskConfigV2 := base.GetServerConfig().SyncService.SyncKeyTaskV2
 	syncKeyTaskV2 := service.SyncKeysTaskName
@@ -51,18 +32,6 @@ func main() {
 		rateLimitPerSecond := syncKeyTaskConfigV2.RateLimitPerSecond
 		job, err := task.Periodic(syncKeyTaskV2, service.SyncKeysTaskV2, upsertTryTimes, noWrittenDuration, rateLimitPerSecond).
 			EveryMinutes(syncKeyTaskConfigV2.IntervalMinutes).AtSecondInMinute(20)
-		if err != nil {
-			panic(err)
-		}
-		job.SetCoordinate(coordinator)
-	}
-
-	cleanKeyTaskConfig := base.GetServerConfig().SyncService.CleanKeyTask
-	cleanKeyTask := "clean_keys"
-	if !cleanKeyTaskConfig.Off {
-		cleanKeyTaskInterval := cleanKeyTaskConfig.IntervalMinutes
-		inactiveDuration := cleanKeyTaskConfig.InactiveDuration
-		job, err := task.Periodic(cleanKeyTask, service.CleanKeysTask, inactiveDuration).EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}
