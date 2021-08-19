@@ -1,65 +1,56 @@
-name: bytepower_room
-room_server:
+redis_cluster:
+  addrs:
+    - "127.0.0.1:30001"
+    - "127.0.0.1:30002"
+    - "127.0.0.1:30003"
+
+  pool_size: 600
+  min_idle_conns: 300
+  dial_timeout_ms: 1000
+  pool_timeout_ms: 1000
+  idle_timeout_second: 14400
+  read_timeout_ms: 100
+  write_timeout_ms: 100
+  max_retries: 5
+  min_retry_backoff_ms: 1
+  max_retry_backoff_ms: 5
+  max_conn_age_second: 3600
+  idle_check_frequency_second: 60
+
+
+room_service:
+  server:
     url: "localhost:8090"
     pprof_url: "localhost:9090"
-    
-redis_cluster:
-    addrs: 
-      - "127.0.0.1:30001"
-      - "127.0.0.1:30002"
-      - "127.0.0.1:30003"
-    pool_size: 600
-    min_idle_conns: 300
-    dial_timeout_ms: 1000
-    pool_timeout_ms: 1000
-    idle_timeout_second: 14400
-    read_timeout_ms: 100
-    write_timeout_ms: 100
-    max_retries: 5
-    min_retry_backoff_ms: 1
-    max_retry_backoff_ms: 5
-    max_conn_age_second: 3600
-    idle_check_frequency_second: 60
 
-log:
-    server:
-      console:
-        level: debug
-    task:
-      console:
-        level: debug
-    collect_event:
-      console:
-        level: debug
+  log:
+    console:
+      level: debug
 
+  metric:
+      prefix: "bytepower_room.service"
+      host: "127.0.0.1:8125"
 
-metric:
-  prefix: "bytepower_room.service"
-  host: "127.0.0.1:8125"
+  load_key:
+    retry_times: 5
+    retry_interval: "2ms"
+    load_timeout: "2000ms"
 
+  hash_tag_event_service:
+    event_report:
+      url: "http://127.0.0.1:8080/events"
+      request_timeout: "3ms"
+      request_max_event: 10
+      request_max_wait_duration: "5s"
+      request_worker_count: 3
+      request_conn_keep_alive_interval: "30s"
+      request_idle_conn_timeout: "90s"
+      request_max_conn: 100
+    agg_interval : "1m"
+    buffer_limit: 10240000
+    monitor_interval: "15s"
 
-hash_tag_event_service:
-  event_report:
-    url: "http://127.0.0.1:8080/events"
-    request_timeout: "3ms"
-    request_max_event: 10
-    request_max_wait_duration: "5s"
-    request_worker_count: 3
-    request_conn_keep_alive_interval: "30s"
-    request_idle_conn_timeout: "90s"
-    request_max_conn: 100
-  agg_interval : "1m"
-  buffer_limit: 10240000
-  monitor_interval: "15s"
-
-
-load_key:
-  retry_times: 5
-  retry_interval: "2ms"
-  load_timeout: "2000ms"
-
-# 用于同步数据的后端数据库
-service_db_cluster:
+  db_cluster:
     sharding_count: 5
     shardings:
       - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
@@ -96,118 +87,129 @@ service_db_cluster:
         start_index: 2
         end_index: 4
 
-task_db_cluster:
-    sharding_count: 5
-    shardings:
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 0
-        end_index: 1
-
-      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 2
-        end_index: 4
-
-collect_event_db_cluster:
-    sharding_count: 5
-    shardings:
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 0
-        end_index: 1
-
-      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 2
-        end_index: 4
-
-collect_event:
-  buffer_limit: 10240000
-  monitor_interval: "15s"
-  server:
-    url: "127.0.0.1:8080"
-    read_timeout_ms: 1000
-    write_timeout_ms: 1000
-    idle_timeout_ms: 1000
-  save_event:
-    retry_times: 3
-    retry_interval_ms: 20
-    timeout_ms: 2000
-    worker_count: 2
-
-collect_event_metric:
+collect_event_service:
+  metric:
     prefix: "bytepower_room.collect_event"
     host: "127.0.0.1:8125"
 
-sync:
+  log:
+    console:
+      level: debug
+
+  collect_event:
+    buffer_limit: 10240000
+    monitor_interval: "15s"
+    server:
+      url: "127.0.0.1:8080"
+      read_timeout_ms: 1000
+      write_timeout_ms: 1000
+      idle_timeout_ms: 1000
+    save_event:
+      retry_times: 3
+      retry_interval_ms: 20
+      timeout_ms: 2000
+      worker_count: 2
+
+  db_cluster:
+    sharding_count: 5
+    shardings:
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 0
+        end_index: 1
+
+      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 2
+        end_index: 4
+
+room_task:
+  log:
+    console:
+      level: debug
+
   metric:
     prefix: "bytepower_room.task"
     host: "127.0.0.1:8125"
+
+  db_cluster:
+    sharding_count: 5
+    shardings:
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 0
+        end_index: 1
+
+      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+        pool_size: 100
+        min_idle_conns: 10
+        dial_timeout_ms: 1000
+        pool_timeout_ms: 1000
+        idle_timeout_second: 14400
+        read_timeout_ms: 100
+        write_timeout_ms: 100
+        max_retries: 5
+        min_retry_backoff_ms: 1
+        max_retry_backoff_ms: 5
+        max_conn_age_second: 3600
+        idle_check_frequency_second: 60
+
+        start_index: 2
+        end_index: 4
+
   coordinator:
     name: "room_sync"
     addrs:
       - "127.0.0.1:30001"
       - "127.0.0.1:30002"
       - "127.0.0.1:30003"
+
   sync_key_task_v2:
     interval_minutes: 5
     upsert_try_times: 3
     no_written_duration: 1h
     rate_limit_per_second: 100
     off: false
+
   clean_key_task_v2:
     interval_minutes: 10
     # Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
     inactive_duration: 2h
     rate_limit_per_second: 100
     off: false
-    
