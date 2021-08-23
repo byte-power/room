@@ -12,7 +12,7 @@ room 以 redis 的 [RESP 协议](https://redis.io/topics/protocol)对外提供�
 
 ## 2. room 整体架构
 
-room 服务分为三个部分: room_server 服务, room_collect_event 服务 和 room_task，这 3 个部分以不同的进程进行部署。
+room 服务分为三个部分: room_server 服务, room_collect_event 服务和 room_task，这 3 个部分以不同的进程进行部署。
 
 这 3 部分实现的功能如下：
 
@@ -34,26 +34,29 @@ room_server 服务使用 RESP 协议，接收客户端的请求，并给出响�
 2. 判断命令中的 keys 是否需要从 PostgreSQL 数据库中加载，如果需要加载，进行步骤 3，否则进行步骤 4
 3. 从 PostgreSQL 数据库中加载数据至 redis cluster 中
 4. 更新 redis cluster 中 keys 所属 hash_tag 的 meta 信息（meta 信息文档稍后有说明）
-5. 执行命令，将命令转发至 redis cluster，redis cluster 执行命令并返回结果，room 将结果返回给客户端
+5. 以 proxy 的方式执行命令，将命令转发至 redis cluster，redis cluster 执行命令并返回结果，room 将结果返回给客户端
 6. 发送 hash_tag 读写事件至 room_collect_event 服务，这一步是异步执行的，不影响对客户端的响应时间
 
+#### 3.1.1. 如何判断 keys 是否需要从数据库中进行加载
+
 下面进一步说明在流程的第 2 步中，如何判断命令中的 keys 是否需要从 PostgreSQL 数据库中加载。
+
 room 为每个 hash_tag 维护了一个 meta 信息，以 hash 类型存储在 redis cluster 中，meta 中包含该 hash_tag 下 keys 的最近读写时间等信息。room 根据 meta 信息来判断是否需要从 PostgreSQL 数据库中加载数据：
 
-1. 如果 meta 信息不存在，则表示这个 hash_tag 的所有 keys 不在 redis cluster 中，即该 hash_tag 下的 keys 没有被访问过或由于很久没被访问而被 clean_keys 任务清理，需要从数据库中加载
+1. 如果 meta 信息不存在，则表示该 hash_tag 的所有 keys 不在 redis cluster 中，即该 hash_tag 下的 keys 没有被访问过或由于一段时间没被访问而被 clean_keys 任务清理，需要从数据库中加载
 2. 如果 meta 信息存在，则表示 hash_tag 下的 keys 已经存在于 redis cluster 中，且 redis cluster 中的是最新数据，不需要从 PostgreSQL 数据库中加载数据
 
 ### 3.2. room_colllect_event 服务处理 hash_tag 读写事件的流程
 
-room_server 服务在处理命令时，会收集 hash_tag 的读写事件，表示某 hash_tag 下的 keys 在什么时间被读写了。事件经过去重合并后，发送给 room_collect_event 服务。room_collect_event 服务负责将这些事件写入数据库中。
+room_server 服务在处理命令时，会收集 hash_tag 的读写事件，事件记录了某 hash_tag 下的 keys 在什么时间被读写。事件经过去重合并后，发送给 room_collect_event 服务，room_collect_event 服务负责将这些事件写入数据库中。
 这些事件在定时任务 sync_keys 和 clean_keys 中会用到。
 
 ### 3.3. room_task 后台任务处理流程
 
-sync_keys 任务根据收集到的 hash_tag 写事件，将一段时间内有写事件的 hash_tag 下的 所有 keys 由 redis cluster 同步到 PostgreSQL 数据库中，并将该 hash_tag 的同步状态由待同步(need_synced) 修改为已同步(synced)。
-sync_keys 是周期性的异步后台任务，这意味 PostgreSQL 数据库中的数据不是实时的，这些数据只用于被 clean_keys 任务清理的 keys 的数据加载或离线分析任务（目前还没有离线分析任务），线上业务需要以 redis cluster 中的数据为准。
+sync_keys 任务根据收集到的 hash_tag 写事件，将最近一段时间内有写事件的 hash_tag 下的所有 keys 由 redis cluster 同步到 PostgreSQL 数据库中，并将该 hash_tag 的同步状态由待同步(need_synced) 修改为已同步(synced)。
+sync_keys 是周期性的异步后台任务，这意味 PostgreSQL 数据库中的数据不是实时的，这些数据只用于被清理的 keys 的数据加载或离线分析任务，线上业务需以 redis cluster 中的数据为准。
 
-clean_keys 任务根据收集到的 hash_tag 读写事件，将一段时间内没有读写过的 hash_tag 下的所有 keys 从 redis cluster 中清除（包括该 hash_tag 的 meta 信息），以释放内存，并将 hash_tag 的同步状态由已同步(synced)修改为已清理(cleaned)。
+clean_keys 任务根据收集到的 hash_tag 读写事件，将一段时间内没有读写过的 hash_tag 下的所有 keys 从 redis cluster 中清除（包括该 hash_tag 的 meta 信息），以释放内存，并将数据库中 hash_tag 的同步状态由已同步(synced)修改为已清理(cleaned)。
 
 ## 4. 如何使用 room
 
@@ -63,10 +66,11 @@ clean_keys 任务根据收集到的 hash_tag 读写事件，将一段时间内�
 
 目前 room 服务只对 bytepower_server 开放使用，使用时需要使用 bytepower_server 封装的 API，而不是直接使用 redis 客户端库。
 
-详细使用文档请访问[这里](https://bp-doc.atcloudbox.com/s/TYb3lluCY)。
+详细使用文档请访问 bp-doc 中的文档。
 
 ## 5. FAQ
 
 1. 为什么要兼容 redis？
+
    首先在设计 room 之前，已有一些业务场景中使用了 redis，这样这些业务由 redis 迁移到 room 时不需要做太多的工作；
    其次 redis 的数据类型、事务等适用于现在的业务场景，不需要重新进行设计；访问 room 的客户端库也可在已有的 redis 客户端库的基础上进行，不需要重新造轮子，这些都减少了工作量。
