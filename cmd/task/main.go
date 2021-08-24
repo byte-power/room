@@ -18,13 +18,13 @@ func main() {
 	if configPath == nil {
 		panic("config not found")
 	}
-	if err := base.InitSyncService(*configPath); err != nil {
+	if err := base.InitRoomTask(*configPath); err != nil {
 		panic(err)
 	}
-	coordinatorConfig := base.GetServerConfig().SyncService.Coordinator
+	coordinatorConfig := base.GetTaskConfig().Coordinator
 	coordinator := task.NewCoordinatorFromRedisCluster(coordinatorConfig.Name, coordinatorConfig.Addrs)
 
-	syncKeyTaskConfigV2 := base.GetServerConfig().SyncService.SyncKeyTaskV2
+	syncKeyTaskConfigV2 := base.GetTaskConfig().SyncKeyTaskV2
 	syncKeyTaskV2 := service.SyncKeysTaskName
 	if !syncKeyTaskConfigV2.Off {
 		upsertTryTimes := syncKeyTaskConfigV2.UpSertTryTimes
@@ -38,7 +38,7 @@ func main() {
 		job.SetCoordinate(coordinator)
 	}
 
-	cleanKeyTaskConfigV2 := base.GetServerConfig().SyncService.CleanKeyTaskV2
+	cleanKeyTaskConfigV2 := base.GetTaskConfig().CleanKeyTaskV2
 	cleanKeyTaskV2 := service.CleanKeysTaskName
 	if !cleanKeyTaskConfigV2.Off {
 		cleanKeyTaskInterval := cleanKeyTaskConfigV2.IntervalMinutes
@@ -56,7 +56,7 @@ func main() {
 }
 
 func monitorScheduler() {
-	logger := base.GetTaskLogger()
+	logger := base.GetTaskDependency().Logger
 	for {
 		count := task.JobCount()
 		logger.Info("job_count", log.Int("count", count))

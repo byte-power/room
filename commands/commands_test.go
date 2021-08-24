@@ -15,7 +15,7 @@ import (
 
 func TestMain(m *testing.M) {
 	configFile := "../cmd/config.yaml"
-	if err := base.InitRoomService(configFile); err != nil {
+	if err := base.InitRoomServer(configFile); err != nil {
 		panic(err)
 	}
 	code := m.Run()
@@ -42,6 +42,7 @@ func TestCommands(t *testing.T) {
 	}
 }
 func TestExecuteCommands(t *testing.T) {
+	dep := base.GetServerDependency()
 	for _, testCase := range testExecuteCommandCases {
 		log.Printf("start test case: %s\n", testCase.description)
 		testCase.prepareFn(testCase.prepareArgs)
@@ -49,15 +50,16 @@ func TestExecuteCommands(t *testing.T) {
 		command, err := newFn(testCase.args)
 		assert.Nil(t, err)
 		log.Printf("test case: %s, command execution: %s\n", testCase.description, command.String())
-		result := ExecuteCommand(command)
+		result := ExecuteCommand(dep.Redis, command)
 		assert.True(t, testCase.compareFn(testCase.respData, result))
 		testEmptyKeysInRedis(testCase.emptyKeys...)
 	}
 }
 
 func testEmptyKeysInRedis(keys ...string) {
+	redisCluster := base.GetServerDependency().Redis
 	for _, key := range keys {
-		base.GetRedisCluster().Del(contextTODO, key)
+		redisCluster.Del(contextTODO, key)
 	}
 }
 
@@ -3173,9 +3175,9 @@ func testRESPDataFindIndex(array []RESPData, item RESPData) int {
 }
 
 func testNewStringKeys(keys interface{}) {
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	for _, key := range keys.([]string) {
-		client.Set(context.TODO(), key, key, 0)
+		redisCluster.Set(context.TODO(), key, key, 0)
 	}
 }
 
@@ -3183,32 +3185,32 @@ func testNewStringKeyWithExpiration(input interface{}) {
 	slice := input.([]interface{})
 	key := slice[0].(string)
 	duration := slice[1].(time.Duration)
-	client := base.GetRedisCluster()
-	client.Set(context.TODO(), key, key, duration)
+	redisCluster := base.GetServerDependency().Redis
+	redisCluster.Set(context.TODO(), key, key, duration)
 }
 
 func testNewListKey(input interface{}) {
 	slice := input.([]interface{})
 	key := slice[0].(string)
 	values := slice[1:]
-	client := base.GetRedisCluster()
-	client.RPush(context.TODO(), key, values...)
+	redisCluster := base.GetServerDependency().Redis
+	redisCluster.RPush(context.TODO(), key, values...)
 }
 
 func testNewSetKey(input interface{}) {
 	slice := input.([]interface{})
 	key := slice[0].(string)
 	values := slice[1:]
-	client := base.GetRedisCluster()
-	client.SAdd(context.TODO(), key, values...)
+	redisCluster := base.GetServerDependency().Redis
+	redisCluster.SAdd(context.TODO(), key, values...)
 }
 
 func testNewHashKey(input interface{}) {
 	slice := input.([]interface{})
 	key := slice[0].(string)
 	values := slice[1:]
-	client := base.GetRedisCluster()
-	client.HSet(context.TODO(), key, values...)
+	redisCluster := base.GetServerDependency().Redis
+	redisCluster.HSet(context.TODO(), key, values...)
 }
 
 func testPrepareNOOP(input interface{}) {
@@ -3219,8 +3221,8 @@ func testNewStringKeyValue(input interface{}) {
 	slice := input.([]string)
 	key := slice[0]
 	value := slice[1]
-	client := base.GetRedisCluster()
-	client.Set(context.TODO(), key, value, 0)
+	redisCluster := base.GetServerDependency().Redis
+	redisCluster.Set(context.TODO(), key, value, 0)
 }
 
 func testNewZSetKey(input interface{}) {
@@ -3237,8 +3239,8 @@ func testNewZSetKey(input interface{}) {
 		zSlice[i/2] = z
 	}
 
-	client := base.GetRedisCluster()
-	client.ZAdd(context.TODO(), key, zSlice...)
+	redisCluster := base.GetServerDependency().Redis
+	redisCluster.ZAdd(context.TODO(), key, zSlice...)
 }
 
 func TestExtractHashTagFromKey(t *testing.T) {

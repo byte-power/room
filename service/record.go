@@ -176,7 +176,7 @@ func recordTaskSuccess(taskName string, d time.Duration) {
 }
 
 func recordTaskSuccessLog(taskName string, d time.Duration) {
-	logger := base.GetTaskLogger()
+	logger := base.GetTaskDependency().Logger
 	logger.Info(
 		"task success",
 		log.String("task", taskName),
@@ -185,7 +185,7 @@ func recordTaskSuccessLog(taskName string, d time.Duration) {
 }
 
 func recordTaskSuccessMetric(taskName string, d time.Duration) {
-	metric := base.GetTaskMetricService()
+	metric := base.GetTaskDependency().Metric
 	metricName := fmt.Sprintf("%s.success", taskName)
 	metric.MetricIncrease(metricName)
 	if d != time.Duration(0) {
@@ -195,7 +195,7 @@ func recordTaskSuccessMetric(taskName string, d time.Duration) {
 }
 
 func logTaskStart(taskName string, startTime time.Time, pairs ...log.LogPair) {
-	logger := base.GetTaskLogger()
+	logger := base.GetTaskDependency().Logger
 	logPairs := []log.LogPair{
 		log.String("task", taskName),
 		log.String("start_time", startTime.String()),

@@ -38,7 +38,7 @@ func testCleanDataInDB(db *base.DBCluster, hashTags ...string) {
 }
 
 func TestLoadDataByID(t *testing.T) {
-	db := base.GetServiceDBCluster()
+	db := base.GetServerDependency().DB
 
 	// load not existed row
 	hashTag := "hash_tag_not_exist"
@@ -112,7 +112,7 @@ func TestLoadDataByID(t *testing.T) {
 }
 
 func TestLoadDataByIDWithContext(t *testing.T) {
-	db := base.GetServiceDBCluster()
+	db := base.GetServerDependency().DB
 	currentTime := time.Now()
 	currentTsInMS := currentTime.Unix() * 1000
 
@@ -211,7 +211,7 @@ func TestRedisValue(t *testing.T) {
 }
 
 func TestUpsertHashTagKeysRecordByEvent(t *testing.T) {
-	db := base.GetServiceDBCluster()
+	db := base.GetServerDependency().DB
 
 	// insert row with read event
 	hashTag := "abc"

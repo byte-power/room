@@ -19,11 +19,11 @@ func main() {
 	if configPath == nil {
 		panic("config not found")
 	}
-	if err := base.InitCollectEventService(*configPath); err != nil {
+	if err := base.InitCollectEvent(*configPath); err != nil {
 		panic(err)
 	}
 	dep := base.GetCollectEventDependency()
-	config := base.GetServerConfig().CollectEventService
+	config := base.GetCollectEventConfig().CollectEvent
 	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric, dep.DB)
 	if err != nil {
 		panic(err)

@@ -11,7 +11,7 @@ import (
 func testInitHashTagEventService() *HashTagEventService {
 	loggerConfig := map[string]interface{}{"console": map[string]interface{}{"level": "debug"}}
 	logger, _ := parseLogger(
-		"room", "event_service",
+		"event_service",
 		loggerConfig)
 	metric, _ := InitMetric(MetricConfig{Host: "localhost"})
 	hashTagEventConfig := HashTagEventServiceConfig{EventReport: HashTagEventServiceEventReportConfig{URL: "localhost"}}

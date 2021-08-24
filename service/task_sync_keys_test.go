@@ -49,7 +49,7 @@ func testGenerateZSetValueForRedis(count int) ([]*redis.Z, map[string]float64) {
 }
 
 func TestSerializeNonStringValue(t *testing.T) {
-	redisClient := base.GetRedisCluster()
+	redisCluster := base.GetTaskDependency().Redis
 
 	// test list
 	testListItems := []struct {
@@ -80,8 +80,8 @@ func TestSerializeNonStringValue(t *testing.T) {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
 		values := testGenerateListValueForRedis(item.count)
-		redisClient.RPush(testContextTODO, key, values...).Result()
-		result, err := serializeNonStringValue(key, listType)
+		redisCluster.RPush(testContextTODO, key, values...).Result()
+		result, err := serializeNonStringValue(redisCluster, key, listType)
 		assert.Nil(t, err)
 		assert.Equal(t, len(values), len(result))
 		for index, value := range values {
@@ -118,8 +118,8 @@ func TestSerializeNonStringValue(t *testing.T) {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
 		values := testGenerateHashValueForRedis(item.count)
-		redisClient.HSet(testContextTODO, key, values).Result()
-		result, err := serializeNonStringValue(key, hashType)
+		redisCluster.HSet(testContextTODO, key, values).Result()
+		result, err := serializeNonStringValue(redisCluster, key, hashType)
 		assert.Nil(t, err)
 		assert.Equal(t, len(values)*2, len(result))
 		for index := 0; index < len(result)-1; index += 2 {
@@ -158,8 +158,8 @@ func TestSerializeNonStringValue(t *testing.T) {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
 		values := testGenerateSetValueForRedis(item.count)
-		redisClient.SAdd(testContextTODO, key, values...).Result()
-		result, err := serializeNonStringValue(key, setType)
+		redisCluster.SAdd(testContextTODO, key, values...).Result()
+		result, err := serializeNonStringValue(redisCluster, key, setType)
 		assert.Nil(t, err)
 		assert.Equal(t, len(values), len(result))
 		for _, item := range values {
@@ -196,8 +196,8 @@ func TestSerializeNonStringValue(t *testing.T) {
 		key := item.key
 		defer testEmptyKeysInRedis(key)
 		values, m := testGenerateZSetValueForRedis(item.count)
-		redisClient.ZAdd(testContextTODO, key, values...).Result()
-		result, err := serializeNonStringValue(key, zsetType)
+		redisCluster.ZAdd(testContextTODO, key, values...).Result()
+		result, err := serializeNonStringValue(redisCluster, key, zsetType)
 		assert.Nil(t, err)
 		assert.Equal(t, len(m)*2, len(result))
 		for i := 0; i < len(result)-1; i += 2 {
@@ -210,9 +210,10 @@ func TestSerializeNonStringValue(t *testing.T) {
 }
 
 func TestGetValueFromRedis(t *testing.T) {
+	redisCluster := base.GetTaskDependency().Redis
 	//get not exist key
 	key := "{a}not_exist"
-	value, err := getValueFromRedis(key)
+	value, err := getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, "", value.Type)
 	assert.Equal(t, "", value.Value)
@@ -221,10 +222,9 @@ func TestGetValueFromRedis(t *testing.T) {
 	// get a string key
 	key = "{b}string"
 	stringValue := "abc"
-	client := base.GetRedisCluster()
-	defer client.Del(context.TODO(), key)
-	client.Set(context.TODO(), key, stringValue, 0)
-	value, err = getValueFromRedis(key)
+	defer redisCluster.Del(context.TODO(), key)
+	redisCluster.Set(context.TODO(), key, stringValue, 0)
+	value, err = getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, stringType, value.Type)
 	assert.Equal(t, stringValue, value.Value)
@@ -233,9 +233,9 @@ func TestGetValueFromRedis(t *testing.T) {
 	// get a string key with expiration
 	key = "{b}string2"
 	stringValue = "abcd"
-	defer client.Del(context.TODO(), key)
-	client.Set(context.TODO(), key, stringValue, 10*time.Second)
-	value, err = getValueFromRedis(key)
+	defer redisCluster.Del(context.TODO(), key)
+	redisCluster.Set(context.TODO(), key, stringValue, 10*time.Second)
+	value, err = getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, stringType, value.Type)
 	assert.Equal(t, stringValue, value.Value)
@@ -244,9 +244,9 @@ func TestGetValueFromRedis(t *testing.T) {
 	// get a list key
 	key = "{b}list"
 	listValue := []interface{}{"a", "b", "c", "d"}
-	defer client.Del(context.TODO(), key)
-	client.RPush(context.TODO(), key, listValue...)
-	value, err = getValueFromRedis(key)
+	defer redisCluster.Del(context.TODO(), key)
+	redisCluster.RPush(context.TODO(), key, listValue...)
+	value, err = getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, listType, value.Type)
 
@@ -259,9 +259,9 @@ func TestGetValueFromRedis(t *testing.T) {
 	// get a set key
 	key = "{b}set"
 	setValue := []interface{}{"a", "b", "c", "d"}
-	defer client.Del(context.TODO(), key)
-	client.SAdd(context.TODO(), key, setValue...)
-	value, err = getValueFromRedis(key)
+	defer redisCluster.Del(context.TODO(), key)
+	redisCluster.SAdd(context.TODO(), key, setValue...)
+	value, err = getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, setType, value.Type)
 
@@ -277,9 +277,9 @@ func TestGetValueFromRedis(t *testing.T) {
 	// get a hash key
 	key = "{b}hash"
 	hashValue := map[string]interface{}{"a": "b", "c": "d", "e": "f"}
-	defer client.Del(context.TODO(), key)
-	client.HSet(context.TODO(), key, hashValue)
-	value, err = getValueFromRedis(key)
+	defer redisCluster.Del(context.TODO(), key)
+	redisCluster.HSet(context.TODO(), key, hashValue)
+	value, err = getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, hashType, value.Type)
 
@@ -301,12 +301,12 @@ func TestGetValueFromRedis(t *testing.T) {
 		"b": {Member: "b", Score: 2.2},
 		"c": {Member: "c", Score: 3.3},
 	}
-	defer client.Del(context.TODO(), key)
+	defer redisCluster.Del(context.TODO(), key)
 	for _, z := range zsetValue {
-		client.ZAdd(context.TODO(), key, &z)
+		redisCluster.ZAdd(context.TODO(), key, &z)
 	}
-	client.Expire(context.TODO(), key, 10*time.Second)
-	value, err = getValueFromRedis(key)
+	redisCluster.Expire(context.TODO(), key, 10*time.Second)
+	value, err = getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
 	assert.Equal(t, zsetType, value.Type)
 

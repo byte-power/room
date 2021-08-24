@@ -1,9 +1,7 @@
 package commands
 
 import (
-	"bytepower_room/base"
 	"bytepower_room/utility"
-	"strings"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -33,22 +31,22 @@ func (command *CommandCommand) Cmd() redis.Cmder {
 	return redis.NewCommandsInfoCmd(contextTODO, command.name)
 }
 
-func (command *CommandCommand) Exec() RESPData {
-	client := base.GetRedisCluster()
-	commands, err := client.Command(contextTODO).Result()
-	if err != nil {
-		return RESPData{DataType: ErrorRespType, Value: err}
-	}
-	data := RESPData{DataType: ArrayRespType}
-	value := make([]RESPData, 0)
-	for name, cmd := range commands {
-		if _, ok := supportedCommands[strings.ToLower(name)]; ok {
-			value = append(value, convertCommandInfoToRESPData(cmd))
-		}
-	}
-	data.Value = value
-	return data
-}
+// func (command *CommandCommand) Exec() RESPData {
+// 	client := base.GetRedisCluster()
+// 	commands, err := client.Command(contextTODO).Result()
+// 	if err != nil {
+// 		return RESPData{DataType: ErrorRespType, Value: err}
+// 	}
+// 	data := RESPData{DataType: ArrayRespType}
+// 	value := make([]RESPData, 0)
+// 	for name, cmd := range commands {
+// 		if _, ok := supportedCommands[strings.ToLower(name)]; ok {
+// 			value = append(value, convertCommandInfoToRESPData(cmd))
+// 		}
+// 	}
+// 	data.Value = value
+// 	return data
+// }
 
 func convertCommandInfoToRESPData(data *redis.CommandInfo) RESPData {
 	respData := RESPData{DataType: ArrayRespType}

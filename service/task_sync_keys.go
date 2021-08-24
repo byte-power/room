@@ -65,7 +65,7 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLim
 			processCount := 0
 			for _, model := range models {
 				ratelimitBucket.Take()
-				if err = syncRoomData(dep.DB, model, time.Now(), upsertTryTimes); err != nil {
+				if err = syncRoomData(dep.DB, dep.Redis, model, time.Now(), upsertTryTimes); err != nil {
 					recordTaskErrorV2(
 						dep.Logger, dep.Metric, SyncKeysTaskName,
 						err, "sync_room_data",
@@ -95,8 +95,8 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLim
 	}
 }
 
-func syncRoomData(db *base.DBCluster, model *roomHashTagKeys, t time.Time, tryTimes int) error {
-	if err := syncHashTagKeys(db, model.HashTag, model.Keys, tryTimes); err != nil {
+func syncRoomData(db *base.DBCluster, redisCluster *redis.ClusterClient, model *roomHashTagKeys, t time.Time, tryTimes int) error {
+	if err := syncHashTagKeys(db, redisCluster, model.HashTag, model.Keys, tryTimes); err != nil {
 		return err
 	}
 	if err := model.SetStatusAsSynced(db, t); err != nil {
@@ -105,10 +105,10 @@ func syncRoomData(db *base.DBCluster, model *roomHashTagKeys, t time.Time, tryTi
 	return nil
 }
 
-func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string, tryTimes int) error {
+func syncHashTagKeys(db *base.DBCluster, redisCluster *redis.ClusterClient, hashTag string, keys []string, tryTimes int) error {
 	value := make(map[string]RedisValue)
 	for _, key := range keys {
-		v, err := getValueFromRedis(key)
+		v, err := getValueFromRedis(redisCluster, key)
 		if err != nil {
 			return err
 		}
@@ -125,12 +125,11 @@ func syncHashTagKeys(db *base.DBCluster, hashTag string, keys []string, tryTimes
 
 const redisKeyNotExist = "none"
 
-func getValueFromRedis(key string) (RedisValue, error) {
-	redisClient := base.GetRedisCluster()
+func getValueFromRedis(redisCluster *redis.ClusterClient, key string) (RedisValue, error) {
 	currentTime := time.Now()
 
 	// Get redis key type.
-	keyType, err := redisClient.Type(contextTODO, key).Result()
+	keyType, err := redisCluster.Type(contextTODO, key).Result()
 	if err != nil {
 		return RedisValue{}, err
 	}
@@ -138,7 +137,7 @@ func getValueFromRedis(key string) (RedisValue, error) {
 		return RedisValue{}, nil
 	}
 
-	keyValue, err := serializeValue(keyType, key)
+	keyValue, err := serializeValue(redisCluster, keyType, key)
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return RedisValue{}, nil
@@ -146,7 +145,7 @@ func getValueFromRedis(key string) (RedisValue, error) {
 		return RedisValue{}, err
 	}
 
-	ttl, err := redisClient.PTTL(contextTODO, key).Result()
+	ttl, err := redisCluster.PTTL(contextTODO, key).Result()
 	if err != nil {
 		return RedisValue{}, err
 	}
@@ -163,8 +162,8 @@ func getValueFromRedis(key string) (RedisValue, error) {
 	return value, nil
 }
 
-func serializeValue(keyType, key string) (string, error) {
-	value, err := getValueByKeyFromRedis(keyType, key)
+func serializeValue(redisCluster *redis.ClusterClient, keyType, key string) (string, error) {
+	value, err := getValueByKeyFromRedis(redisCluster, keyType, key)
 	if err != nil {
 		return "", err
 	}
@@ -180,28 +179,26 @@ func serializeValue(keyType, key string) (string, error) {
 	}
 }
 
-func getValueByKeyFromRedis(keyType, key string) ([]string, error) {
-	redisClient := base.GetRedisCluster()
+func getValueByKeyFromRedis(redisCluster *redis.ClusterClient, keyType, key string) ([]string, error) {
 	var result []string
 	var err error
 	switch keyType {
 	case stringType:
-		value, stringErr := redisClient.Get(contextTODO, key).Result()
+		value, stringErr := redisCluster.Get(contextTODO, key).Result()
 		err = stringErr
 		result = []string{value}
 	case listType, hashType, zsetType, setType:
-		result, err = serializeNonStringValue(key, keyType)
+		result, err = serializeNonStringValue(redisCluster, key, keyType)
 	default:
 		err = fmt.Errorf("not supported key type: %s", keyType)
 	}
 	return result, err
 }
 
-func serializeNonStringValue(key, keyType string) ([]string, error) {
-	redisClient := base.GetRedisCluster()
+func serializeNonStringValue(redisCluster *redis.ClusterClient, key, keyType string) ([]string, error) {
 	// list type
 	if keyType == listType {
-		items, err := redisClient.LRange(contextTODO, key, 0, -1).Result()
+		items, err := redisCluster.LRange(contextTODO, key, 0, -1).Result()
 		if err != nil {
 			return nil, err
 		}
@@ -212,11 +209,11 @@ func serializeNonStringValue(key, keyType string) ([]string, error) {
 	var scanStep int64 = 100
 	var scan func(context.Context, string, uint64, string, int64) *redis.ScanCmd
 	if keyType == hashType {
-		scan = redisClient.HScan
+		scan = redisCluster.HScan
 	} else if keyType == setType {
-		scan = redisClient.SScan
+		scan = redisCluster.SScan
 	} else if keyType == zsetType {
-		scan = redisClient.ZScan
+		scan = redisCluster.ZScan
 	} else {
 		return nil, fmt.Errorf("data type %s is not supported", keyType)
 	}
