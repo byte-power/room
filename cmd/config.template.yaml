@@ -1,27 +1,6 @@
-redis_cluster:
-  addrs:
-    - "127.0.0.1:30001"
-    - "127.0.0.1:30002"
-    - "127.0.0.1:30003"
-
-  pool_size: 600
-  min_idle_conns: 300
-  dial_timeout_ms: 1000
-  pool_timeout_ms: 1000
-  idle_timeout_second: 14400
-  read_timeout_ms: 100
-  write_timeout_ms: 100
-  max_retries: 5
-  min_retry_backoff_ms: 1
-  max_retry_backoff_ms: 5
-  max_conn_age_second: 3600
-  idle_check_frequency_second: 60
-
-
-room_service:
-  server:
-    url: "localhost:8090"
-    pprof_url: "localhost:9090"
+server:
+  url: "localhost:8090"
+  pprof_url: "localhost:9090"
 
   log:
     console:
@@ -50,6 +29,25 @@ room_service:
     buffer_limit: 10240000
     monitor_interval: "15s"
 
+  redis_cluster:
+    addrs:
+      - "127.0.0.1:30001"
+      - "127.0.0.1:30002"
+      - "127.0.0.1:30003"
+
+    pool_size: 600
+    min_idle_conns: 300
+    dial_timeout_ms: 1000
+    pool_timeout_ms: 1000
+    idle_timeout_second: 14400
+    read_timeout_ms: 100
+    write_timeout_ms: 100
+    max_retries: 5
+    min_retry_backoff_ms: 1
+    max_retry_backoff_ms: 5
+    max_conn_age_second: 3600
+    idle_check_frequency_second: 60
+
   db_cluster:
     sharding_count: 5
     shardings:
@@ -87,7 +85,7 @@ room_service:
         start_index: 2
         end_index: 4
 
-collect_event_service:
+collect_event:
   metric:
     prefix: "bytepower_room.collect_event"
     host: "127.0.0.1:8125"
@@ -110,6 +108,25 @@ collect_event_service:
       timeout_ms: 2000
       worker_count: 2
 
+  redis_cluster:
+    addrs:
+      - "127.0.0.1:30001"
+      - "127.0.0.1:30002"
+      - "127.0.0.1:30003"
+
+    pool_size: 600
+    min_idle_conns: 300
+    dial_timeout_ms: 1000
+    pool_timeout_ms: 1000
+    idle_timeout_second: 14400
+    read_timeout_ms: 100
+    write_timeout_ms: 100
+    max_retries: 5
+    min_retry_backoff_ms: 1
+    max_retry_backoff_ms: 5
+    max_conn_age_second: 3600
+    idle_check_frequency_second: 60
+
   db_cluster:
     sharding_count: 5
     shardings:
@@ -147,7 +164,7 @@ collect_event_service:
         start_index: 2
         end_index: 4
 
-room_task:
+task:
   log:
     console:
       level: debug
@@ -155,6 +172,25 @@ room_task:
   metric:
     prefix: "bytepower_room.task"
     host: "127.0.0.1:8125"
+
+  redis_cluster:
+    addrs:
+      - "127.0.0.1:30001"
+      - "127.0.0.1:30002"
+      - "127.0.0.1:30003"
+
+    pool_size: 600
+    min_idle_conns: 300
+    dial_timeout_ms: 1000
+    pool_timeout_ms: 1000
+    idle_timeout_second: 14400
+    read_timeout_ms: 100
+    write_timeout_ms: 100
+    max_retries: 5
+    min_retry_backoff_ms: 1
+    max_retry_backoff_ms: 5
+    max_conn_age_second: 3600
+    idle_check_frequency_second: 60
 
   db_cluster:
     sharding_count: 5
