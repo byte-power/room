@@ -23,11 +23,13 @@ func main() {
 		panic(err)
 	}
 	dep := base.GetCollectEventDependency()
-	config := base.GetCollectEventConfig().CollectEvent
+	config := base.GetCollectEventConfig()
 	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric, dep.DB)
 	if err != nil {
 		panic(err)
 	}
+	dep.Logger.Info("init_collect_event_service", log.String("config", fmt.Sprintf("%+v", *collectEventService.Config())))
+
 	collectEventService.Run()
 
 	signalCh := make(chan os.Signal, 1)

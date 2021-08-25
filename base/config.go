@@ -147,11 +147,19 @@ func (config LoadKeyConfig) GetLoadTimeout() time.Duration {
 }
 
 type RoomCollectEventConfig struct {
-	Log          map[string]interface{}    `yaml:"log"`
-	Metric       MetricConfig              `yaml:"metric"`
-	CollectEvent CollectEventServiceConfig `yaml:"collect_event"`
-	RedisCluster RedisClusterConfig        `yaml:"redis_cluster"`
-	DB           DBClusterConfig           `yaml:"db_cluster"`
+	Log    map[string]interface{} `yaml:"log"`
+	Metric MetricConfig           `yaml:"metric"`
+
+	Server    CollectEventServiceServerConfig    `yaml:"server"`
+	SaveEvent CollectEventServiceSaveEventConfig `yaml:"save_event"`
+
+	BufferLimit int `yaml:"buffer_limit"`
+
+	RawMonitorInterval string `yaml:"monitor_interval"`
+	MonitorInterval    time.Duration
+
+	RedisCluster RedisClusterConfig `yaml:"redis_cluster"`
+	DB           DBClusterConfig    `yaml:"db_cluster"`
 }
 
 func (config RoomCollectEventConfig) check() error {
@@ -161,29 +169,6 @@ func (config RoomCollectEventConfig) check() error {
 	if err := config.Metric.check(); err != nil {
 		return fmt.Errorf("metric.%w", err)
 	}
-	if err := config.CollectEvent.check(); err != nil {
-		return fmt.Errorf("collect_event.%w", err)
-	}
-	if err := config.RedisCluster.check(); err != nil {
-		return fmt.Errorf("redis_cluster.%w", err)
-	}
-	if err := config.DB.check(); err != nil {
-		return fmt.Errorf("db_cluster.%w", err)
-	}
-	return nil
-}
-
-type CollectEventServiceConfig struct {
-	Server    CollectEventServiceServerConfig    `yaml:"server"`
-	SaveEvent CollectEventServiceSaveEventConfig `yaml:"save_event"`
-
-	BufferLimit int `yaml:"buffer_limit"`
-
-	RawMonitorInterval string `yaml:"monitor_interval"`
-	MonitorInterval    time.Duration
-}
-
-func (config CollectEventServiceConfig) check() error {
 	if err := config.Server.check(); err != nil {
 		return fmt.Errorf("server.%w", err)
 	}
@@ -196,10 +181,16 @@ func (config CollectEventServiceConfig) check() error {
 	if config.RawMonitorInterval == "" {
 		return errors.New("monitor_interval should not be empty")
 	}
+	if err := config.RedisCluster.check(); err != nil {
+		return fmt.Errorf("redis_cluster.%w", err)
+	}
+	if err := config.DB.check(); err != nil {
+		return fmt.Errorf("db_cluster.%w", err)
+	}
 	return nil
 }
 
-func (config *CollectEventServiceConfig) Init() error {
+func (config *RoomCollectEventConfig) Init() error {
 	if err := config.check(); err != nil {
 		return err
 	}

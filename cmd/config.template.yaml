@@ -94,19 +94,19 @@ collect_event:
     console:
       level: debug
 
-  collect_event:
-    buffer_limit: 10240000
-    monitor_interval: "15s"
-    server:
-      url: "127.0.0.1:8080"
-      read_timeout_ms: 1000
-      write_timeout_ms: 1000
-      idle_timeout_ms: 1000
-    save_event:
-      retry_times: 3
-      retry_interval_ms: 20
-      timeout_ms: 2000
-      worker_count: 2
+  buffer_limit: 10240000
+  monitor_interval: "15s"
+  server:
+    url: "127.0.0.1:8080"
+    read_timeout_ms: 1000
+    write_timeout_ms: 1000
+    idle_timeout_ms: 1000
+  save_event:
+    retry_times: 3
+    retry_interval_ms: 20
+    timeout_ms: 2000
+    worker_count: 2
+
 
   redis_cluster:
     addrs:
