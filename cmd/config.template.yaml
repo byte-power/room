@@ -236,14 +236,14 @@ task:
       - "127.0.0.1:30002"
       - "127.0.0.1:30003"
 
-  sync_key_task_v2:
+  sync_key_task:
     interval_minutes: 5
     upsert_try_times: 3
     no_written_duration: 1h
     rate_limit_per_second: 100
     off: false
 
-  clean_key_task_v2:
+  clean_key_task:
     interval_minutes: 10
     # Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
     inactive_duration: 2h

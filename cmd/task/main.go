@@ -24,27 +24,27 @@ func main() {
 	coordinatorConfig := base.GetTaskConfig().Coordinator
 	coordinator := task.NewCoordinatorFromRedisCluster(coordinatorConfig.Name, coordinatorConfig.Addrs)
 
-	syncKeyTaskConfigV2 := base.GetTaskConfig().SyncKeyTaskV2
-	syncKeyTaskV2 := service.SyncKeysTaskName
-	if !syncKeyTaskConfigV2.Off {
-		upsertTryTimes := syncKeyTaskConfigV2.UpSertTryTimes
-		noWrittenDuration := syncKeyTaskConfigV2.NoWrittenDuration
-		rateLimitPerSecond := syncKeyTaskConfigV2.RateLimitPerSecond
-		job, err := task.Periodic(syncKeyTaskV2, service.SyncKeysTaskV2, upsertTryTimes, noWrittenDuration, rateLimitPerSecond).
-			EveryMinutes(syncKeyTaskConfigV2.IntervalMinutes).AtSecondInMinute(20)
+	syncKeyTaskConfig := base.GetTaskConfig().SyncKeyTask
+	syncKeyTask := service.SyncKeysTaskName
+	if !syncKeyTaskConfig.Off {
+		upsertTryTimes := syncKeyTaskConfig.UpSertTryTimes
+		noWrittenDuration := syncKeyTaskConfig.NoWrittenDuration
+		rateLimitPerSecond := syncKeyTaskConfig.RateLimitPerSecond
+		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask, upsertTryTimes, noWrittenDuration, rateLimitPerSecond).
+			EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}
 		job.SetCoordinate(coordinator)
 	}
 
-	cleanKeyTaskConfigV2 := base.GetTaskConfig().CleanKeyTaskV2
-	cleanKeyTaskV2 := service.CleanKeysTaskName
-	if !cleanKeyTaskConfigV2.Off {
-		cleanKeyTaskInterval := cleanKeyTaskConfigV2.IntervalMinutes
-		inactiveDuration := cleanKeyTaskConfigV2.InactiveDuration
-		rateLimtPerSecond := cleanKeyTaskConfigV2.RateLimitPerSecond
-		job, err := task.Periodic(cleanKeyTaskV2, service.CleanKeysTaskV2, inactiveDuration, rateLimtPerSecond).
+	cleanKeyTaskConfig := base.GetTaskConfig().CleanKeyTask
+	cleanKeyTask := service.CleanKeysTaskName
+	if !cleanKeyTaskConfig.Off {
+		cleanKeyTaskInterval := cleanKeyTaskConfig.IntervalMinutes
+		inactiveDuration := cleanKeyTaskConfig.InactiveDuration
+		rateLimtPerSecond := cleanKeyTaskConfig.RateLimitPerSecond
+		job, err := task.Periodic(cleanKeyTask, service.CleanKeysTask, inactiveDuration, rateLimtPerSecond).
 			EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)

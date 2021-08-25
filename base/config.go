@@ -250,13 +250,13 @@ func (config CollectEventServiceSaveEventConfig) check() error {
 }
 
 type RoomTaskConfig struct {
-	Log            map[string]interface{} `yaml:"log"`
-	Metric         MetricConfig           `yaml:"metric"`
-	RedisCluster   RedisClusterConfig     `yaml:"redis_cluster"`
-	DB             DBClusterConfig        `yaml:"db_cluster"`
-	Coordinator    CoordinatorConfig      `yaml:"coordinator"`
-	SyncKeyTaskV2  SyncKeyTaskConfig      `yaml:"sync_key_task_v2"`
-	CleanKeyTaskV2 CleanKeyTaskConfig     `yaml:"clean_key_task_v2"`
+	Log          map[string]interface{} `yaml:"log"`
+	Metric       MetricConfig           `yaml:"metric"`
+	RedisCluster RedisClusterConfig     `yaml:"redis_cluster"`
+	DB           DBClusterConfig        `yaml:"db_cluster"`
+	Coordinator  CoordinatorConfig      `yaml:"coordinator"`
+	SyncKeyTask  SyncKeyTaskConfig      `yaml:"sync_key_task"`
+	CleanKeyTask CleanKeyTaskConfig     `yaml:"clean_key_task"`
 }
 
 func (config RoomTaskConfig) check() error {
@@ -275,11 +275,11 @@ func (config RoomTaskConfig) check() error {
 	if err := config.Coordinator.check(); err != nil {
 		return fmt.Errorf("coordinator.%w", err)
 	}
-	if err := config.SyncKeyTaskV2.check(); err != nil {
-		return fmt.Errorf("sync_key_task_v2.%w", err)
+	if err := config.SyncKeyTask.check(); err != nil {
+		return fmt.Errorf("sync_key_task.%w", err)
 	}
-	if err := config.CleanKeyTaskV2.check(); err != nil {
-		return fmt.Errorf("clean_key_task_v2.%w", err)
+	if err := config.CleanKeyTask.check(); err != nil {
+		return fmt.Errorf("clean_key_task.%w", err)
 	}
 	return nil
 }

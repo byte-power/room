@@ -116,19 +116,19 @@ func InitRoomTask(configPath string) error {
 		taskConfig.Metric, taskDBQueryDurationMetricKey,
 		taskConfig.RedisCluster, taskConfig.DB)
 
-	rawNoWrittenDuration := taskConfig.SyncKeyTaskV2.RawNoWrittenDuration
+	rawNoWrittenDuration := taskConfig.SyncKeyTask.RawNoWrittenDuration
 	duration, err := time.ParseDuration(rawNoWrittenDuration)
 	if err != nil {
 		return err
 	}
-	taskConfig.SyncKeyTaskV2.NoWrittenDuration = duration
+	taskConfig.SyncKeyTask.NoWrittenDuration = duration
 
-	rawInactiveDuration := taskConfig.CleanKeyTaskV2.RawInactiveDuration
+	rawInactiveDuration := taskConfig.CleanKeyTask.RawInactiveDuration
 	duration, err = time.ParseDuration(rawInactiveDuration)
 	if err != nil {
 		return err
 	}
-	taskConfig.CleanKeyTaskV2.InactiveDuration = duration
+	taskConfig.CleanKeyTask.InactiveDuration = duration
 
 	taskLogger.Info(
 		"init room task",

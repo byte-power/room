@@ -12,14 +12,16 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const CleanKeysTaskName = "clean_keys_v2"
+const CleanKeysTaskName = "clean_keys"
 
 // find keys to clean
 // select * from table where status != "cleaned" and accessed_at < ?;
 // update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"
-func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
+func CleanKeysTask(inactiveDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
+	dep := base.GetTaskDependency()
 	logTaskStart(
+		dep.Logger,
 		CleanKeysTaskName,
 		startTime,
 		log.String("inactive_duration", inactiveDuration.String()),
@@ -28,11 +30,10 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 
 	count := 100
 	accessedAt := startTime.Add(-inactiveDuration)
-	dep := base.GetTaskDependency()
 	var err error
 	defer func() {
 		if err == nil {
-			recordTaskSuccess(CleanKeysTaskName, time.Since(startTime))
+			recordTaskSuccess(dep.Logger, dep.Metric, CleanKeysTaskName, time.Since(startTime))
 		}
 	}()
 	excludedHashTags := make([]string, 0)
@@ -49,7 +50,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 		index, models, loadErr := loadHashTagKeysModelsByCondition(dep.DB, count, tableIndex, conditions...)
 		if loadErr != nil {
 			err = loadErr
-			recordTaskErrorV2(
+			recordTaskError(
 				dep.Logger, dep.Metric, CleanKeysTaskName,
 				err, "load_hash_tag_keys", nil)
 			return
@@ -68,7 +69,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 			keyCount, cleanKeysErr := cleanHashTagKeys(dep, model)
 			err = cleanKeysErr
 			if err != nil {
-				recordTaskErrorV2(
+				recordTaskError(
 					dep.Logger, dep.Metric,
 					CleanKeysTaskName, err,
 					"clean_keys",
@@ -77,7 +78,7 @@ func CleanKeysTaskV2(inactiveDuration time.Duration, rateLimitPerSecond int) {
 						"keys":     strings.Join(model.Keys, " "),
 					})
 				if errors.Is(err, ErrAccessAfterRecord) || errors.Is(err, errLoadKeysLockFailed) || isRetryErrorForUpdateInTx(err) {
-					recordTaskErrorV2(
+					recordTaskError(
 						dep.Logger, dep.Metric,
 						CleanKeysTaskName, err,
 						"clean_keys.conflict",

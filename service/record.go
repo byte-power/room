@@ -113,12 +113,12 @@ func recordLoadIntoRedisSuccess(logger *log.Logger, metric *base.MetricClient, h
 	metric.MetricTimeDuration(metricLoadKeyIntoRedisSuccessDuration, duration)
 }
 
-func recordTaskErrorV2(logger *log.Logger, metric *base.MetricClient, taskName string, err error, reason string, ctxInfo map[string]string) {
-	recordTaskErrorLog2(logger, taskName, err, reason, ctxInfo)
-	recordTaskErrorMetric2(metric, taskName, reason)
+func recordTaskError(logger *log.Logger, metric *base.MetricClient, taskName string, err error, reason string, ctxInfo map[string]string) {
+	recordTaskErrorLog(logger, taskName, err, reason, ctxInfo)
+	recordTaskErrorMetric(metric, taskName, reason)
 }
 
-func recordTaskErrorLog2(logger *log.Logger, taskName string, err error, reason string, ctxInfo map[string]string) {
+func recordTaskErrorLog(logger *log.Logger, taskName string, err error, reason string, ctxInfo map[string]string) {
 	logPairs := make([]log.LogPair, 0)
 	logPairs = append(logPairs, log.String("task", taskName))
 	if reason != "" {
@@ -133,34 +133,12 @@ func recordTaskErrorLog2(logger *log.Logger, taskName string, err error, reason 
 	logger.Error("task error", logPairs...)
 }
 
-func recordTaskErrorMetric2(metric *base.MetricClient, taskName string, reasons ...string) {
+func recordTaskErrorMetric(metric *base.MetricClient, taskName string, reasons ...string) {
 	metricName := fmt.Sprintf("%s.error", taskName)
 	metric.MetricIncrease(metricName)
 	for _, reason := range reasons {
 		errorMetricName := fmt.Sprintf("%s.%s", metricName, reason)
 		metric.MetricIncrease(errorMetricName)
-	}
-}
-
-func recordTaskSuccessV2(logger *log.Logger, metric *base.MetricClient, taskName string, d time.Duration) {
-	recordTaskSuccessLogV2(logger, taskName, d)
-	recordTaskSuccessMetricV2(metric, taskName, d)
-}
-
-func recordTaskSuccessLogV2(logger *log.Logger, taskName string, d time.Duration) {
-	logger.Info(
-		"task success",
-		log.String("task", taskName),
-		log.String("duration", d.String()),
-	)
-}
-
-func recordTaskSuccessMetricV2(metric *base.MetricClient, taskName string, d time.Duration) {
-	metricName := fmt.Sprintf("%s.success", taskName)
-	metric.MetricIncrease(metricName)
-	if d != time.Duration(0) {
-		durationMetricName := fmt.Sprintf("%s.duration", metricName)
-		metric.MetricTimeDuration(durationMetricName, d)
 	}
 }
 
@@ -170,13 +148,12 @@ func recordTaskSuccessInfo(logger *log.Logger, metric *base.MetricClient, taskNa
 	metric.MetricCount(metricName, count)
 }
 
-func recordTaskSuccess(taskName string, d time.Duration) {
-	recordTaskSuccessLog(taskName, d)
-	recordTaskSuccessMetric(taskName, d)
+func recordTaskSuccess(logger *log.Logger, metric *base.MetricClient, taskName string, d time.Duration) {
+	recordTaskSuccessLog(logger, taskName, d)
+	recordTaskSuccessMetric(metric, taskName, d)
 }
 
-func recordTaskSuccessLog(taskName string, d time.Duration) {
-	logger := base.GetTaskDependency().Logger
+func recordTaskSuccessLog(logger *log.Logger, taskName string, d time.Duration) {
 	logger.Info(
 		"task success",
 		log.String("task", taskName),
@@ -184,8 +161,7 @@ func recordTaskSuccessLog(taskName string, d time.Duration) {
 	)
 }
 
-func recordTaskSuccessMetric(taskName string, d time.Duration) {
-	metric := base.GetTaskDependency().Metric
+func recordTaskSuccessMetric(metric *base.MetricClient, taskName string, d time.Duration) {
 	metricName := fmt.Sprintf("%s.success", taskName)
 	metric.MetricIncrease(metricName)
 	if d != time.Duration(0) {
@@ -194,8 +170,7 @@ func recordTaskSuccessMetric(taskName string, d time.Duration) {
 	}
 }
 
-func logTaskStart(taskName string, startTime time.Time, pairs ...log.LogPair) {
-	logger := base.GetTaskDependency().Logger
+func logTaskStart(logger *log.Logger, taskName string, startTime time.Time, pairs ...log.LogPair) {
 	logPairs := []log.LogPair{
 		log.String("task", taskName),
 		log.String("start_time", startTime.String()),

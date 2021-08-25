@@ -14,14 +14,16 @@ import (
 	"go.uber.org/ratelimit"
 )
 
-const SyncKeysTaskName = "sync_keys_v2"
+const SyncKeysTaskName = "sync_keys"
 
 // find keys to sync
 // select * from table where status = "syncing";
 // update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLimitPerSecond int) {
+func SyncKeysTask(upsertTryTimes int, noWrittenDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
+	dep := base.GetTaskDependency()
 	logTaskStart(
+		dep.Logger,
 		SyncKeysTaskName, startTime,
 		log.Int("upsert_try_times", upsertTryTimes),
 		log.String("no_written_duration", noWrittenDuration.String()),
@@ -29,11 +31,10 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLim
 	)
 
 	count := 1000
-	dep := base.GetTaskDependency()
 	var err error
 	defer func() {
 		if err == nil {
-			recordTaskSuccess(SyncKeysTaskName, time.Since(startTime))
+			recordTaskSuccess(dep.Logger, dep.Metric, SyncKeysTaskName, time.Since(startTime))
 		}
 	}()
 	ratelimitBucket := ratelimit.New(rateLimitPerSecond)
@@ -54,7 +55,7 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLim
 			// dbWhereCondition{column: "status", operator: "=?", parameter: HashTagKeysStatusNeedSynced},
 			// dbWhereCondition{column: "written_at", operator: "<=?", parameter: writtenAt})
 			if loadErr != nil {
-				recordTaskErrorV2(dep.Logger, dep.Metric, SyncKeysTaskName, loadErr, "load_hash_tag_keys", nil)
+				recordTaskError(dep.Logger, dep.Metric, SyncKeysTaskName, loadErr, "load_hash_tag_keys", nil)
 				err = loadErr
 				return
 			}
@@ -66,7 +67,7 @@ func SyncKeysTaskV2(upsertTryTimes int, noWrittenDuration time.Duration, rateLim
 			for _, model := range models {
 				ratelimitBucket.Take()
 				if err = syncRoomData(dep.DB, dep.Redis, model, time.Now(), upsertTryTimes); err != nil {
-					recordTaskErrorV2(
+					recordTaskError(
 						dep.Logger, dep.Metric, SyncKeysTaskName,
 						err, "sync_room_data",
 						map[string]string{"hash_tag": model.HashTag, "keys": strings.Join(model.Keys, " ")},
