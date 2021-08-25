@@ -179,7 +179,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 	if transaction != nil {
 		metric.MetricIncrease("process.transaction")
 		startTime := time.Now()
-		result = transaction.Process(redisCluster, command)
+		result = transaction.Process(command)
 		if command.Name() == "exec" {
 			metric.MetricTimeDuration("process.transaction.duration", time.Since(startTime))
 		}
@@ -245,7 +245,7 @@ func getTransactionIfNeeded(conn redcon.Conn, command commands.Commander) (*comm
 	transaction := transactionManager.getTransaction(conn)
 	if transaction == nil {
 		if isTransactionNeeded(command) {
-			transaction = commands.NewTransaction()
+			transaction = commands.NewTransaction(dep)
 			transactionManager.addTransaction(conn, transaction)
 			metric.MetricIncrease("transaction.new")
 			logger.Debug(

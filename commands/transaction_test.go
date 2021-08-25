@@ -16,7 +16,8 @@ func testCloseTransaction(t *testing.T, transactions ...*Transaction) {
 }
 
 func TestTransactionInit(t *testing.T) {
-	transaction := NewTransaction()
+	dep := base.GetServerDependency()
+	transaction := NewTransaction(dep)
 	assert.Equal(t, TransactionStatusInited, transaction.Status())
 	testCloseTransaction(t, transaction)
 }
@@ -25,10 +26,10 @@ func TestTransactionInit(t *testing.T) {
 // watch {a}1 {a}2
 func TestTransactionWatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	keys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, keys...))
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "OK"}, result)
 	assert.Equal(t, TransactionStatusInited, transaction.Status())
 	testCloseTransaction(t, transaction)
@@ -38,10 +39,10 @@ func TestTransactionWatch(t *testing.T) {
 // watch {a}1 {b}1
 func TestTransactionWatchKeysCrossSlots(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	keys := []string{"{a}1", "{b}1"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, keys...))
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: ErrorRespType, Value: errTxKeysNotInSameSlot}, result)
 	assert.True(t, transaction.IsClosed(), true)
 }
@@ -52,20 +53,20 @@ func TestTransactionWatchKeysCrossSlots(t *testing.T) {
 // watch {b}1 {b}2
 func TestTransactionMultipleWatches(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	keys1 := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, keys1...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 	assert.Equal(t, transaction.watchedKeys, keys1)
 
 	keys2 := []string{"{a}3", "{a}4"}
 	command, _ = NewWatchCommand(append([]string{"watch"}, keys2...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 	assert.Equal(t, transaction.watchedKeys, append(keys1, keys2...))
 
 	keys3 := []string{"{b}1", "{b}2"}
 	command, _ = NewWatchCommand(append([]string{"watch"}, keys3...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 	assert.Equal(t, transaction.watchedKeys, keys3)
 	testCloseTransaction(t, transaction)
 }
@@ -74,9 +75,9 @@ func TestTransactionMultipleWatches(t *testing.T) {
 // multi
 func TestMulti(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	command, _ := NewMultiCommand([]string{"multi"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "OK"}, result)
 	assert.Equal(t, TransactionStatusStarted, transaction.Status())
 	testCloseTransaction(t, transaction)
@@ -89,23 +90,23 @@ func TestMulti(t *testing.T) {
 // exec
 func TestNestedMulti(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	command, _ := NewMultiCommand([]string{"multi"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewMultiCommand([]string{"multi"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, ErrorRespType, result.DataType)
 	assert.Equal(t, TransactionStatusStarted, transaction.status)
 
 	key := "{a}1"
 	value := "a"
 	command, _ = NewSetCommand([]string{"set", key, value})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	command, _ = NewExecCommand([]string{"exec"})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	assert.Equal(
 		t,
 		RESPData{
@@ -120,12 +121,12 @@ func TestNestedMulti(t *testing.T) {
 // watch {a}1 {a}2
 func TestWatchInMulti(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	command, _ := NewMultiCommand([]string{"multi"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 	keys := []string{"{a}1", "{a}2"}
 	command, _ = NewWatchCommand(append([]string{"watch"}, keys...))
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, ErrorRespType, result.DataType)
 	testCloseTransaction(t, transaction)
 }
@@ -134,9 +135,9 @@ func TestWatchInMulti(t *testing.T) {
 // exec
 func TestExecWithoutMulti(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	command, _ := NewExecCommand([]string{"exec"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, ErrorRespType, result.DataType)
 	assert.Equal(t, TransactionStatusInited, transaction.Status())
 }
@@ -146,13 +147,13 @@ func TestExecWithoutMulti(t *testing.T) {
 // exec
 func TestExecWithoutMultiAfterWatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewExecCommand([]string{"exec"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, ErrorRespType, result.DataType)
 	assert.Equal(t, TransactionStatusInited, transaction.Status())
 	assert.Equal(t, 2, len(transaction.watchedKeys))
@@ -170,34 +171,34 @@ func TestExecWithoutMultiAfterWatch(t *testing.T) {
 // exec
 func TestExec(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewMultiCommand([]string{"multi"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	command, _ = NewSetCommand([]string{"set", "{a}2", "100"})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	command, _ = NewGetCommand([]string{"get", "{a}1"})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	command, _ = NewGetCommand([]string{"get", "{a}2"})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	assert.Equal(t, TransactionStatusStarted, transaction.Status())
 
 	command, _ = NewExecCommand([]string{"exec"})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	expectedResult := RESPData{
 		DataType: ArrayRespType,
 		Value: []RESPData{
@@ -226,7 +227,8 @@ func TestExec(t *testing.T) {
 // tx1: exec
 // tx2: exec
 func TestConcurrentTransactionSuccess(t *testing.T) {
-	tx1 := NewTransaction()
+	dep := base.GetServerDependency()
+	tx1 := NewTransaction(dep)
 	ch1 := make(chan RESPData, 0)
 	commandSet1 := []Commander{}
 	command, _ := NewSetCommand([]string{"set", "{a}1", "10"})
@@ -238,7 +240,7 @@ func TestConcurrentTransactionSuccess(t *testing.T) {
 	command, _ = NewGetCommand([]string{"get", "{a}2"})
 	commandSet1 = append(commandSet1, command)
 
-	tx2 := NewTransaction()
+	tx2 := NewTransaction(dep)
 	ch2 := make(chan RESPData, 0)
 	commandSet2 := []Commander{}
 	command, _ = NewSetCommand([]string{"set", "{a}1", "x"})
@@ -283,14 +285,13 @@ func TestConcurrentTransactionSuccess(t *testing.T) {
 }
 
 func testExecuteTransaction(tx *Transaction, result chan<- RESPData, commands ...Commander) {
-	dep := base.GetServerDependency()
 	command, _ := NewMultiCommand([]string{"multi"})
-	tx.Process(dep.Redis, command)
+	tx.Process(command)
 	for _, command := range commands {
-		tx.Process(dep.Redis, command)
+		tx.Process(command)
 	}
 	command, _ = NewExecCommand([]string{"exec"})
-	result <- tx.Process(dep.Redis, command)
+	result <- tx.Process(command)
 }
 
 // test commands:
@@ -302,23 +303,23 @@ func testExecuteTransaction(tx *Transaction, result chan<- RESPData, commands ..
 
 func TestTransactionFail(t *testing.T) {
 	dep := base.GetServerDependency()
-	tx1 := NewTransaction()
+	tx1 := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 
-	tx2 := NewTransaction()
+	tx2 := NewTransaction(dep)
 	command, _ = NewSetCommand([]string{"set", "{a}1", "a"})
-	tx2.Process(dep.Redis, command)
+	tx2.Process(command)
 
 	command, _ = NewMultiCommand([]string{"multi"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewSetCommand([]string{"set", "{a}2", "b"})
-	result := tx1.Process(dep.Redis, command)
+	result := tx1.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	command, _ = NewExecCommand([]string{"exec"})
-	result = tx1.Process(dep.Redis, command)
+	result = tx1.Process(command)
 	assert.Equal(t, RESPData{DataType: ErrorRespType, Value: redis.TxFailedErr}, result)
 	assert.True(t, tx1.IsClosed())
 
@@ -342,22 +343,22 @@ func TestTransactionFail(t *testing.T) {
 // exec
 func TestTransactionFailSameClient(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewMultiCommand([]string{"multi"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 	command, _ = NewSetCommand([]string{"set", "{a}2", "100"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}, result)
 
 	command, _ = NewExecCommand([]string{"exec"})
-	result = transaction.Process(dep.Redis, command)
+	result = transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: ErrorRespType, Value: redis.TxFailedErr}, result)
 	assert.True(t, transaction.IsClosed())
 
@@ -381,15 +382,15 @@ func TestTransactionFailSameClient(t *testing.T) {
 
 func TestDiscard(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	command, _ := NewMultiCommand([]string{"multi"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewSetCommand([]string{"set", "{a}1", "x"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewDiscardCommand([]string{"discard"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "OK"}, result)
 
 	assert.True(t, transaction.IsClosed())
@@ -411,20 +412,20 @@ func TestDiscard(t *testing.T) {
 // discard
 func TestDiscardWithWatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 	assert.Equal(t, 2, len(watchedKeys))
 
 	command, _ = NewMultiCommand([]string{"multi"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewSetCommand([]string{"set", "{a}1", "x"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewDiscardCommand([]string{"discard"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "OK"}, result)
 
 	assert.True(t, transaction.IsClosed())
@@ -453,13 +454,13 @@ func TestDiscardWithoutMulti(t *testing.T) {
 // discard
 func TestDiscardWithoutMultiAfterWatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewDiscardCommand([]string{"discard"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 
 	assert.Equal(t, ErrorRespType, result.DataType)
 	assert.Equal(t, 2, len(transaction.watchedKeys))
@@ -478,26 +479,26 @@ func TestDiscardWithoutMultiAfterWatch(t *testing.T) {
 // exec
 func TestDiscardUnwatchSuccess(t *testing.T) {
 	dep := base.GetServerDependency()
-	tx1 := NewTransaction()
-	tx2 := NewTransaction()
+	tx1 := NewTransaction(dep)
+	tx2 := NewTransaction(dep)
 
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 
 	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
-	tx2.Process(dep.Redis, command)
+	tx2.Process(command)
 
 	command, _ = NewMultiCommand([]string{"multi"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewDiscardCommand([]string{"discard"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewMultiCommand([]string{"multi"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewSetCommand([]string{"set", "{a}1", "100"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewExecCommand([]string{"exec"})
-	result := tx1.Process(dep.Redis, command)
+	result := tx1.Process(command)
 	assert.Equal(
 		t,
 		RESPData{
@@ -519,13 +520,13 @@ func TestDiscardUnwatchSuccess(t *testing.T) {
 // unwatch
 func TestUnwatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewUnwatchCommand([]string{"unwatch"})
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "OK"}, result)
 
 	assert.True(t, transaction.IsClosed())
@@ -540,17 +541,17 @@ func TestUnwatch(t *testing.T) {
 
 func TestWatchAfterUnwatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	transaction := NewTransaction()
+	transaction := NewTransaction(dep)
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	command, _ = NewUnwatchCommand([]string{"unwatch"})
-	transaction.Process(dep.Redis, command)
+	transaction.Process(command)
 
 	watchedKeys2 := []string{"{b}1", "{b}2"}
 	command, _ = NewWatchCommand(append([]string{"watch"}, watchedKeys2...))
-	result := transaction.Process(dep.Redis, command)
+	result := transaction.Process(command)
 
 	assert.Equal(t, RESPData{DataType: SimpleStringRespType, Value: "OK"}, result)
 	assert.Equal(t, TransactionStatusInited, transaction.Status())
@@ -568,24 +569,24 @@ func TestWatchAfterUnwatch(t *testing.T) {
 // exec
 func TestExecAfterUnWatch(t *testing.T) {
 	dep := base.GetServerDependency()
-	tx1 := NewTransaction()
-	tx2 := NewTransaction()
+	tx1 := NewTransaction(dep)
+	tx2 := NewTransaction(dep)
 
 	watchedKeys := []string{"{a}1", "{a}2"}
 	command, _ := NewWatchCommand(append([]string{"watch"}, watchedKeys...))
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 
 	command, _ = NewSetCommand([]string{"set", "{a}1", "10"})
-	tx2.Process(dep.Redis, command)
+	tx2.Process(command)
 
 	command, _ = NewUnwatchCommand([]string{"unwatch"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewMultiCommand([]string{"multi"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewSetCommand([]string{"set", "{a}1", "100"})
-	tx1.Process(dep.Redis, command)
+	tx1.Process(command)
 	command, _ = NewExecCommand([]string{"exec"})
-	result := tx1.Process(dep.Redis, command)
+	result := tx1.Process(command)
 	assert.Equal(
 		t,
 		RESPData{

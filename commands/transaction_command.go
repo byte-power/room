@@ -36,10 +36,11 @@ type Transaction struct {
 	keys        []string
 	status      TransactionStatus
 	commands    []redis.Cmder
+	dep         base.Dependency
 }
 
-func NewTransaction() *Transaction {
-	return &Transaction{status: TransactionStatusInited}
+func NewTransaction(dep base.Dependency) *Transaction {
+	return &Transaction{status: TransactionStatusInited, dep: dep}
 }
 
 var errTxKeysNotInSameSlot = errors.New("ERR keys in transaction should be in the same slot")
@@ -65,7 +66,7 @@ func (transaction *Transaction) multi() RESPData {
 func (transaction *Transaction) reset(reason TransactionCloseReason, status TransactionStatus) error {
 	if transaction.tx != nil {
 		if err := transaction.tx.Close(contextTODO); err != nil {
-			recordTransactionCloseError(err, reason)
+			recordTransactionCloseError(transaction.dep.Logger, transaction.dep.Metric, err, reason)
 			return err
 		}
 		transaction.tx = nil
@@ -77,7 +78,7 @@ func (transaction *Transaction) reset(reason TransactionCloseReason, status Tran
 	return nil
 }
 
-func (transaction *Transaction) watch(redisCluster *redis.ClusterClient, keys ...string) RESPData {
+func (transaction *Transaction) watch(keys ...string) RESPData {
 	if transaction.isStarted() {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR WATCH inside MULTI is not allowed")}
 	}
@@ -94,7 +95,7 @@ func (transaction *Transaction) watch(redisCluster *redis.ClusterClient, keys ..
 	}
 
 	if transaction.tx == nil {
-		tx, err := newRedisTransaction(redisCluster, keys...)
+		tx, err := newRedisTransaction(transaction.dep.Redis, keys...)
 		if err != nil {
 			if err == errTxKeysNotInSameSlot {
 				transaction.Close(TransactionCloseReasonWatchedKeysNotInSameSlot)
@@ -112,19 +113,19 @@ func (transaction *Transaction) watch(redisCluster *redis.ClusterClient, keys ..
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
-func (transaction *Transaction) addCommand(redisCluster *redis.ClusterClient, command Commander) RESPData {
+func (transaction *Transaction) addCommand(command Commander) RESPData {
 	var result RESPData
 	if transaction.isStarted() {
 		transaction.commands = append(transaction.commands, command.Cmd())
 		transaction.keys = append(transaction.keys, append(command.ReadKeys(), command.WriteKeys()...)...)
 		result = RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}
 	} else {
-		result = ExecuteCommand(redisCluster, command)
+		result = ExecuteCommand(transaction.dep.Redis, command)
 	}
 	return result
 }
 
-func (transaction *Transaction) exec(redisCluster *redis.ClusterClient) RESPData {
+func (transaction *Transaction) exec() RESPData {
 	if !transaction.isStarted() {
 		return convertErrorToRESPData(errors.New("ERR EXEC without MULTI"))
 	}
@@ -137,7 +138,7 @@ func (transaction *Transaction) exec(redisCluster *redis.ClusterClient) RESPData
 	if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.keys, transaction.watchedKeys...)...) {
 		if transaction.tx != nil {
 			if err := transaction.tx.Close(contextTODO); err != nil {
-				recordTransactionCloseError(err, TransactionCloseReasonResetInExec)
+				recordTransactionCloseError(transaction.dep.Logger, transaction.dep.Metric, err, TransactionCloseReasonResetInExec)
 			}
 			transaction.tx = nil
 			transaction.watchedKeys = make([]string, 0)
@@ -145,7 +146,7 @@ func (transaction *Transaction) exec(redisCluster *redis.ClusterClient) RESPData
 	}
 
 	if transaction.tx == nil {
-		tx, err := newRedisTransaction(redisCluster, transaction.keys...)
+		tx, err := newRedisTransaction(transaction.dep.Redis, transaction.keys...)
 		if err != nil {
 			return convertErrorToRESPData(err)
 		}
@@ -203,10 +204,10 @@ func (transaction *Transaction) discard() RESPData {
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
-func (transaction *Transaction) unwatch(redisCluster *redis.ClusterClient) RESPData {
+func (transaction *Transaction) unwatch() RESPData {
 	if transaction.isStarted() {
 		command, _ := NewUnwatchCommand([]string{"unwatch"})
-		return transaction.addCommand(redisCluster, command)
+		return transaction.addCommand(command)
 	}
 	if err := transaction.Close(TransactionCloseReasonUnwatch); err != nil {
 		return convertErrorToRESPData(err)
@@ -214,21 +215,21 @@ func (transaction *Transaction) unwatch(redisCluster *redis.ClusterClient) RESPD
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
-func (transaction *Transaction) Process(redisCluster *redis.ClusterClient, command Commander) RESPData {
+func (transaction *Transaction) Process(command Commander) RESPData {
 	var result RESPData
 	switch command.Name() {
 	case "watch":
-		result = transaction.watch(redisCluster, command.ReadKeys()...)
+		result = transaction.watch(command.ReadKeys()...)
 	case "multi":
 		result = transaction.multi()
 	case "exec":
-		result = transaction.exec(redisCluster)
+		result = transaction.exec()
 	case "discard":
 		result = transaction.discard()
 	case "unwatch":
-		result = transaction.unwatch(redisCluster)
+		result = transaction.unwatch()
 	default:
-		result = transaction.addCommand(redisCluster, command)
+		result = transaction.addCommand(command)
 	}
 	return result
 }
@@ -328,12 +329,11 @@ func (command *UnwatchCommand) Cmd() redis.Cmder {
 	return redis.NewStatusCmd(contextTODO, command.name)
 }
 
-func recordTransactionCloseError(err error, reason TransactionCloseReason) {
-	dep := base.GetServerDependency()
-	dep.Logger.Error(
+func recordTransactionCloseError(logger *log.Logger, metric *base.MetricClient, err error, reason TransactionCloseReason) {
+	logger.Error(
 		"transaction close error",
 		log.String("reason", string(reason)),
 		log.Error(err),
 	)
-	dep.Metric.MetricIncrease("error.transaction.close")
+	metric.MetricIncrease("error.transaction.close")
 }
