@@ -23,10 +23,10 @@ var testContextTODO = context.TODO()
 
 func TestMain(m *testing.M) {
 	configFile := "../cmd/config.yaml"
-	if err := base.InitRoomService(configFile); err != nil {
+	if err := base.InitRoomServer(configFile); err != nil {
 		panic(err)
 	}
-	if err := base.InitSyncService(configFile); err != nil {
+	if err := base.InitRoomTask(configFile); err != nil {
 		panic(err)
 	}
 	code := m.Run()
@@ -34,22 +34,23 @@ func TestMain(m *testing.M) {
 }
 
 func testEmptyKeysInRedis(keys ...string) {
+	redisCluster := base.GetServerDependency().Redis
 	for _, key := range keys {
 		hashTag := commands.ExtractHashTagFromKey(key)
 		metaKey := getHashTagMetaKey(hashTag)
-		base.GetRedisCluster().Del(contextTODO, key, metaKey)
+		redisCluster.Del(contextTODO, key, metaKey)
 	}
 }
 
 func testEmptyRoomDataRecordInDatabase(hashTag string) {
-	db := base.GetServiceDBCluster()
+	db := base.GetServerDependency().DB
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, _ := db.Model(model)
 	query.WherePK().ForceDelete()
 }
 
 func testEmptyHashTagKeysRecordInDB(hashTag string) {
-	db := base.GetServiceDBCluster()
+	db := base.GetServerDependency().DB
 	model := &roomHashTagKeys{HashTag: hashTag}
 	query, _ := db.Model(model)
 	query.WherePK().ForceDelete()
@@ -76,9 +77,9 @@ func (input testInsertRoomDataInput) check() error {
 }
 
 func testSetMetaKeyCleaned(hashTag string) {
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	metaKey := getHashTagMetaKey(hashTag)
-	client.Del(context.TODO(), metaKey)
+	redisCluster.Del(context.TODO(), metaKey)
 }
 
 func TestLoadKeyNotExist(t *testing.T) {
@@ -89,20 +90,20 @@ func TestLoadKeyNotExist(t *testing.T) {
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
-	client := base.GetRedisCluster()
-	_, err = client.Get(testContextTODO, key).Result()
+	redisCluster := base.GetServerDependency().Redis
+	_, err = redisCluster.Get(testContextTODO, key).Result()
 	assert.Equal(t, redis.Nil, err)
 
-	loaded, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	loaded, err := redisCluster.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
 	assert.Nil(t, err)
 	assert.Equal(t, HashTagStatusLoaded, loaded)
 
-	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	_, err = redisCluster.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
 }
 
 func testInsertRoomData(hashTag string, value map[string]RedisValue) *roomDataModelV2 {
-	db := base.GetServiceDBCluster()
+	db := base.GetServerDependency().DB
 	model := &roomDataModelV2{HashTag: hashTag, Value: value}
 	query, _ := db.Model(model)
 	query.Returning("*").Insert()
@@ -150,13 +151,13 @@ func TestLoadKeyString(t *testing.T) {
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	for key, value := range validValue {
-		v, err := client.Get(testContextTODO, key).Result()
+		v, err := redisCluster.Get(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, value.Value, v)
 
-		d, err := client.TTL(testContextTODO, key).Result()
+		d, err := redisCluster.TTL(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		if value.ExpireTs > 0 {
 			assert.Greater(t, int64(d), int64(0))
@@ -166,15 +167,15 @@ func TestLoadKeyString(t *testing.T) {
 	}
 
 	for key := range expireValue {
-		_, err := client.Get(testContextTODO, key).Result()
+		_, err := redisCluster.Get(testContextTODO, key).Result()
 		assert.Equal(t, redis.Nil, err)
 	}
 
-	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	status, err := redisCluster.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
 	assert.Nil(t, err)
 	assert.Equal(t, HashTagStatusLoaded, status)
 
-	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	_, err = redisCluster.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
 }
 
@@ -231,24 +232,24 @@ func TestLoadKeyList(t *testing.T) {
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	for _, item := range testItems {
 		key := item.key
-		b, err := client.LRange(testContextTODO, key, 0, -1).Result()
+		b, err := redisCluster.LRange(testContextTODO, key, 0, -1).Result()
 		assert.Nil(t, err)
 		v, _ := json.Marshal(b)
 		assert.Equal(t, value[key].Value, string(v))
 
-		duration, err := client.TTL(testContextTODO, key).Result()
+		duration, err := redisCluster.TTL(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, time.Duration(-1), duration)
 	}
 
-	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	status, err := redisCluster.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
 	assert.Nil(t, err)
 	assert.Equal(t, HashTagStatusLoaded, status)
 
-	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	_, err = redisCluster.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
 }
 
@@ -311,26 +312,26 @@ func TestLoadKeyHash(t *testing.T) {
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	for _, item := range testItems {
 		key := item.key
 		hash := hashes[key]
-		m, err := client.HGetAll(testContextTODO, key).Result()
+		m, err := redisCluster.HGetAll(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, len(hash), len(m))
 		for key, value := range hash {
 			assert.Equal(t, value, m[key])
 		}
 
-		duration, err := client.TTL(testContextTODO, key).Result()
+		duration, err := redisCluster.TTL(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, time.Duration(-1), duration)
 	}
-	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	status, err := redisCluster.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
 	assert.Nil(t, err)
 	assert.Equal(t, HashTagStatusLoaded, status)
 
-	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	_, err = redisCluster.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
 }
 
@@ -389,27 +390,27 @@ func TestLoadKeySet(t *testing.T) {
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 
 	for _, item := range testItems {
 		key := item.key
 		set := sets[key]
-		m, err := client.SMembers(testContextTODO, key).Result()
+		m, err := redisCluster.SMembers(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, len(set), len(m))
 		for _, value := range set {
 			assert.True(t, utility.StringSliceContains(m, value))
 		}
 
-		duration, err := client.TTL(testContextTODO, key).Result()
+		duration, err := redisCluster.TTL(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, time.Duration(-1), duration)
 	}
-	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	status, err := redisCluster.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
 	assert.Nil(t, err)
 	assert.Equal(t, HashTagStatusLoaded, status)
 
-	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	_, err = redisCluster.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
 }
 
@@ -478,12 +479,12 @@ func TestLoadKeyZSet(t *testing.T) {
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 
 	for _, item := range testItems {
 		key := item.key
 		zset := zsets[key]
-		zset2, err := client.ZRangeWithScores(testContextTODO, key, 0, -1).Result()
+		zset2, err := redisCluster.ZRangeWithScores(testContextTODO, key, 0, -1).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, len(zset), len(zset2))
 		for _, value := range zset2 {
@@ -492,15 +493,15 @@ func TestLoadKeyZSet(t *testing.T) {
 			assert.True(t, math.Abs(zset[member]-value.Score) < 0.001)
 		}
 
-		duration, err := client.TTL(testContextTODO, key).Result()
+		duration, err := redisCluster.TTL(testContextTODO, key).Result()
 		assert.Nil(t, err)
 		assert.Equal(t, time.Duration(-1), duration)
 	}
-	status, err := client.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
+	status, err := redisCluster.HGet(testContextTODO, getHashTagMetaKey(hashTag), HashTagMetaInfoStatusFieldName).Result()
 	assert.Nil(t, err)
 	assert.Equal(t, HashTagStatusLoaded, status)
 
-	_, err = client.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
+	_, err = redisCluster.Get(testContextTODO, getHashTagLockKey(hashTag)).Result()
 	assert.Equal(t, redis.Nil, err)
 }
 
@@ -593,15 +594,16 @@ func TestLoadSetToRedis(t *testing.T) {
 			members: []string{"a", "b"},
 		},
 	}
-	client := base.GetRedisCluster()
+
+	redisCluster := base.GetServerDependency().Redis
 	ctx := context.TODO()
 	for _, c := range cases {
-		defer client.Del(ctx, c.key)
-		err := loadSetToRedis(ctx, client, c.key, c.slices, c.tl)
+		defer redisCluster.Del(ctx, c.key)
+		err := loadSetToRedis(ctx, redisCluster, c.key, c.slices, c.tl)
 		assert.Nil(t, err)
-		length, _ := client.SCard(ctx, c.key).Result()
+		length, _ := redisCluster.SCard(ctx, c.key).Result()
 		assert.Equal(t, len(c.members), int(length))
-		members, _ := client.SMembers(ctx, c.key).Result()
+		members, _ := redisCluster.SMembers(ctx, c.key).Result()
 		for _, member := range c.members {
 			assert.True(t, utility.StringSliceContains(members, member))
 		}
@@ -632,15 +634,15 @@ func TestLoadListToRedis(t *testing.T) {
 			members: []string{"a", "b"},
 		},
 	}
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	ctx := context.TODO()
 	for _, c := range cases {
-		defer client.Del(ctx, c.key)
-		err := loadListToRedis(ctx, client, c.key, c.slices, c.ttl)
+		defer redisCluster.Del(ctx, c.key)
+		err := loadListToRedis(ctx, redisCluster, c.key, c.slices, c.ttl)
 		assert.Nil(t, err)
-		length, _ := client.LLen(ctx, c.key).Result()
+		length, _ := redisCluster.LLen(ctx, c.key).Result()
 		assert.Equal(t, len(c.members), int(length))
-		members, _ := client.LRange(ctx, c.key, 0, -1).Result()
+		members, _ := redisCluster.LRange(ctx, c.key, 0, -1).Result()
 		for index, member := range members {
 			assert.Equal(t, c.members[index], member)
 		}
@@ -671,15 +673,15 @@ func TestLoadHashToRedis(t *testing.T) {
 			members: map[string]string{"a": "b"},
 		},
 	}
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	ctx := context.TODO()
 	for _, c := range cases {
-		defer client.Del(ctx, c.key)
-		err := loadHashToRedis(ctx, client, c.key, c.slices, c.ttl)
+		defer redisCluster.Del(ctx, c.key)
+		err := loadHashToRedis(ctx, redisCluster, c.key, c.slices, c.ttl)
 		assert.Nil(t, err)
-		length, _ := client.HLen(ctx, c.key).Result()
+		length, _ := redisCluster.HLen(ctx, c.key).Result()
 		assert.Equal(t, len(c.members), int(length))
-		members, _ := client.HGetAll(ctx, c.key).Result()
+		members, _ := redisCluster.HGetAll(ctx, c.key).Result()
 		for key, value := range members {
 			assert.Equal(t, c.members[key], value)
 		}
@@ -710,15 +712,15 @@ func TestLoadZsetToRedis(t *testing.T) {
 			members: map[string]string{"a": "10.89"},
 		},
 	}
-	client := base.GetRedisCluster()
+	redisCluster := base.GetServerDependency().Redis
 	ctx := context.TODO()
 	for _, c := range cases {
-		defer client.Del(ctx, c.key)
-		err := loadZSetToRedis(ctx, client, c.key, c.slices, c.ttl)
+		defer redisCluster.Del(ctx, c.key)
+		err := loadZSetToRedis(ctx, redisCluster, c.key, c.slices, c.ttl)
 		assert.Nil(t, err)
-		length, _ := client.ZCard(ctx, c.key).Result()
+		length, _ := redisCluster.ZCard(ctx, c.key).Result()
 		assert.Equal(t, len(c.members), int(length))
-		members, _ := client.ZRangeWithScores(ctx, c.key, 0, -1).Result()
+		members, _ := redisCluster.ZRangeWithScores(ctx, c.key, 0, -1).Result()
 		for _, member := range members {
 			key := member.Member
 			score := member.Score

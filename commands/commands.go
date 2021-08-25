@@ -268,10 +268,9 @@ func ParseCommand(args []string) (Commander, error) {
 	return fn(args)
 }
 
-func ExecuteCommand(command Commander) RESPData {
-	client := base.GetRedisCluster()
+func ExecuteCommand(redisCluster *redis.ClusterClient, command Commander) RESPData {
 	cmd := command.Cmd()
-	if err := client.Process(contextTODO, cmd); err != nil {
+	if err := redisCluster.Process(contextTODO, cmd); err != nil {
 		return convertErrorToRESPData(err)
 	}
 

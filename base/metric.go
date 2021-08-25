@@ -1,6 +1,7 @@
 package base
 
 import (
+	"errors"
 	"time"
 
 	"gopkg.in/alexcesaro/statsd.v2"
@@ -12,6 +13,26 @@ const (
 	gaugeMetricPrefix     = "gauge."
 	histogramMetricPrefix = "histogram."
 )
+
+type MetricConfig struct {
+	Prefix             string   `yaml:"prefix"`
+	Host               string   `yaml:"host"`
+	Network            string   `yaml:"network"`
+	MaxPacktSize       int      `yaml:"max_packet_size"`
+	FlushPeriodSeconds int64    `yaml:"flush_period_seconds"`
+	SampleRate         float32  `yaml:"sample_rate"`
+	Tags               []string `yaml:"tags"`
+}
+
+func (config MetricConfig) check() error {
+	if config.Host == "" {
+		return errors.New("host should not be empty")
+	}
+	if len(config.Tags)%2 != 0 {
+		return errors.New("tags count should be even")
+	}
+	return nil
+}
 
 type MetricClient struct {
 	*statsd.Client

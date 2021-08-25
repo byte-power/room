@@ -23,14 +23,14 @@ func main() {
 		fmt.Println(roomVersion)
 		return
 	}
-	if err := base.InitRoomService(*configPath); err != nil {
+	if err := base.InitRoomServer(*configPath); err != nil {
 		panic(err)
 	}
 
 	base.StartServices()
 	dep := base.GetServerDependency()
 	logger := dep.Logger
-	config := base.GetServerConfig().Server
+	config := base.GetServerConfig()
 	roomService, err := service.NewRoomService(config, dep)
 	if err != nil {
 		panic(err)

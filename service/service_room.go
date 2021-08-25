@@ -101,12 +101,11 @@ func (service *RoomService) Stop() {
 }
 
 func connAcceptHandler(conn redcon.Conn) bool {
-	metric := base.GetMetricService()
-	metric.MetricIncrease("connection.accept")
-	metric.MetricGauge("connection.total", atomic.AddInt64(&connectionTotal, 1))
-	metric.MetricGauge("transaction.total", transactionManager.transactionCount())
-	logger := base.GetServerLogger()
-	logger.Debug(
+	dep := base.GetServerDependency()
+	dep.Metric.MetricIncrease("connection.accept")
+	dep.Metric.MetricGauge("connection.total", atomic.AddInt64(&connectionTotal, 1))
+	dep.Metric.MetricGauge("transaction.total", transactionManager.transactionCount())
+	dep.Logger.Debug(
 		"accept incomming request",
 		log.String("local_addr", conn.NetConn().LocalAddr().String()),
 		log.String("remote_addr", conn.RemoteAddr()),
@@ -116,8 +115,8 @@ func connAcceptHandler(conn redcon.Conn) bool {
 }
 
 func connAcceptErrorHandler(err error) {
-	base.GetMetricService().MetricIncrease("error.accept")
-	base.GetServerLogger().Error("accept error", log.Error(err))
+	base.GetServerDependency().Metric.MetricIncrease("error.accept")
+	base.GetServerDependency().Logger.Error("accept error", log.Error(err))
 }
 
 func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
@@ -127,8 +126,10 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		args[index] = string(arg)
 	}
 
-	logger := base.GetServerLogger()
-	metric := base.GetMetricService()
+	dep := base.GetServerDependency()
+	redisCluster := dep.Redis
+	logger := dep.Logger
+	metric := dep.Metric
 	metric.MetricIncrease("process.command")
 
 	logger.Debug(
@@ -151,7 +152,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 	}
 
 	// Pre Porcess related keys
-	if err = preProcessCommand(command, serveStartTime); err != nil {
+	if err = preProcessCommand(dep, command, serveStartTime); err != nil {
 		metric.MetricIncrease("error.pre_process")
 		logger.Error(
 			"preprocess command error",
@@ -162,7 +163,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
-	transaction, err := getTransactionIfNeeded(conn, command)
+	transaction, err := getTransactionIfNeeded(dep, conn, command)
 	if err != nil {
 		metric.MetricIncrease("error.get_transaction")
 		logger.Error(
@@ -188,7 +189,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 	} else {
 		metric.MetricIncrease("process.single_command")
 		startTime := time.Now()
-		result = commands.ExecuteCommand(command)
+		result = commands.ExecuteCommand(redisCluster, command)
 		metric.MetricTimeDuration("process.single_connamd.duration", time.Since(startTime))
 	}
 	writeDataToConnection(conn, result)
@@ -217,13 +218,14 @@ func isTransactionNeeded(command commands.Commander) bool {
 	return utility.StringSliceContains(transactionCommands, command.Name())
 }
 
-func preProcessCommand(command commands.Commander, accessTime time.Time) error {
-	logger := base.GetServerLogger()
+func preProcessCommand(dep base.Dependency, command commands.Commander, accessTime time.Time) error {
+	logger := dep.Logger
+
 	hashTag, err := commands.CheckAndGetCommandKeysHashTag(command)
 	if err != nil {
 		return err
 	}
-	if err := Load(base.GetServerDependency(), hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
+	if err := Load(dep, hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
 		logger.Error(
 			"load hash_tag error",
 			log.String("command", command.String()),
@@ -235,13 +237,13 @@ func preProcessCommand(command commands.Commander, accessTime time.Time) error {
 	return nil
 }
 
-func getTransactionIfNeeded(conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
-	logger := base.GetServerLogger()
-	metric := base.GetMetricService()
+func getTransactionIfNeeded(dep base.Dependency, conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
+	logger := dep.Logger
+	metric := dep.Metric
 	transaction := transactionManager.getTransaction(conn)
 	if transaction == nil {
 		if isTransactionNeeded(command) {
-			transaction = commands.NewTransaction()
+			transaction = commands.NewTransaction(dep)
 			transactionManager.addTransaction(conn, transaction)
 			metric.MetricIncrease("transaction.new")
 			logger.Debug(
@@ -307,11 +309,12 @@ func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 }
 
 func connCloseHandler(conn redcon.Conn, err error) {
-	metric := base.GetMetricService()
+	dep := base.GetServerDependency()
+	metric := dep.Metric
 	metric.MetricIncrease("connection.close")
 	transactionManager.removeTransaction(conn, commands.TransactionCloseReasonConnClosed)
 	transactionCount := transactionManager.transactionCount()
-	logger := base.GetServerLogger()
+	logger := dep.Logger
 	if err == nil {
 		logger.Debug(
 			"connection is closed",

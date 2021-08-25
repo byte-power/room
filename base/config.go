@@ -12,199 +12,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type Config struct {
-	Name                      string                            `yaml:"name"`
-	Server                    RoomServerConfig                  `yaml:"room_server"`
-	RedisCluster              RedisClusterConfig                `yaml:"redis_cluster"`
-	ServiceDBCluster          DBClusterConfig                   `yaml:"service_db_cluster"`
-	TaskDBCluster             DBClusterConfig                   `yaml:"task_db_cluster"`
-	CollectEventDBCluster     DBClusterConfig                   `yaml:"collect_event_db_cluster"`
-	HashTagEventService       HashTagEventServiceConfig         `yaml:"hash_tag_event_service"`
-	Metric                    MetricConfig                      `yaml:"metric"`
-	Log                       map[string]map[string]interface{} `yaml:"log"`
-	LoadKey                   LoadKeyConfig                     `yaml:"load_key"`
-	SyncService               SyncServiceConfig                 `yaml:"sync"`
-	CollectEventService       CollectEventServiceConfig         `yaml:"collect_event"`
-	CollectEventServiceMetric MetricConfig                      `yaml:"collect_event_metric"`
-}
-
-func (config Config) check() error {
-	if config.Name == "" {
-		return errors.New("config.name should not be empty")
-	}
-	if err := config.Server.Check(); err != nil {
-		return fmt.Errorf("config.%w", err)
-	}
-	if err := config.RedisCluster.check(); err != nil {
-		return fmt.Errorf("config.%w", err)
-	}
-	if err := config.ServiceDBCluster.check(); err != nil {
-		return fmt.Errorf("config.service_db_cluster.%w", err)
-	}
-	if err := config.TaskDBCluster.check(); err != nil {
-		return fmt.Errorf("config.task_db_cluster.%w", err)
-	}
-	if err := config.CollectEventDBCluster.check(); err != nil {
-		return fmt.Errorf("config.collect_event_db_cluster.%w", err)
-	}
-	if err := config.Metric.check(); err != nil {
-		return fmt.Errorf("config.%w", err)
-	}
-	if len(config.Log) == 0 {
-		return errors.New("config.log should not be empty.")
-	}
-	if err := config.LoadKey.check(); err != nil {
-		return fmt.Errorf("config.%w", err)
-	}
-	if err := config.SyncService.check(); err != nil {
-		return fmt.Errorf("config.%w", err)
-	}
-	if err := config.CollectEventService.check(); err != nil {
-		return fmt.Errorf("config.%w", err)
-	}
-	return nil
-}
-
-type RoomServerConfig struct {
-	URL      string `yaml:"url"`
-	PProfURL string `yaml:"pprof_url"`
-}
-
-func (config RoomServerConfig) Check() error {
-	if config.URL == "" {
-		return errors.New("room_service.url should not be empty")
-	}
-	return nil
-}
-
-type connectionConfig struct {
-	PoolSize int `yaml:"pool_size"`
-
-	DialTimeoutMS     int `yaml:"dial_timeout_ms"`
-	ReadTimeoutMS     int `yaml:"read_timeout_ms"`
-	WriteTimeoutMS    int `yaml:"write_timeout_ms"`
-	IdleTimeoutSecond int `yaml:"idle_timeout_second"`
-	PoolTimeoutMS     int `yaml:"pool_timeout_ms"`
-
-	MaxRetries                int `yaml:"max_retries"`
-	MaxConnAgeSeconds         int `yaml:"max_conn_age_second"`
-	MinIdleConns              int `yaml:"min_idle_conns"`
-	MinRetryBackoffMS         int `yaml:"min_retry_backoff_ms"`
-	MaxRetryBackoffMS         int `yaml:"max_retry_backoff_ms"`
-	IdleCheckFrequencySeconds int `yaml:"idle_check_frequency_second"`
-}
-
-func (config connectionConfig) check() error {
-	if v := config.PoolSize; v <= 0 {
-		return fmt.Errorf("pool_size=%d, it should be > 0", v)
-	}
-	if v := config.DialTimeoutMS; v < 0 {
-		return fmt.Errorf("dial_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.ReadTimeoutMS; v < 0 {
-		return fmt.Errorf("read_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.WriteTimeoutMS; v < 0 {
-		return fmt.Errorf("write_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.IdleTimeoutSecond; v < -1 {
-		return fmt.Errorf("idle_timeout_second=%d, it should be >= -1", v)
-	}
-	if v := config.PoolTimeoutMS; v < 0 {
-		return fmt.Errorf("pool_timeout_ms=%d, it should be >= 0", v)
-	}
-	if v := config.MaxRetries; v < 0 {
-		return fmt.Errorf("max_retries=%d, it should be >= 0", v)
-	}
-	if v := config.MaxConnAgeSeconds; v < 0 {
-		return fmt.Errorf("max_conn_age_second=%d, it should be >= 0", v)
-	}
-	if v := config.MinIdleConns; v < 0 {
-		return fmt.Errorf("min_idle_conns=%d, it should be >= 0", v)
-	}
-	if v := config.MinRetryBackoffMS; v < -1 {
-		return fmt.Errorf("min_retry_backoff_ms=%d, it should be >= -1", v)
-	}
-	if v := config.MaxRetryBackoffMS; v < -1 {
-		return fmt.Errorf("max_retry_backoff_ms=%d, it should be >= -1", v)
-	}
-	if config.MinRetryBackoffMS > config.MaxRetryBackoffMS {
-		return fmt.Errorf(
-			"min_retry_backoff_ms=%d, max_retry_backoff_ms=%d, min_retry_backoff_ms shoule be less than or equal to max_retry_backoff_ms",
-			config.MinRetryBackoffMS, config.MaxRetryBackoffMS)
-	}
-	if v := config.IdleCheckFrequencySeconds; v < -1 {
-		return fmt.Errorf("idle_check_frequency_seconds=%d, it should be >= -1", v)
-	}
-	return nil
-}
-
-type RedisClusterConfig struct {
-	Addrs      []string         `yaml:"addrs"`
-	Connection connectionConfig `yaml:",inline"`
-}
-
-func (config RedisClusterConfig) check() error {
-	if len(config.Addrs) == 0 {
-		return fmt.Errorf("redis_cluster.adds should not be empty")
-	}
-	for _, addr := range config.Addrs {
-		if addr == "" {
-			return fmt.Errorf("address in redis_cluster.adds should not be empty")
-		}
-	}
-	if err := config.Connection.check(); err != nil {
-		return fmt.Errorf("redis_cluster.%w", err)
-	}
-
-	return nil
-}
-
-type DBClusterConfig struct {
-	ShardingCount int        `yaml:"sharding_count"`
-	Shardings     []DBConfig `yaml:"shardings"`
-}
-
-func (config DBClusterConfig) check() error {
-	if config.ShardingCount <= 0 {
-		return errors.New("sharding_count should be greater than 0")
-	}
-	for _, sharding := range config.Shardings {
-		if err := sharding.check(); err != nil {
-			return fmt.Errorf("shardings.%w", err)
-		}
-	}
-	return nil
-}
-
-type DBConfig struct {
-	URL string `yaml:"url"`
-
-	Connection connectionConfig `yaml:",inline"`
-
-	StartShardingIndex int `yaml:"start_index"`
-	EndShardingIndex   int `yaml:"end_index"`
-}
-
-func (config DBConfig) check() error {
-	if config.URL == "" {
-		return errors.New("db_config.url should not be empty")
-	}
-	if err := config.Connection.check(); err != nil {
-		return fmt.Errorf("db_config.%w", err)
-	}
-	if config.StartShardingIndex < 0 {
-		return errors.New("db_config.start_index shoule be equal to or greater than 0")
-	}
-	if config.EndShardingIndex < 0 {
-		return errors.New("db_config.end_index shoule be equal to or greater than 0")
-	}
-	if config.StartShardingIndex > config.EndShardingIndex {
-		return errors.New("db_config.start_index should be equal to or less than end_index")
-	}
-	return nil
-}
-
 func NewConfigFromFile(filePath string) (Config, error) {
 	config := Config{}
 	bs, err := readFileFromPath(filePath)
@@ -239,22 +46,61 @@ func readBytes(fp io.Reader) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-type MetricConfig struct {
-	Prefix             string   `yaml:"prefix"`
-	Host               string   `yaml:"host"`
-	Network            string   `yaml:"network"`
-	MaxPacktSize       int      `yaml:"max_packet_size"`
-	FlushPeriodSeconds int64    `yaml:"flush_period_seconds"`
-	SampleRate         float32  `yaml:"sample_rate"`
-	Tags               []string `yaml:"tags"`
+type Config struct {
+	Server       RoomServerConfig       `yaml:"server"`
+	CollectEvent RoomCollectEventConfig `yaml:"collect_event"`
+	Task         RoomTaskConfig         `yaml:"task"`
 }
 
-func (config MetricConfig) check() error {
-	if config.Host == "" {
-		return errors.New("metric.host should not be empty")
+func (config Config) check() error {
+	if err := config.Server.check(); err != nil {
+		return fmt.Errorf("room_service.%w", err)
 	}
-	if len(config.Tags)%2 != 0 {
-		return errors.New("metric.tags count should be even")
+	if err := config.CollectEvent.check(); err != nil {
+		return fmt.Errorf("room_collect_event_service.%w", err)
+	}
+	if err := config.Task.check(); err != nil {
+		return fmt.Errorf("room_task.%w", err)
+	}
+	return nil
+}
+
+type RoomServerConfig struct {
+	URL                 string                    `yaml:"url"`
+	PProfURL            string                    `yaml:"pprof_url"`
+	Log                 map[string]interface{}    `yaml:"log"`
+	Metric              MetricConfig              `yaml:"metric"`
+	LoadKey             LoadKeyConfig             `yaml:"load_key"`
+	HashTagEventService HashTagEventServiceConfig `yaml:"hash_tag_event_service"`
+	RedisCluster        RedisClusterConfig        `yaml:"redis_cluster"`
+	DB                  DBClusterConfig           `yaml:"db_cluster"`
+}
+
+func (config RoomServerConfig) Check() error {
+	return config.check()
+}
+
+func (config RoomServerConfig) check() error {
+	if config.URL == "" {
+		return errors.New("url should not be empty")
+	}
+	if config.PProfURL == "" {
+		return errors.New("pprof_url should not be empty")
+	}
+	if len(config.Log) == 0 {
+		return errors.New("log should not be empty")
+	}
+	if err := config.Metric.check(); err != nil {
+		return fmt.Errorf("metric.%w", err)
+	}
+	if err := config.LoadKey.check(); err != nil {
+		return fmt.Errorf("load_key.%w", err)
+	}
+	if err := config.RedisCluster.check(); err != nil {
+		return fmt.Errorf("redis_cluster.%w", err)
+	}
+	if err := config.DB.check(); err != nil {
+		return fmt.Errorf("db_cluster.%w", err)
 	}
 	return nil
 }
@@ -269,21 +115,21 @@ type LoadKeyConfig struct {
 
 func (config LoadKeyConfig) check() error {
 	if config.RetryTimes <= 0 {
-		return fmt.Errorf("load_key.retry_times=%d, should be greater than 0", config.RetryTimes)
+		return fmt.Errorf("retry_times=%d, should be greater than 0", config.RetryTimes)
 	}
 	d, err := time.ParseDuration(config.RawRetryInterval)
 	if err != nil {
-		return fmt.Errorf("load_key.retry_interval=%s, should be in valid duration format", config.RawRetryInterval)
+		return fmt.Errorf("retry_interval=%s, should be in valid duration format", config.RawRetryInterval)
 	}
 	if d <= 0 {
-		return fmt.Errorf("load_key.retry_interval=%s, duration should be positive", config.RawRetryInterval)
+		return fmt.Errorf("retry_interval=%s, duration should be positive", config.RawRetryInterval)
 	}
 	d, err = time.ParseDuration(config.RawLoadTimeout)
 	if err != nil {
-		return fmt.Errorf("load_key.load_timeout=%s, should be in valid duration format", config.RawLoadTimeout)
+		return fmt.Errorf("load_timeout=%s, should be in valid duration format", config.RawLoadTimeout)
 	}
 	if d <= 0 {
-		return fmt.Errorf("load_key.load_timeout=%s, duration should be positive", config.RawLoadTimeout)
+		return fmt.Errorf("load_timeout=%s, duration should be positive", config.RawLoadTimeout)
 	}
 	return nil
 }
@@ -300,25 +146,140 @@ func (config LoadKeyConfig) GetLoadTimeout() time.Duration {
 	return config.loadTimeout
 }
 
-type SyncServiceConfig struct {
-	Metric         MetricConfig       `yaml:"metric"`
-	Coordinator    CoordinatorConfig  `yaml:"coordinator"`
-	SyncKeyTaskV2  SyncKeyTaskConfig  `yaml:"sync_key_task_v2"`
-	CleanKeyTaskV2 CleanKeyTaskConfig `yaml:"clean_key_task_v2"`
+type RoomCollectEventConfig struct {
+	Log    map[string]interface{} `yaml:"log"`
+	Metric MetricConfig           `yaml:"metric"`
+
+	Server    CollectEventServiceServerConfig    `yaml:"server"`
+	SaveEvent CollectEventServiceSaveEventConfig `yaml:"save_event"`
+
+	BufferLimit int `yaml:"buffer_limit"`
+
+	RawMonitorInterval string `yaml:"monitor_interval"`
+	MonitorInterval    time.Duration
+
+	RedisCluster RedisClusterConfig `yaml:"redis_cluster"`
+	DB           DBClusterConfig    `yaml:"db_cluster"`
 }
 
-func (config SyncServiceConfig) check() error {
+func (config RoomCollectEventConfig) check() error {
+	if len(config.Log) == 0 {
+		return errors.New("log should not be empty")
+	}
 	if err := config.Metric.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
+		return fmt.Errorf("metric.%w", err)
+	}
+	if err := config.Server.check(); err != nil {
+		return fmt.Errorf("server.%w", err)
+	}
+	if err := config.SaveEvent.check(); err != nil {
+		return fmt.Errorf("save_event.%w", err)
+	}
+	if config.BufferLimit <= 0 {
+		return fmt.Errorf("buffer_limit is %d, it should be greater than 0", config.BufferLimit)
+	}
+	if config.RawMonitorInterval == "" {
+		return errors.New("monitor_interval should not be empty")
+	}
+	if err := config.RedisCluster.check(); err != nil {
+		return fmt.Errorf("redis_cluster.%w", err)
+	}
+	if err := config.DB.check(); err != nil {
+		return fmt.Errorf("db_cluster.%w", err)
+	}
+	return nil
+}
+
+func (config *RoomCollectEventConfig) Init() error {
+	if err := config.check(); err != nil {
+		return err
+	}
+
+	duration, err := time.ParseDuration(config.RawMonitorInterval)
+	if err != nil {
+		return fmt.Errorf("monitor_interval is inavlid %w", err)
+	}
+	config.MonitorInterval = duration
+	return nil
+}
+
+type CollectEventServiceServerConfig struct {
+	URL            string `yaml:"url"`
+	ReadTimeoutMS  int    `yaml:"read_timeout_ms"`
+	WriteTimeoutMS int    `yaml:"write_timeout_ms"`
+	IdleTimeoutMS  int    `yaml:"idle_timeout_ms"`
+}
+
+func (config CollectEventServiceServerConfig) check() error {
+	if config.URL == "" {
+		return errors.New("url should not be empty")
+	}
+	if config.ReadTimeoutMS <= 0 {
+		return fmt.Errorf("read_timeout_ms is %d, it should be greater than 0", config.ReadTimeoutMS)
+	}
+	if config.WriteTimeoutMS <= 0 {
+		return fmt.Errorf("write_timeout_ms is %d, it should be greater than 0", config.WriteTimeoutMS)
+	}
+	if config.IdleTimeoutMS <= 0 {
+		return fmt.Errorf("idle_timeout_ms is %d, it should be greater than 0", config.IdleTimeoutMS)
+	}
+	return nil
+}
+
+type CollectEventServiceSaveEventConfig struct {
+	RetryTimes      int `yaml:"retry_times"`
+	RetryIntervalMS int `yaml:"retry_interval_ms"`
+	TimeoutMS       int `yaml:"timeout_ms"`
+	WorkerCount     int `yaml:"worker_count"`
+}
+
+func (config CollectEventServiceSaveEventConfig) check() error {
+	if config.RetryTimes <= 0 {
+		return fmt.Errorf("retry_times is %d, it should be greater than 0", config.RetryTimes)
+	}
+	if config.RetryIntervalMS <= 0 {
+		return fmt.Errorf("retry_interval_ms is %d, it should be greater than 0", config.RetryIntervalMS)
+	}
+	if config.TimeoutMS <= 0 {
+		return fmt.Errorf("timeout_ms is %d, it should be greater than 0", config.TimeoutMS)
+	}
+	if config.WorkerCount <= 0 {
+		return fmt.Errorf("worker_count is %d, it should be greater than 0", config.WorkerCount)
+	}
+	return nil
+}
+
+type RoomTaskConfig struct {
+	Log          map[string]interface{} `yaml:"log"`
+	Metric       MetricConfig           `yaml:"metric"`
+	RedisCluster RedisClusterConfig     `yaml:"redis_cluster"`
+	DB           DBClusterConfig        `yaml:"db_cluster"`
+	Coordinator  CoordinatorConfig      `yaml:"coordinator"`
+	SyncKeyTask  SyncKeyTaskConfig      `yaml:"sync_key_task"`
+	CleanKeyTask CleanKeyTaskConfig     `yaml:"clean_key_task"`
+}
+
+func (config RoomTaskConfig) check() error {
+	if len(config.Log) == 0 {
+		return errors.New("log should not be empty")
+	}
+	if err := config.Metric.check(); err != nil {
+		return fmt.Errorf("metric.%w", err)
+	}
+	if err := config.RedisCluster.check(); err != nil {
+		return fmt.Errorf("redis_cluster.%w", err)
+	}
+	if err := config.DB.check(); err != nil {
+		return fmt.Errorf("db_cluster.%w", err)
 	}
 	if err := config.Coordinator.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
+		return fmt.Errorf("coordinator.%w", err)
 	}
-	if err := config.SyncKeyTaskV2.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
+	if err := config.SyncKeyTask.check(); err != nil {
+		return fmt.Errorf("sync_key_task.%w", err)
 	}
-	if err := config.CleanKeyTaskV2.check(); err != nil {
-		return fmt.Errorf("sync.%w", err)
+	if err := config.CleanKeyTask.check(); err != nil {
+		return fmt.Errorf("clean_key_task.%w", err)
 	}
 	return nil
 }
@@ -330,10 +291,10 @@ type CoordinatorConfig struct {
 
 func (config CoordinatorConfig) check() error {
 	if config.Name == "" {
-		return errors.New("coordinator.name should not be empty")
+		return errors.New("name should not be empty")
 	}
 	if len(config.Addrs) == 0 {
-		return errors.New("coordinator.addrs should not be empty")
+		return errors.New("addrs should not be empty")
 	}
 	return nil
 }
@@ -350,10 +311,10 @@ type SyncKeyTaskConfig struct {
 
 func (config SyncKeyTaskConfig) check() error {
 	if config.IntervalMinutes <= 0 {
-		return fmt.Errorf("sync_key_task.interval_minutes is %d, it should be greater than 0", config.IntervalMinutes)
+		return fmt.Errorf("interval_minutes is %d, it should be greater than 0", config.IntervalMinutes)
 	}
 	if config.UpSertTryTimes <= 0 {
-		return fmt.Errorf("sync_key_task.upsert_try_times is %d, it should be greater than 0", config.UpSertTryTimes)
+		return fmt.Errorf("upsert_try_times is %d, it should be greater than 0", config.UpSertTryTimes)
 	}
 	return nil
 }
@@ -369,98 +330,10 @@ type CleanKeyTaskConfig struct {
 
 func (config CleanKeyTaskConfig) check() error {
 	if config.IntervalMinutes <= 0 {
-		return fmt.Errorf("clean_key_task.interval_minutes=%d, it should be greater than 0", config.IntervalMinutes)
+		return fmt.Errorf("interval_minutes=%d, it should be greater than 0", config.IntervalMinutes)
 	}
 	if config.RawInactiveDuration == "" {
-		return errors.New("clean_key_task.inactive_duration should not be empty")
-	}
-	return nil
-}
-
-type CollectEventServiceConfig struct {
-	Server    CollectEventServiceServerConfig    `yaml:"server"`
-	SaveEvent CollectEventServiceSaveEventConfig `yaml:"save_event"`
-
-	BufferLimit int `yaml:"buffer_limit"`
-
-	RawMonitorInterval string `yaml:"monitor_interval"`
-	MonitorInterval    time.Duration
-}
-
-func (config CollectEventServiceConfig) check() error {
-	prefix := "collect_event"
-	if err := config.Server.check(); err != nil {
-		return fmt.Errorf("%s.%w", prefix, err)
-	}
-	if err := config.SaveEvent.check(); err != nil {
-		return fmt.Errorf("%s.%w", prefix, err)
-	}
-	if config.BufferLimit <= 0 {
-		return fmt.Errorf("%s.buffer_limit is %d, it should be greater than 0", prefix, config.BufferLimit)
-	}
-	if config.RawMonitorInterval == "" {
-		return fmt.Errorf("%s.monitor_interval should not be empty", prefix)
-	}
-	return nil
-}
-
-func (config *CollectEventServiceConfig) Init() error {
-	prefix := "collect_event"
-	if err := config.check(); err != nil {
-		return err
-	}
-
-	duration, err := time.ParseDuration(config.RawMonitorInterval)
-	if err != nil {
-		return fmt.Errorf("%s.monitor_interval is inavlid %w", prefix, err)
-	}
-	config.MonitorInterval = duration
-	return nil
-}
-
-type CollectEventServiceServerConfig struct {
-	URL            string `yaml:"url"`
-	ReadTimeoutMS  int    `yaml:"read_timeout_ms"`
-	WriteTimeoutMS int    `yaml:"write_timeout_ms"`
-	IdleTimeoutMS  int    `yaml:"idle_timeout_ms"`
-}
-
-func (config CollectEventServiceServerConfig) check() error {
-	if config.URL == "" {
-		return errors.New("service.url should not be empty")
-	}
-	if config.ReadTimeoutMS <= 0 {
-		return fmt.Errorf("service.read_timeout_ms is %d, it should be greater than 0", config.ReadTimeoutMS)
-	}
-	if config.WriteTimeoutMS <= 0 {
-		return fmt.Errorf("service.write_timeout_ms is %d, it should be greater than 0", config.WriteTimeoutMS)
-	}
-	if config.IdleTimeoutMS <= 0 {
-		return fmt.Errorf("service.idle_timeout_ms is %d, it should be greater than 0", config.IdleTimeoutMS)
-	}
-	return nil
-}
-
-type CollectEventServiceSaveEventConfig struct {
-	RetryTimes      int `yaml:"retry_times"`
-	RetryIntervalMS int `yaml:"retry_interval_ms"`
-	TimeoutMS       int `yaml:"timeout_ms"`
-	WorkerCount     int `yaml:"worker_count"`
-}
-
-func (config CollectEventServiceSaveEventConfig) check() error {
-	prefix := "save_event"
-	if config.RetryTimes <= 0 {
-		return fmt.Errorf("%s.retry_times is %d, it should be greater than 0", prefix, config.RetryTimes)
-	}
-	if config.RetryIntervalMS <= 0 {
-		return fmt.Errorf("%s.retry_interval_ms is %d, it should be greater than 0", prefix, config.RetryIntervalMS)
-	}
-	if config.TimeoutMS <= 0 {
-		return fmt.Errorf("%s.timeout_ms is %d, it should be greater than 0", prefix, config.TimeoutMS)
-	}
-	if config.WorkerCount <= 0 {
-		return fmt.Errorf("%s.worker_count is %d, it should be greater than 0", prefix, config.WorkerCount)
+		return errors.New("inactive_duration should not be empty")
 	}
 	return nil
 }

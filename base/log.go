@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func parseLogger(appName, name string, cfg utility.StrMap) (*log.Logger, error) {
+func parseLogger(name string, cfg utility.StrMap) (*log.Logger, error) {
 	var outputs []log.Output
 	for k, v := range cfg {
 		vs := utility.AnyToAnyMap(v)
@@ -25,7 +25,7 @@ func parseLogger(appName, name string, cfg utility.StrMap) (*log.Logger, error) 
 		case "file":
 			output = parseFileLogger(name, format, level, vs)
 		case "tcp":
-			output, _ = parseTCPLogger(fmt.Sprintf("%s.%s", appName, name), format, level, vs)
+			output, _ = parseTCPLogger(name, format, level, vs)
 		}
 		if output == nil {
 			return nil, fmt.Errorf("'log.%v' unknown output type", k)

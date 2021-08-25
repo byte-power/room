@@ -28,7 +28,7 @@ const (
 const CollectEventServiceName = "collect_event_service"
 
 type CollectEventService struct {
-	config                  *base.CollectEventServiceConfig
+	config                  *base.RoomCollectEventConfig
 	eventBuffer             chan base.HashTagEvent
 	eventCountInEventBuffer int64
 	logger                  *log.Logger
@@ -40,7 +40,7 @@ type CollectEventService struct {
 	server                  *http.Server
 }
 
-func NewCollectEventService(config base.CollectEventServiceConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
+func NewCollectEventService(config base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
 	if err := config.Init(); err != nil {
 		return nil, err
 	}
@@ -65,8 +65,11 @@ func NewCollectEventService(config base.CollectEventServiceConfig, logger *log.L
 		stop:                    0,
 		server:                  nil,
 	}
-	logger.Info(fmt.Sprintf("new %s", CollectEventServiceName), log.String("config", fmt.Sprintf("%+v", config)))
 	return service, nil
+}
+
+func (service *CollectEventService) Config() *base.RoomCollectEventConfig {
+	return service.config
 }
 
 func (service *CollectEventService) Run() {

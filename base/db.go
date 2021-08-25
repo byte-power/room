@@ -13,6 +13,51 @@ import (
 	"github.com/go-pg/pg/v10/orm"
 )
 
+type DBClusterConfig struct {
+	ShardingCount int        `yaml:"sharding_count"`
+	Shardings     []DBConfig `yaml:"shardings"`
+}
+
+func (config DBClusterConfig) check() error {
+	if config.ShardingCount <= 0 {
+		return errors.New("sharding_count should be greater than 0")
+	}
+	for index, sharding := range config.Shardings {
+		if err := sharding.check(); err != nil {
+			return fmt.Errorf("shardings.%d.%w", index, err)
+		}
+	}
+	return nil
+}
+
+type DBConfig struct {
+	URL string `yaml:"url"`
+
+	Connection connectionConfig `yaml:",inline"`
+
+	StartShardingIndex int `yaml:"start_index"`
+	EndShardingIndex   int `yaml:"end_index"`
+}
+
+func (config DBConfig) check() error {
+	if config.URL == "" {
+		return errors.New("url should not be empty")
+	}
+	if err := config.Connection.check(); err != nil {
+		return err
+	}
+	if config.StartShardingIndex < 0 {
+		return errors.New("start_index shoule be equal to or greater than 0")
+	}
+	if config.EndShardingIndex < 0 {
+		return errors.New("end_index shoule be equal to or greater than 0")
+	}
+	if config.StartShardingIndex > config.EndShardingIndex {
+		return errors.New("start_index should be equal to or less than end_index")
+	}
+	return nil
+}
+
 type DBCluster struct {
 	clients       []dbClient
 	shardingCount int
@@ -40,7 +85,7 @@ type Model interface {
 	GetTablePrefix() string
 }
 
-func NewDBClusterFromConfig(config DBClusterConfig) (*DBCluster, error) {
+func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metric *MetricClient, metricKey string) (*DBCluster, error) {
 	shardingCount := config.ShardingCount
 	if shardingCount <= 0 {
 		return nil, errors.New("sharding_count should be greater than 0")
@@ -55,6 +100,8 @@ func NewDBClusterFromConfig(config DBClusterConfig) (*DBCluster, error) {
 			dbCluster.clients,
 			dbClient{startIndex: cfg.StartShardingIndex, endIndex: cfg.EndShardingIndex, client: client})
 	}
+	queryHook := dbLogger{logger: logger, metricClient: metric, durationMetricKey: metricKey}
+	dbCluster.AddQueryHook(queryHook)
 	return dbCluster, nil
 }
 
