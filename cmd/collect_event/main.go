@@ -13,9 +13,16 @@ import (
 )
 
 var configPath = pflag.StringP("config", "c", "config.yaml", "config file path")
+var versionFlag = pflag.BoolP("version", "v", false, "service version")
+var version string
 
 func main() {
 	pflag.Parse()
+	if *versionFlag {
+		fmt.Println(version)
+		return
+	}
+
 	if configPath == nil {
 		panic("config not found")
 	}

@@ -14,13 +14,13 @@ import (
 )
 
 var configPath = pflag.StringP("config", "c", "config.yaml", "config file path")
-var version = pflag.BoolP("version", "v", false, "room version")
-var roomVersion = "1.2.1"
+var versionFlag = pflag.BoolP("version", "v", false, "service version")
+var version string
 
 func main() {
 	pflag.Parse()
-	if *version {
-		fmt.Println(roomVersion)
+	if *versionFlag {
+		fmt.Println(version)
 		return
 	}
 	if err := base.InitRoomServer(*configPath); err != nil {
