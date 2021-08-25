@@ -152,7 +152,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 	}
 
 	// Pre Porcess related keys
-	if err = preProcessCommand(command, serveStartTime); err != nil {
+	if err = preProcessCommand(dep, command, serveStartTime); err != nil {
 		metric.MetricIncrease("error.pre_process")
 		logger.Error(
 			"preprocess command error",
@@ -163,7 +163,7 @@ func connServeHandler(conn redcon.Conn, cmd redcon.Command) {
 		return
 	}
 
-	transaction, err := getTransactionIfNeeded(conn, command)
+	transaction, err := getTransactionIfNeeded(dep, conn, command)
 	if err != nil {
 		metric.MetricIncrease("error.get_transaction")
 		logger.Error(
@@ -218,8 +218,7 @@ func isTransactionNeeded(command commands.Commander) bool {
 	return utility.StringSliceContains(transactionCommands, command.Name())
 }
 
-func preProcessCommand(command commands.Commander, accessTime time.Time) error {
-	dep := base.GetServerDependency()
+func preProcessCommand(dep base.Dependency, command commands.Commander, accessTime time.Time) error {
 	logger := dep.Logger
 
 	hashTag, err := commands.CheckAndGetCommandKeysHashTag(command)
@@ -238,8 +237,7 @@ func preProcessCommand(command commands.Commander, accessTime time.Time) error {
 	return nil
 }
 
-func getTransactionIfNeeded(conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
-	dep := base.GetServerDependency()
+func getTransactionIfNeeded(dep base.Dependency, conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
 	logger := dep.Logger
 	metric := dep.Metric
 	transaction := transactionManager.getTransaction(conn)
