@@ -40,10 +40,7 @@ type CollectEventService struct {
 	server                  *http.Server
 }
 
-func NewCollectEventService(config base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
-	if err := config.Init(); err != nil {
-		return nil, err
-	}
+func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
 	if logger == nil {
 		return nil, errors.New("logger should not be nil")
 	}
@@ -54,7 +51,7 @@ func NewCollectEventService(config base.RoomCollectEventConfig, logger *log.Logg
 		return nil, errors.New("db should not be nil")
 	}
 	service := &CollectEventService{
-		config:                  &config,
+		config:                  config,
 		eventBuffer:             make(chan base.HashTagEvent, config.BufferLimit),
 		eventCountInEventBuffer: 0,
 		logger:                  logger,

@@ -14,7 +14,7 @@ func testInitHashTagEventService() *HashTagEventService {
 		"event_service",
 		loggerConfig)
 	metric, _ := InitMetric(MetricConfig{Host: "localhost"})
-	hashTagEventConfig := HashTagEventServiceConfig{EventReport: HashTagEventServiceEventReportConfig{URL: "localhost"}}
+	hashTagEventConfig := &HashTagEventServiceConfig{EventReport: HashTagEventServiceEventReportConfig{URL: "localhost"}}
 	service, _ := NewHashTagEventService(hashTagEventConfig, logger, metric)
 	return service
 }

@@ -30,9 +30,9 @@ var serverLogger *log.Logger
 var collectEventLogger *log.Logger
 var taskLogger *log.Logger
 
-var serverConfig RoomServerConfig
-var taskConfig RoomTaskConfig
-var collectEventConfig RoomCollectEventConfig
+var serverConfig *RoomServerConfig
+var taskConfig *RoomTaskConfig
+var collectEventConfig *RoomCollectEventConfig
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -68,7 +68,7 @@ func InitRoomServer(configPath string) error {
 		return err
 	}
 
-	serverConfig = config.Server
+	serverConfig = &config.Server
 	serverLogger, serverMetricService, serverRedisCluster, serverDBCluster, err = initService(
 		"room.server", serverConfig.Log, serverConfig.Metric,
 		serviceDBQueryDurationMetricKey, serverConfig.RedisCluster,
@@ -77,22 +77,14 @@ func InitRoomServer(configPath string) error {
 		return err
 	}
 
-	hashTagEventService, err = NewHashTagEventService(serverConfig.HashTagEventService, serverLogger, serverMetricService)
+	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, serverLogger, serverMetricService)
 	if err != nil {
 		return err
 	}
 
-	d, err := time.ParseDuration(serverConfig.LoadKey.RawRetryInterval)
-	if err != nil {
+	if err = serverConfig.init(); err != nil {
 		return err
 	}
-	serverConfig.LoadKey.retryInterval = d
-
-	d, err = time.ParseDuration(serverConfig.LoadKey.RawLoadTimeout)
-	if err != nil {
-		return err
-	}
-	serverConfig.LoadKey.loadTimeout = d
 
 	serverLogger.Info(
 		"init room server service",
@@ -110,25 +102,18 @@ func InitRoomTask(configPath string) error {
 		return err
 	}
 
-	taskConfig = config.Task
+	taskConfig = &config.Task
 	taskLogger, taskMetricService, taskRedisCluster, taskDBCluster, err = initService(
 		"room.task", taskConfig.Log,
 		taskConfig.Metric, taskDBQueryDurationMetricKey,
 		taskConfig.RedisCluster, taskConfig.DB)
-
-	rawNoWrittenDuration := taskConfig.SyncKeyTask.RawNoWrittenDuration
-	duration, err := time.ParseDuration(rawNoWrittenDuration)
 	if err != nil {
 		return err
 	}
-	taskConfig.SyncKeyTask.NoWrittenDuration = duration
 
-	rawInactiveDuration := taskConfig.CleanKeyTask.RawInactiveDuration
-	duration, err = time.ParseDuration(rawInactiveDuration)
-	if err != nil {
+	if err = taskConfig.init(); err != nil {
 		return err
 	}
-	taskConfig.CleanKeyTask.InactiveDuration = duration
 
 	taskLogger.Info(
 		"init room task",
@@ -146,11 +131,18 @@ func InitCollectEvent(configPath string) error {
 		return err
 	}
 
-	collectEventConfig = config.CollectEvent
+	collectEventConfig = &config.CollectEvent
 	collectEventLogger, collectEventMetricService, collectEventRedisCluster, collectEventDBCluster, err = initService(
 		"room.collect_event", collectEventConfig.Log,
 		collectEventConfig.Metric, collectEventDBQueryDurationMetricKey,
 		collectEventConfig.RedisCluster, collectEventConfig.DB)
+	if err != nil {
+		return err
+	}
+
+	if err := collectEventConfig.init(); err != nil {
+		return err
+	}
 
 	collectEventLogger.Info(
 		"init room collect event service",
@@ -166,15 +158,15 @@ func GetHashTagEventService() *HashTagEventService {
 	return hashTagEventService
 }
 
-func GetServerConfig() RoomServerConfig {
+func GetServerConfig() *RoomServerConfig {
 	return serverConfig
 }
 
-func GetTaskConfig() RoomTaskConfig {
+func GetTaskConfig() *RoomTaskConfig {
 	return taskConfig
 }
 
-func GetCollectEventConfig() RoomCollectEventConfig {
+func GetCollectEventConfig() *RoomCollectEventConfig {
 	return collectEventConfig
 }
 

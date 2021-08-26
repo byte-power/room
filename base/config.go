@@ -105,6 +105,21 @@ func (config RoomServerConfig) check() error {
 	return nil
 }
 
+func (config *RoomServerConfig) init() error {
+	d, err := time.ParseDuration(config.LoadKey.RawRetryInterval)
+	if err != nil {
+		return fmt.Errorf("load_key.retry_interval=%s is invalid %w", config.LoadKey.RawRetryInterval, err)
+	}
+	config.LoadKey.retryInterval = d
+
+	d, err = time.ParseDuration(serverConfig.LoadKey.RawLoadTimeout)
+	if err != nil {
+		return fmt.Errorf("load_key.load_timeout=%s is invalid %w", config.LoadKey.RawLoadTimeout, err)
+	}
+	config.LoadKey.loadTimeout = d
+	return nil
+}
+
 type LoadKeyConfig struct {
 	RetryTimes       int    `yaml:"retry_times"`
 	RawRetryInterval string `yaml:"retry_interval"`
@@ -190,7 +205,7 @@ func (config RoomCollectEventConfig) check() error {
 	return nil
 }
 
-func (config *RoomCollectEventConfig) Init() error {
+func (config *RoomCollectEventConfig) init() error {
 	if err := config.check(); err != nil {
 		return err
 	}
@@ -284,6 +299,23 @@ func (config RoomTaskConfig) check() error {
 	return nil
 }
 
+func (config *RoomTaskConfig) init() error {
+	rawNoWrittenDuration := config.SyncKeyTask.RawNoWrittenDuration
+	duration, err := time.ParseDuration(rawNoWrittenDuration)
+	if err != nil {
+		return fmt.Errorf("sync_key_task.no_written_duration=%s is invalid %w", rawNoWrittenDuration, err)
+	}
+	config.SyncKeyTask.NoWrittenDuration = duration
+
+	rawInactiveDuration := config.CleanKeyTask.RawInactiveDuration
+	duration, err = time.ParseDuration(rawInactiveDuration)
+	if err != nil {
+		return fmt.Errorf("clean_key_task.inactive_duration=%s is invalid %w", rawInactiveDuration, err)
+	}
+	config.CleanKeyTask.InactiveDuration = duration
+	return nil
+}
+
 type CoordinatorConfig struct {
 	Name  string   `yaml:"name"`
 	Addrs []string `yaml:"addrs"`
@@ -316,6 +348,12 @@ func (config SyncKeyTaskConfig) check() error {
 	if config.UpSertTryTimes <= 0 {
 		return fmt.Errorf("upsert_try_times is %d, it should be greater than 0", config.UpSertTryTimes)
 	}
+	if config.RateLimitPerSecond <= 0 {
+		return fmt.Errorf("rate_limit_per_second is %d, it should be greater than 0", config.RateLimitPerSecond)
+	}
+	if config.RawNoWrittenDuration == "" {
+		return fmt.Errorf("no_written_duration should not be empty")
+	}
 	return nil
 }
 
@@ -331,6 +369,9 @@ type CleanKeyTaskConfig struct {
 func (config CleanKeyTaskConfig) check() error {
 	if config.IntervalMinutes <= 0 {
 		return fmt.Errorf("interval_minutes=%d, it should be greater than 0", config.IntervalMinutes)
+	}
+	if config.RateLimitPerSecond <= 0 {
+		return fmt.Errorf("rate_limit_per_second is %d, it should be greater than 0", config.RateLimitPerSecond)
 	}
 	if config.RawInactiveDuration == "" {
 		return errors.New("inactive_duration should not be empty")
