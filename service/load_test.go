@@ -22,7 +22,7 @@ import (
 var testContextTODO = context.TODO()
 
 func TestMain(m *testing.M) {
-	configFile := "../cmd/config.yaml"
+	configFile := "../test/config.yaml"
 	if err := base.InitRoomServer(configFile); err != nil {
 		panic(err)
 	}
