@@ -36,7 +36,7 @@ func main() {
 		panic(err)
 	}
 	roomService.Run()
-	logger.Info("service has started")
+	logger.Info("room server has started")
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -44,7 +44,7 @@ func main() {
 	sig := <-signalCh
 	logger.Info("signal received, closing service...", log.String("signal", sig.String()))
 	roomService.Stop()
-	logger.Info("room server is closed")
 	logger.Info("room server is stopped, try to stop other related services...")
 	base.StopServices()
+	logger.Info("room server and related service are all closed")
 }

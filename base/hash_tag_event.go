@@ -187,7 +187,7 @@ type HashTagEventService struct {
 	client                           *http.Client
 }
 
-func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger, metric *MetricClient) (*HashTagEventService, error) {
+func NewHashTagEventService(config *HashTagEventServiceConfig, logger *log.Logger, metric *MetricClient) (*HashTagEventService, error) {
 	if config.RawAggInterval == "" {
 		config.AggInterval = defaultEventServiceAggregateInterval
 	} else {
@@ -278,7 +278,7 @@ func NewHashTagEventService(config HashTagEventServiceConfig, logger *log.Logger
 	}
 	server := &HashTagEventService{
 		name:                             HashTagEventServiceName,
-		config:                           &config,
+		config:                           config,
 		eventBuffer:                      make(chan HashTagEvent, config.BufferLimit),
 		eventCountInEventBuffer:          0,
 		mutex:                            sync.Mutex{},

@@ -39,13 +39,13 @@ func newInvalidKeyError(key string) error {
 var errInvalidResponse = errors.New("ERR invalid command response")
 
 type RoomService struct {
-	config      base.RoomServerConfig
+	config      *base.RoomServerConfig
 	dep         base.Dependency
 	server      *redcon.Server
 	pprofServer *http.Server
 }
 
-func NewRoomService(config base.RoomServerConfig, dep base.Dependency) (*RoomService, error) {
+func NewRoomService(config *base.RoomServerConfig, dep base.Dependency) (*RoomService, error) {
 	if err := config.Check(); err != nil {
 		return nil, err
 	}
