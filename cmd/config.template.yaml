@@ -68,7 +68,7 @@ server:
         start_index: 0
         end_index: 1
 
-      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
         pool_size: 100
         min_idle_conns: 10
         dial_timeout_ms: 1000
@@ -147,7 +147,7 @@ collect_event:
         start_index: 0
         end_index: 1
 
-      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
         pool_size: 100
         min_idle_conns: 10
         dial_timeout_ms: 1000
@@ -212,7 +212,7 @@ task:
         start_index: 0
         end_index: 1
 
-      - url: postgres://root:root123@127.0.0.1:5433/room_service2?sslmode=disable
+      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
         pool_size: 100
         min_idle_conns: 10
         dial_timeout_ms: 1000

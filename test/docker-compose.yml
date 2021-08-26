@@ -1,0 +1,44 @@
+version: '3'
+services:
+    room_postgres:
+        image: postgres:11
+        environment:
+            POSTGRES_USER: 'root'
+            POSTGRES_PASSWORD: 'root123'
+            PGDATA: /var/lib/postgresql/data/pgdata
+        ports:
+            - '5433:5432'
+        restart: always
+        container_name: room_postgres
+        volumes:
+            - ./pgdata:/var/lib/postgresql/data
+            - ./db.sql:/room.sql
+            - ./init_room_db.sh:/docker-entrypoint-initdb.d/init-room-db.sh
+
+
+    # TODO: redis sometimes timeout used with docker.
+    # room_redis:
+    #     image: grokzen/redis-cluster
+    #     environment:
+    #         IP: '0.0.0.0'
+    #     ports:
+    #         - '7000:7000'
+    #         - '7001:7001'
+    #         - '7002:7002'
+    #         - '7003:7003'
+    #         - '7004:7004'
+    #         - '7005:7005'
+    #     restart: always
+    #     container_name: room_redis
+    #     volumes:
+    #         - ./redisdata:/redis-data
+
+    # room_vector:
+    #     image: timberio/vector:latest-alpine
+    #     ports:
+    #         - '7006:7006'
+    #     restart: always
+    #     container_name: room_vector
+    #     volumes:
+    #         - ./vector.toml:/etc/vector/vector.toml
+    #         - ./vectordata:/var/lib/vector
