@@ -63,7 +63,7 @@ func initService(
 }
 
 func InitRoomServer(configPath string) error {
-	config, err := NewConfigFromFile(configPath)
+	config, err := newConfigFromFile(configPath)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func InitRoomServer(configPath string) error {
 }
 
 func InitRoomTask(configPath string) error {
-	config, err := NewConfigFromFile(configPath)
+	config, err := newConfigFromFile(configPath)
 	if err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func InitRoomTask(configPath string) error {
 }
 
 func InitCollectEvent(configPath string) error {
-	config, err := NewConfigFromFile(configPath)
+	config, err := newConfigFromFile(configPath)
 	if err != nil {
 		return err
 	}

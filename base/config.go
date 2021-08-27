@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-func NewConfigFromFile(filePath string) (Config, error) {
+func newConfigFromFile(filePath string) (Config, error) {
 	config := Config{}
 	bs, err := readFileFromPath(filePath)
 	if err != nil {
