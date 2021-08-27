@@ -96,6 +96,9 @@ func (config RoomServerConfig) check() error {
 	if err := config.LoadKey.check(); err != nil {
 		return fmt.Errorf("load_key.%w", err)
 	}
+	if err := config.HashTagEventService.check(); err != nil {
+		return fmt.Errorf("hash_tag_event_service.%w", err)
+	}
 	if err := config.RedisCluster.check(); err != nil {
 		return fmt.Errorf("redis_cluster.%w", err)
 	}
@@ -106,6 +109,10 @@ func (config RoomServerConfig) check() error {
 }
 
 func (config *RoomServerConfig) init() error {
+	if err := config.check(); err != nil {
+		return fmt.Errorf("room_server.%w", err)
+	}
+
 	d, err := time.ParseDuration(config.LoadKey.RawRetryInterval)
 	if err != nil {
 		return fmt.Errorf("load_key.retry_interval=%s is invalid %w", config.LoadKey.RawRetryInterval, err)
@@ -117,6 +124,43 @@ func (config *RoomServerConfig) init() error {
 		return fmt.Errorf("load_key.load_timeout=%s is invalid %w", config.LoadKey.RawLoadTimeout, err)
 	}
 	config.LoadKey.loadTimeout = d
+
+	d, err = time.ParseDuration(config.HashTagEventService.RawAggInterval)
+	if err != nil {
+		return fmt.Errorf("hash_tag_event_service.agg_interval.%w", err)
+	}
+	config.HashTagEventService.AggInterval = d
+
+	d, err = time.ParseDuration(config.HashTagEventService.RawMonitorInterval)
+	if err != nil {
+		return fmt.Errorf("hash_tag_event_service.monitor_interval.%w", err)
+	}
+	config.HashTagEventService.MonitorInterval = d
+
+	d, err = time.ParseDuration(config.HashTagEventService.EventReport.RawRequestTimeout)
+	if err != nil {
+		return fmt.Errorf("hash_tag_event_service.event_report.request_timeout.%w", err)
+	}
+	config.HashTagEventService.EventReport.RequestTimeout = d
+
+	d, err = time.ParseDuration(config.HashTagEventService.EventReport.RawRequestMaxWaitDuration)
+	if err != nil {
+		return fmt.Errorf("hash_tag_event_service.event_report.request_max_wait_duration.%w", err)
+	}
+	config.HashTagEventService.EventReport.RequestMaxWaitDuration = d
+
+	d, err = time.ParseDuration(config.HashTagEventService.EventReport.RawRequestConnKeepAliveInterval)
+	if err != nil {
+		return fmt.Errorf("hash_tag_event_service.event_report.request_conn_keep_alive_interval.%w", err)
+	}
+	config.HashTagEventService.EventReport.RequestConnKeepAliveInterval = d
+
+	d, err = time.ParseDuration(config.HashTagEventService.EventReport.RawRequestIdleConnTimeout)
+	if err != nil {
+		return fmt.Errorf("hash_tag_event_service.event_report.request_idle_conn_timeout.%w", err)
+	}
+	config.HashTagEventService.EventReport.RequestIdleConnTimeout = d
+
 	return nil
 }
 
@@ -207,7 +251,7 @@ func (config RoomCollectEventConfig) check() error {
 
 func (config *RoomCollectEventConfig) init() error {
 	if err := config.check(); err != nil {
-		return err
+		return fmt.Errorf("room_collect_event.%w", err)
 	}
 
 	duration, err := time.ParseDuration(config.RawMonitorInterval)
@@ -300,6 +344,10 @@ func (config RoomTaskConfig) check() error {
 }
 
 func (config *RoomTaskConfig) init() error {
+	if err := config.check(); err != nil {
+		return fmt.Errorf("room_task.%w", err)
+	}
+
 	rawNoWrittenDuration := config.SyncKeyTask.RawNoWrittenDuration
 	duration, err := time.ParseDuration(rawNoWrittenDuration)
 	if err != nil {
