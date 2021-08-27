@@ -26,8 +26,7 @@ var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func initService(
 	loggerName string, logConfig map[string]interface{},
-	metricConfig MetricConfig, metricKey string,
-	dbClusterConfig DBClusterConfig,
+	metricConfig MetricConfig, dbClusterConfig DBClusterConfig,
 ) (*log.Logger, *MetricClient, *DBCluster, error) {
 
 	logger, err := parseLogger(loggerName, logConfig)
@@ -38,7 +37,7 @@ func initService(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("init_metric.%w", err)
 	}
-	databaseCluster, err := NewDBClusterFromConfig(dbClusterConfig, logger, metric, metricKey)
+	databaseCluster, err := NewDBClusterFromConfig(dbClusterConfig, logger, metric)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("init_db.%w", err)
 	}
@@ -58,8 +57,8 @@ func InitRoomServer(configPath string) error {
 	}
 
 	logger, metric, dbCluster, err := initService(
-		"room.server", serverConfig.Log, serverConfig.Metric,
-		serviceDBQueryDurationMetricKey, serverConfig.DB)
+		"room.server", serverConfig.Log,
+		serverConfig.Metric, serverConfig.DB)
 	if err != nil {
 		return err
 	}
@@ -103,8 +102,8 @@ func InitRoomTask(configPath string) error {
 	}
 
 	logger, metric, dbCluster, err := initService(
-		"room.task", taskConfig.Log, taskConfig.Metric,
-		taskDBQueryDurationMetricKey, taskConfig.DB)
+		"room.task", taskConfig.Log,
+		taskConfig.Metric, taskConfig.DB)
 	if err != nil {
 		return err
 	}
@@ -143,8 +142,8 @@ func InitCollectEvent(configPath string) error {
 	}
 
 	logger, metric, dbCluster, err := initService(
-		"room.collect_event", collectEventConfig.Log, collectEventConfig.Metric,
-		collectEventDBQueryDurationMetricKey, collectEventConfig.DB)
+		"room.collect_event", collectEventConfig.Log,
+		collectEventConfig.Metric, collectEventConfig.DB)
 	if err != nil {
 		return err
 	}
