@@ -69,6 +69,11 @@ func InitRoomServer(configPath string) error {
 	}
 
 	serverConfig = &config.Server
+
+	if err = serverConfig.init(); err != nil {
+		return err
+	}
+
 	serverLogger, serverMetricService, serverRedisCluster, serverDBCluster, err = initService(
 		"room.server", serverConfig.Log, serverConfig.Metric,
 		serviceDBQueryDurationMetricKey, serverConfig.RedisCluster,
@@ -79,10 +84,6 @@ func InitRoomServer(configPath string) error {
 
 	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, serverLogger, serverMetricService)
 	if err != nil {
-		return err
-	}
-
-	if err = serverConfig.init(); err != nil {
 		return err
 	}
 
@@ -103,15 +104,15 @@ func InitRoomTask(configPath string) error {
 	}
 
 	taskConfig = &config.Task
+	if err = taskConfig.init(); err != nil {
+		return err
+	}
+
 	taskLogger, taskMetricService, taskRedisCluster, taskDBCluster, err = initService(
 		"room.task", taskConfig.Log,
 		taskConfig.Metric, taskDBQueryDurationMetricKey,
 		taskConfig.RedisCluster, taskConfig.DB)
 	if err != nil {
-		return err
-	}
-
-	if err = taskConfig.init(); err != nil {
 		return err
 	}
 
@@ -132,15 +133,15 @@ func InitCollectEvent(configPath string) error {
 	}
 
 	collectEventConfig = &config.CollectEvent
+	if err = collectEventConfig.init(); err != nil {
+		return err
+	}
+
 	collectEventLogger, collectEventMetricService, collectEventRedisCluster, collectEventDBCluster, err = initService(
 		"room.collect_event", collectEventConfig.Log,
 		collectEventConfig.Metric, collectEventDBQueryDurationMetricKey,
 		collectEventConfig.RedisCluster, collectEventConfig.DB)
 	if err != nil {
-		return err
-	}
-
-	if err := collectEventConfig.init(); err != nil {
 		return err
 	}
 
@@ -202,7 +203,7 @@ func (hook redisRecordHook) AfterProcess(ctx context.Context, cmd redis.Cmder) e
 	if startTime, ok := ctx.Value(redisCommandStartTimeContextKey).(time.Time); ok {
 		duration := time.Since(startTime)
 		hook.logger.Debug(
-			"execute redis command",
+			redisCommandDurationMetricKey,
 			log.String("command", cmd.String()),
 			log.String("duration", duration.String()),
 		)
@@ -226,7 +227,7 @@ func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []red
 		sb.WriteString("]")
 		duration := time.Since(startTime)
 		hook.logger.Debug(
-			"execute redis pipeline",
+			redisPipelineDurationMetricKey,
 			log.String("commands", sb.String()),
 			log.String("duration", duration.String()),
 		)
