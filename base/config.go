@@ -217,8 +217,7 @@ type RoomCollectEventConfig struct {
 	RawMonitorInterval string `yaml:"monitor_interval"`
 	MonitorInterval    time.Duration
 
-	RedisCluster RedisClusterConfig `yaml:"redis_cluster"`
-	DB           DBClusterConfig    `yaml:"db_cluster"`
+	DB DBClusterConfig `yaml:"db_cluster"`
 }
 
 func (config RoomCollectEventConfig) check() error {
@@ -239,9 +238,6 @@ func (config RoomCollectEventConfig) check() error {
 	}
 	if config.RawMonitorInterval == "" {
 		return errors.New("monitor_interval should not be empty")
-	}
-	if err := config.RedisCluster.check(); err != nil {
-		return fmt.Errorf("redis_cluster.%w", err)
 	}
 	if err := config.DB.check(); err != nil {
 		return fmt.Errorf("db_cluster.%w", err)
