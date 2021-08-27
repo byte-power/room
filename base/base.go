@@ -12,22 +12,11 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-var serverRedisCluster *redis.ClusterClient
-var taskRedisCluster *redis.ClusterClient
-
-var serverDBCluster *DBCluster
-var taskDBCluster *DBCluster
-var collectEventDBCluster *DBCluster
+var serverDependency Dependency
+var taskDependency Dependency
+var collectEventDependency CollectEventDependency
 
 var hashTagEventService *HashTagEventService
-
-var serverMetricService *MetricClient
-var taskMetricService *MetricClient
-var collectEventMetricService *MetricClient
-
-var serverLogger *log.Logger
-var collectEventLogger *log.Logger
-var taskLogger *log.Logger
 
 var serverConfig *RoomServerConfig
 var taskConfig *RoomTaskConfig
@@ -68,28 +57,35 @@ func InitRoomServer(configPath string) error {
 		return err
 	}
 
-	serverLogger, serverMetricService, serverDBCluster, err = initService(
+	logger, metric, dbCluster, err := initService(
 		"room.server", serverConfig.Log, serverConfig.Metric,
 		serviceDBQueryDurationMetricKey, serverConfig.DB)
 	if err != nil {
 		return err
 	}
 
-	serverRedisCluster, err = NewRedisClusterFromConfig(serverConfig.RedisCluster, serverLogger, serverMetricService)
+	redisCluster, err := NewRedisClusterFromConfig(serverConfig.RedisCluster, logger, metric)
 	if err != nil {
 		return fmt.Errorf("init_redis.%w", err)
 	}
 
-	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, serverLogger, serverMetricService)
+	serverDependency = Dependency{
+		Redis:  redisCluster,
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
+	}
+
+	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, logger, metric)
 	if err != nil {
 		return err
 	}
 
-	serverLogger.Info(
+	logger.Info(
 		"init room server service",
 		log.String("config", fmt.Sprintf("%+v", serverConfig)),
-		log.String("redis", fmt.Sprintf("%+v", *serverRedisCluster.Options())),
-		log.String("database", serverDBCluster.String()),
+		log.String("redis", fmt.Sprintf("%+v", *redisCluster.Options())),
+		log.String("database", dbCluster.String()),
 	)
 
 	return nil
@@ -106,23 +102,30 @@ func InitRoomTask(configPath string) error {
 		return err
 	}
 
-	taskLogger, taskMetricService, taskDBCluster, err = initService(
+	logger, metric, dbCluster, err := initService(
 		"room.task", taskConfig.Log, taskConfig.Metric,
 		taskDBQueryDurationMetricKey, taskConfig.DB)
 	if err != nil {
 		return err
 	}
 
-	taskRedisCluster, err = NewRedisClusterFromConfig(taskConfig.RedisCluster, taskLogger, taskMetricService)
+	redisCluster, err := NewRedisClusterFromConfig(taskConfig.RedisCluster, logger, metric)
 	if err != nil {
 		return fmt.Errorf("init_redis.%w", err)
 	}
 
-	taskLogger.Info(
+	taskDependency = Dependency{
+		Redis:  redisCluster,
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
+	}
+
+	logger.Info(
 		"init room task",
 		log.String("config", fmt.Sprintf("%+v", taskConfig)),
-		log.String("redis", fmt.Sprintf("%+v", *taskRedisCluster.Options())),
-		log.String("database", taskDBCluster.String()),
+		log.String("redis", fmt.Sprintf("%+v", *redisCluster.Options())),
+		log.String("database", dbCluster.String()),
 	)
 
 	return nil
@@ -139,17 +142,23 @@ func InitCollectEvent(configPath string) error {
 		return err
 	}
 
-	collectEventLogger, collectEventMetricService, collectEventDBCluster, err = initService(
+	logger, metric, dbCluster, err := initService(
 		"room.collect_event", collectEventConfig.Log, collectEventConfig.Metric,
 		collectEventDBQueryDurationMetricKey, collectEventConfig.DB)
 	if err != nil {
 		return err
 	}
 
-	collectEventLogger.Info(
+	collectEventDependency = CollectEventDependency{
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
+	}
+
+	logger.Info(
 		"init room collect event service",
 		log.String("config", fmt.Sprintf("%+v", collectEventConfig)),
-		log.String("database", collectEventDBCluster.String()),
+		log.String("database", dbCluster.String()),
 	)
 
 	return nil
@@ -267,21 +276,11 @@ func (dep Dependency) Check() error {
 }
 
 func GetServerDependency() Dependency {
-	return Dependency{
-		Redis:  serverRedisCluster,
-		DB:     serverDBCluster,
-		Logger: serverLogger,
-		Metric: serverMetricService,
-	}
+	return serverDependency
 }
 
 func GetTaskDependency() Dependency {
-	return Dependency{
-		Redis:  taskRedisCluster,
-		DB:     taskDBCluster,
-		Logger: taskLogger,
-		Metric: taskMetricService,
-	}
+	return taskDependency
 }
 
 type CollectEventDependency struct {
@@ -304,9 +303,5 @@ func (dep CollectEventDependency) Check() error {
 }
 
 func GetCollectEventDependency() CollectEventDependency {
-	return CollectEventDependency{
-		DB:     collectEventDBCluster,
-		Logger: collectEventLogger,
-		Metric: collectEventMetricService,
-	}
+	return collectEventDependency
 }
