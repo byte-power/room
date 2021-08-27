@@ -54,10 +54,10 @@ type Config struct {
 
 func (config Config) check() error {
 	if err := config.Server.check(); err != nil {
-		return fmt.Errorf("room_service.%w", err)
+		return fmt.Errorf("room_server.%w", err)
 	}
 	if err := config.CollectEvent.check(); err != nil {
-		return fmt.Errorf("room_collect_event_service.%w", err)
+		return fmt.Errorf("room_collect_event.%w", err)
 	}
 	if err := config.Task.check(); err != nil {
 		return fmt.Errorf("room_task.%w", err)
@@ -112,7 +112,7 @@ func (config *RoomServerConfig) init() error {
 	}
 	config.LoadKey.retryInterval = d
 
-	d, err = time.ParseDuration(serverConfig.LoadKey.RawLoadTimeout)
+	d, err = time.ParseDuration(config.LoadKey.RawLoadTimeout)
 	if err != nil {
 		return fmt.Errorf("load_key.load_timeout=%s is invalid %w", config.LoadKey.RawLoadTimeout, err)
 	}
