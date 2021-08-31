@@ -85,7 +85,7 @@ type Model interface {
 	GetTablePrefix() string
 }
 
-func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metric *MetricClient, metricKey string) (*DBCluster, error) {
+func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metric *MetricClient) (*DBCluster, error) {
 	shardingCount := config.ShardingCount
 	if shardingCount <= 0 {
 		return nil, errors.New("sharding_count should be greater than 0")
@@ -100,7 +100,7 @@ func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metric *
 			dbCluster.clients,
 			dbClient{startIndex: cfg.StartShardingIndex, endIndex: cfg.EndShardingIndex, client: client})
 	}
-	queryHook := dbLogger{logger: logger, metricClient: metric, durationMetricKey: metricKey}
+	queryHook := dbLogger{logger: logger, metricClient: metric}
 	dbCluster.AddQueryHook(queryHook)
 	return dbCluster, nil
 }
@@ -219,16 +219,13 @@ func getTableIndex(shardingKey string, shardingCount int) int {
 }
 
 const (
-	dbQueryStartTimeContextKey           = "query_start_time"
-	serviceDBQueryDurationMetricKey      = "service.database.query.duration"
-	taskDBQueryDurationMetricKey         = "task.database.query.duration"
-	collectEventDBQueryDurationMetricKey = "collect_event.database.query.duration"
+	dbQueryStartTimeContextKey = "query_start_time"
+	dbQueryDurationMetricKey   = "database.query.duration"
 )
 
 type dbLogger struct {
-	logger            *log.Logger
-	metricClient      *MetricClient
-	durationMetricKey string
+	logger       *log.Logger
+	metricClient *MetricClient
 }
 
 func (d dbLogger) BeforeQuery(ctx context.Context, queryEvent *pg.QueryEvent) (context.Context, error) {
@@ -244,11 +241,11 @@ func (d dbLogger) AfterQuery(ctx context.Context, queryEvent *pg.QueryEvent) err
 	if startTime, ok := ctx.Value(dbQueryStartTimeContextKey).(time.Time); ok {
 		duration := time.Since(startTime)
 		d.logger.Debug(
-			d.durationMetricKey,
+			dbQueryDurationMetricKey,
 			log.String("query", string(query)),
 			log.String("duration", duration.String()),
 		)
-		d.metricClient.MetricTimeDuration(d.durationMetricKey, duration)
+		d.metricClient.MetricTimeDuration(dbQueryDurationMetricKey, duration)
 	}
 	return nil
 }

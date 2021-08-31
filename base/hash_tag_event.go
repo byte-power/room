@@ -122,20 +122,6 @@ func MergeEvents(event HashTagEvent, events ...HashTagEvent) (HashTagEvent, erro
 	return newEvent, nil
 }
 
-const (
-	defaultEventServiceBufferLimit       = 16 * 1024 * 1024 // 16M
-	defaultEventServiceAggregateInterval = 1 * time.Minute
-
-	defaultEventReportRequestTimeout               = 100 * time.Millisecond
-	defaultEventReportRequestWorkerCount           = 5
-	defaultEventReportRequestMaxEvent              = 10
-	defaultEventReportRequestMaxWaitDuration       = 5 * time.Second
-	defaultEventReportRequestConnKeepAliveInterval = 30 * time.Second
-	defaultEventReportRequestIdleConnTimeout       = 90 * time.Second
-	defaultEventReportRequestMaxConn               = 100
-	defaultMonitorInterval                         = 10 * time.Second
-)
-
 type HashTagEventServiceConfig struct {
 	EventReport HashTagEventServiceEventReportConfig `yaml:"event_report"`
 
@@ -146,6 +132,23 @@ type HashTagEventServiceConfig struct {
 
 	RawMonitorInterval string `yaml:"monitor_interval"`
 	MonitorInterval    time.Duration
+}
+
+func (config HashTagEventServiceConfig) check() error {
+	if err := config.EventReport.check(); err != nil {
+		return fmt.Errorf("event_report.%w", err)
+	}
+	if config.RawAggInterval == "" {
+		return errors.New("agg_interval should not be empty")
+	}
+	if config.BufferLimit <= 0 {
+		return fmt.Errorf("buffer_limit=%d, it should be greater than 0", config.BufferLimit)
+	}
+	if config.RawMonitorInterval == "" {
+		return errors.New("monitor_interval should not be empty")
+	}
+	return nil
+
 }
 
 type HashTagEventServiceEventReportConfig struct {
@@ -170,6 +173,34 @@ type HashTagEventServiceEventReportConfig struct {
 	RequestMaxConn int `yaml:"request_max_conn"`
 }
 
+func (config HashTagEventServiceEventReportConfig) check() error {
+	if config.URL == "" {
+		return errors.New("url should not be empty")
+	}
+	if config.RawRequestTimeout == "" {
+		return errors.New("request_timeout should not be empty")
+	}
+	if config.RequestMaxEvent <= 0 {
+		return fmt.Errorf("request_max_event=%d, it should be greater than 0", config.RequestMaxEvent)
+	}
+	if config.RawRequestMaxWaitDuration == "" {
+		return errors.New("request_max_wait_duration should not be empty")
+	}
+	if config.RequestWorkerCount <= 0 {
+		return fmt.Errorf("request_worker_count=%d, it should be greater than 0", config.RequestWorkerCount)
+	}
+	if config.RawRequestConnKeepAliveInterval == "" {
+		return errors.New("request_conn_keep_alive_interval should not be empty")
+	}
+	if config.RawRequestIdleConnTimeout == "" {
+		return errors.New("request_idle_conn_timeout should not be empty")
+	}
+	if config.RequestMaxConn <= 0 {
+		return fmt.Errorf("request_max_conn=%d, it should be greater than 0", config.RequestMaxConn)
+	}
+	return nil
+}
+
 type HashTagEventService struct {
 	name                             string
 	config                           *HashTagEventServiceConfig
@@ -188,77 +219,6 @@ type HashTagEventService struct {
 }
 
 func NewHashTagEventService(config *HashTagEventServiceConfig, logger *log.Logger, metric *MetricClient) (*HashTagEventService, error) {
-	if config.RawAggInterval == "" {
-		config.AggInterval = defaultEventServiceAggregateInterval
-	} else {
-		duration, err := time.ParseDuration(config.RawAggInterval)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.agg_interval is invalid:%w", err)
-		}
-		config.AggInterval = duration
-	}
-
-	if config.BufferLimit <= 0 {
-		config.BufferLimit = defaultEventServiceBufferLimit
-	}
-	if config.RawMonitorInterval == "" {
-		config.MonitorInterval = defaultMonitorInterval
-	} else {
-		duration, err := time.ParseDuration(config.RawMonitorInterval)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.monitor_interval is invalid:%w", err)
-		}
-		config.MonitorInterval = duration
-	}
-	if config.EventReport.URL == "" {
-		return nil, errors.New("event_service.event_report.url is empty")
-	}
-	if config.EventReport.RawRequestTimeout == "" {
-		config.EventReport.RequestTimeout = defaultEventReportRequestTimeout
-	} else {
-		duration, err := time.ParseDuration(config.EventReport.RawRequestTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.event_report.request_timeout is invalid:%w", err)
-		}
-		config.EventReport.RequestTimeout = duration
-	}
-	if config.EventReport.RequestMaxEvent <= 0 {
-		config.EventReport.RequestMaxEvent = defaultEventReportRequestMaxEvent
-	}
-	if config.EventReport.RawRequestMaxWaitDuration == "" {
-		config.EventReport.RequestMaxWaitDuration = defaultEventReportRequestMaxWaitDuration
-	} else {
-		duration, err := time.ParseDuration(config.EventReport.RawRequestMaxWaitDuration)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.event_report.request_max_wait_duration is invalid:%w", err)
-		}
-		config.EventReport.RequestMaxWaitDuration = duration
-	}
-	if config.EventReport.RequestWorkerCount <= 0 {
-		config.EventReport.RequestWorkerCount = defaultEventReportRequestWorkerCount
-	}
-	if config.EventReport.RawRequestConnKeepAliveInterval == "" {
-		config.EventReport.RequestConnKeepAliveInterval = defaultEventReportRequestConnKeepAliveInterval
-	} else {
-		duration, err := time.ParseDuration(config.EventReport.RawRequestConnKeepAliveInterval)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.event_report.request_conn_keep_alive_interval is invalid:%w", err)
-		}
-		config.EventReport.RequestConnKeepAliveInterval = duration
-	}
-	if config.EventReport.RawRequestIdleConnTimeout == "" {
-		config.EventReport.RequestIdleConnTimeout = defaultEventReportRequestIdleConnTimeout
-	} else {
-		duration, err := time.ParseDuration(config.EventReport.RawRequestIdleConnTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("event_service.event_report.request_idle_conn_timeout is invalid:%w", err)
-		}
-		config.EventReport.RequestIdleConnTimeout = duration
-	}
-	if config.EventReport.RequestMaxConn <= 0 {
-		config.EventReport.RequestMaxConn = defaultEventReportRequestMaxConn
-	}
-
 	if logger == nil {
 		return nil, errors.New("logger should not be nil")
 	}

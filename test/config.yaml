@@ -107,26 +107,6 @@ collect_event:
     timeout_ms: 2000
     worker_count: 2
 
-
-  redis_cluster:
-    addrs:
-      - "127.0.0.1:30001"
-      - "127.0.0.1:30002"
-      - "127.0.0.1:30003"
-
-    pool_size: 600
-    min_idle_conns: 300
-    dial_timeout_ms: 1000
-    pool_timeout_ms: 1000
-    idle_timeout_second: 14400
-    read_timeout_ms: 100
-    write_timeout_ms: 100
-    max_retries: 5
-    min_retry_backoff_ms: 1
-    max_retry_backoff_ms: 5
-    max_conn_age_second: 3600
-    idle_check_frequency_second: 60
-
   db_cluster:
     sharding_count: 5
     shardings:

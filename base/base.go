@@ -12,23 +12,11 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-var serverRedisCluster *redis.ClusterClient
-var taskRedisCluster *redis.ClusterClient
-var collectEventRedisCluster *redis.ClusterClient
-
-var serverDBCluster *DBCluster
-var taskDBCluster *DBCluster
-var collectEventDBCluster *DBCluster
+var serverDependency Dependency
+var taskDependency Dependency
+var collectEventDependency CollectEventDependency
 
 var hashTagEventService *HashTagEventService
-
-var serverMetricService *MetricClient
-var taskMetricService *MetricClient
-var collectEventMetricService *MetricClient
-
-var serverLogger *log.Logger
-var collectEventLogger *log.Logger
-var taskLogger *log.Logger
 
 var serverConfig *RoomServerConfig
 var taskConfig *RoomTaskConfig
@@ -38,117 +26,138 @@ var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func initService(
 	loggerName string, logConfig map[string]interface{},
-	metricConfig MetricConfig, metricKey string,
-	redisClusterConfig RedisClusterConfig,
-	dbClusterConfig DBClusterConfig,
-) (*log.Logger, *MetricClient, *redis.ClusterClient, *DBCluster, error) {
+	metricConfig MetricConfig, dbClusterConfig DBClusterConfig,
+) (*log.Logger, *MetricClient, *DBCluster, error) {
 
 	logger, err := parseLogger(loggerName, logConfig)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("init_logger.%w", err)
+		return nil, nil, nil, fmt.Errorf("init_logger.%w", err)
 	}
 	metric, err := InitMetric(metricConfig)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("init_metric.%w", err)
+		return nil, nil, nil, fmt.Errorf("init_metric.%w", err)
 	}
-	rdsCluster, err := NewRedisClusterFromConfig(redisClusterConfig, logger, metric)
+	databaseCluster, err := NewDBClusterFromConfig(dbClusterConfig, logger, metric)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("init_redis.%w", err)
+		return nil, nil, nil, fmt.Errorf("init_db.%w", err)
 	}
-	databaseCluster, err := NewDBClusterFromConfig(dbClusterConfig, logger, metric, metricKey)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("init_db.%w", err)
-	}
-	return logger, metric, rdsCluster, databaseCluster, nil
+	return logger, metric, databaseCluster, nil
 }
 
 func InitRoomServer(configPath string) error {
-	config, err := NewConfigFromFile(configPath)
+	config, err := newConfigFromFile(configPath)
 	if err != nil {
 		return err
 	}
 
 	serverConfig = &config.Server
-	serverLogger, serverMetricService, serverRedisCluster, serverDBCluster, err = initService(
-		"room.server", serverConfig.Log, serverConfig.Metric,
-		serviceDBQueryDurationMetricKey, serverConfig.RedisCluster,
-		serverConfig.DB)
-	if err != nil {
-		return err
-	}
-
-	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, serverLogger, serverMetricService)
-	if err != nil {
-		return err
-	}
 
 	if err = serverConfig.init(); err != nil {
 		return err
 	}
 
-	serverLogger.Info(
+	logger, metric, dbCluster, err := initService(
+		"room.server", serverConfig.Log,
+		serverConfig.Metric, serverConfig.DB)
+	if err != nil {
+		return err
+	}
+
+	redisCluster, err := NewRedisClusterFromConfig(serverConfig.RedisCluster, logger, metric)
+	if err != nil {
+		return fmt.Errorf("init_redis.%w", err)
+	}
+
+	serverDependency = Dependency{
+		Redis:  redisCluster,
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
+	}
+
+	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, logger, metric)
+	if err != nil {
+		return err
+	}
+
+	logger.Info(
 		"init room server service",
 		log.String("config", fmt.Sprintf("%+v", serverConfig)),
-		log.String("redis", fmt.Sprintf("%+v", *serverRedisCluster.Options())),
-		log.String("database", serverDBCluster.String()),
+		log.String("redis", fmt.Sprintf("%+v", *redisCluster.Options())),
+		log.String("database", dbCluster.String()),
 	)
 
 	return nil
 }
 
 func InitRoomTask(configPath string) error {
-	config, err := NewConfigFromFile(configPath)
+	config, err := newConfigFromFile(configPath)
 	if err != nil {
 		return err
 	}
 
 	taskConfig = &config.Task
-	taskLogger, taskMetricService, taskRedisCluster, taskDBCluster, err = initService(
-		"room.task", taskConfig.Log,
-		taskConfig.Metric, taskDBQueryDurationMetricKey,
-		taskConfig.RedisCluster, taskConfig.DB)
-	if err != nil {
-		return err
-	}
-
 	if err = taskConfig.init(); err != nil {
 		return err
 	}
 
-	taskLogger.Info(
+	logger, metric, dbCluster, err := initService(
+		"room.task", taskConfig.Log,
+		taskConfig.Metric, taskConfig.DB)
+	if err != nil {
+		return err
+	}
+
+	redisCluster, err := NewRedisClusterFromConfig(taskConfig.RedisCluster, logger, metric)
+	if err != nil {
+		return fmt.Errorf("init_redis.%w", err)
+	}
+
+	taskDependency = Dependency{
+		Redis:  redisCluster,
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
+	}
+
+	logger.Info(
 		"init room task",
 		log.String("config", fmt.Sprintf("%+v", taskConfig)),
-		log.String("redis", fmt.Sprintf("%+v", *taskRedisCluster.Options())),
-		log.String("database", taskDBCluster.String()),
+		log.String("redis", fmt.Sprintf("%+v", *redisCluster.Options())),
+		log.String("database", dbCluster.String()),
 	)
 
 	return nil
 }
 
 func InitCollectEvent(configPath string) error {
-	config, err := NewConfigFromFile(configPath)
+	config, err := newConfigFromFile(configPath)
 	if err != nil {
 		return err
 	}
 
 	collectEventConfig = &config.CollectEvent
-	collectEventLogger, collectEventMetricService, collectEventRedisCluster, collectEventDBCluster, err = initService(
+	if err = collectEventConfig.init(); err != nil {
+		return err
+	}
+
+	logger, metric, dbCluster, err := initService(
 		"room.collect_event", collectEventConfig.Log,
-		collectEventConfig.Metric, collectEventDBQueryDurationMetricKey,
-		collectEventConfig.RedisCluster, collectEventConfig.DB)
+		collectEventConfig.Metric, collectEventConfig.DB)
 	if err != nil {
 		return err
 	}
 
-	if err := collectEventConfig.init(); err != nil {
-		return err
+	collectEventDependency = CollectEventDependency{
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
 	}
 
-	collectEventLogger.Info(
+	logger.Info(
 		"init room collect event service",
 		log.String("config", fmt.Sprintf("%+v", collectEventConfig)),
-		log.String("redis", fmt.Sprintf("%+v", *collectEventRedisCluster.Options())),
-		log.String("database", collectEventDBCluster.String()),
+		log.String("database", dbCluster.String()),
 	)
 
 	return nil
@@ -202,7 +211,7 @@ func (hook redisRecordHook) AfterProcess(ctx context.Context, cmd redis.Cmder) e
 	if startTime, ok := ctx.Value(redisCommandStartTimeContextKey).(time.Time); ok {
 		duration := time.Since(startTime)
 		hook.logger.Debug(
-			"execute redis command",
+			redisCommandDurationMetricKey,
 			log.String("command", cmd.String()),
 			log.String("duration", duration.String()),
 		)
@@ -226,7 +235,7 @@ func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []red
 		sb.WriteString("]")
 		duration := time.Since(startTime)
 		hook.logger.Debug(
-			"execute redis pipeline",
+			redisPipelineDurationMetricKey,
 			log.String("commands", sb.String()),
 			log.String("duration", duration.String()),
 		)
@@ -266,28 +275,32 @@ func (dep Dependency) Check() error {
 }
 
 func GetServerDependency() Dependency {
-	return Dependency{
-		Redis:  serverRedisCluster,
-		DB:     serverDBCluster,
-		Logger: serverLogger,
-		Metric: serverMetricService,
-	}
+	return serverDependency
 }
 
 func GetTaskDependency() Dependency {
-	return Dependency{
-		Redis:  taskRedisCluster,
-		DB:     taskDBCluster,
-		Logger: taskLogger,
-		Metric: taskMetricService,
-	}
+	return taskDependency
 }
 
-func GetCollectEventDependency() Dependency {
-	return Dependency{
-		Redis:  collectEventRedisCluster,
-		DB:     collectEventDBCluster,
-		Logger: collectEventLogger,
-		Metric: collectEventMetricService,
+type CollectEventDependency struct {
+	DB     *DBCluster
+	Logger *log.Logger
+	Metric *MetricClient
+}
+
+func (dep CollectEventDependency) Check() error {
+	if dep.DB == nil {
+		return ErrDepDBNull
 	}
+	if dep.Logger == nil {
+		return ErrDepLoggerNull
+	}
+	if dep.Metric == nil {
+		return ErrDepMetricNull
+	}
+	return nil
+}
+
+func GetCollectEventDependency() CollectEventDependency {
+	return collectEventDependency
 }

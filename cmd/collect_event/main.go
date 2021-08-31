@@ -30,6 +30,10 @@ func main() {
 		panic(err)
 	}
 	dep := base.GetCollectEventDependency()
+	if err := dep.Check(); err != nil {
+		panic(err)
+	}
+
 	config := base.GetCollectEventConfig()
 	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric, dep.DB)
 	if err != nil {
