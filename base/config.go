@@ -66,8 +66,7 @@ func (config Config) check() error {
 }
 
 type RoomServerConfig struct {
-	URL                 string                    `yaml:"url"`
-	PProfURL            string                    `yaml:"pprof_url"`
+	EnablePProf         bool                      `yaml:"enable_pprof"`
 	Log                 map[string]interface{}    `yaml:"log"`
 	Metric              MetricConfig              `yaml:"metric"`
 	LoadKey             LoadKeyConfig             `yaml:"load_key"`
@@ -81,12 +80,6 @@ func (config RoomServerConfig) Check() error {
 }
 
 func (config RoomServerConfig) check() error {
-	if config.URL == "" {
-		return errors.New("url should not be empty")
-	}
-	if config.PProfURL == "" {
-		return errors.New("pprof_url should not be empty")
-	}
 	if len(config.Log) == 0 {
 		return errors.New("log should not be empty")
 	}

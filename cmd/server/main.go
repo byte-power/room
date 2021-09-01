@@ -14,6 +14,8 @@ import (
 )
 
 var configPath = pflag.StringP("config", "c", "config.yaml", "config file path")
+var host = pflag.StringP("host", "h", "0.0.0.0", "server listen host")
+var port = pflag.IntP("port", "p", 6379, "server listen port")
 var versionFlag = pflag.BoolP("version", "v", false, "service version")
 var version string
 
@@ -23,6 +25,15 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+	if configPath == nil {
+		panic("config should not be empty")
+	}
+	if host == nil {
+		panic("host should not be empty")
+	}
+	if port == nil {
+		panic("port should not be empty")
+	}
 	if err := base.InitRoomServer(*configPath); err != nil {
 		panic(err)
 	}
@@ -31,7 +42,7 @@ func main() {
 	dep := base.GetServerDependency()
 	logger := dep.Logger
 	config := base.GetServerConfig()
-	roomService, err := service.NewRoomService(config, dep)
+	roomService, err := service.NewRoomService(config, dep, *host, *port)
 	if err != nil {
 		panic(err)
 	}

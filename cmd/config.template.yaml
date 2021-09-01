@@ -1,6 +1,5 @@
 server:
-  url: "localhost:8090"
-  pprof_url: "localhost:9090"
+  enable_pprof: true
 
   log:
     console:
