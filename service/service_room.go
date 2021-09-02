@@ -41,25 +41,36 @@ var errInvalidResponse = errors.New("ERR invalid command response")
 type RoomService struct {
 	config      *base.RoomServerConfig
 	dep         base.Dependency
+	host        string
+	port        int
+	pprofPort   int
 	server      *redcon.Server
 	pprofServer *http.Server
 }
 
-func NewRoomService(config *base.RoomServerConfig, dep base.Dependency) (*RoomService, error) {
+func NewRoomService(config *base.RoomServerConfig, dep base.Dependency, host string, port int) (*RoomService, error) {
 	if err := config.Check(); err != nil {
 		return nil, err
 	}
 	if err := dep.Check(); err != nil {
 		return nil, err
 	}
-	return &RoomService{config: config, dep: dep}, nil
+	if host == "" {
+		return nil, errors.New("host should not be empty")
+	}
+	if port <= 0 {
+		return nil, errors.New("port should be greater than 0")
+	}
+
+	return &RoomService{config: config, dep: dep, host: host, port: port, pprofPort: port + 10000}, nil
 }
 
 func (service *RoomService) Run() {
-	service.dep.Logger.Info("starting room server...", log.String("url", service.config.URL))
-	service.server = redcon.NewServer(service.config.URL, connServeHandler, connAcceptHandler, connCloseHandler)
+	address := fmt.Sprintf("%s:%d", service.host, service.port)
+	service.dep.Logger.Info("starting room server...", log.String("address", address))
+	service.server = redcon.NewServer(address, connServeHandler, connAcceptHandler, connCloseHandler)
 	service.server.AcceptError = connAcceptErrorHandler
-	listener, err := greuse.Listen("tcp", service.config.URL)
+	listener, err := greuse.Listen("tcp", address)
 	if err != nil {
 		service.dep.Logger.Error("start room server failed", log.Error(err))
 		panic(err)
@@ -72,10 +83,11 @@ func (service *RoomService) Run() {
 	}()
 
 	// start pprof server
-	if service.config.PProfURL != "" {
-		service.dep.Logger.Info("starting pprof server...", log.String("url", service.config.PProfURL))
+	if service.config.EnablePProf {
+		pprofAddress := fmt.Sprintf("%s.%d", service.host, service.pprofPort)
+		service.dep.Logger.Info("starting pprof server...", log.String("address", pprofAddress))
 		service.pprofServer = &http.Server{Handler: nil}
-		listener, err := greuse.Listen("tcp", service.config.PProfURL)
+		listener, err := greuse.Listen("tcp", pprofAddress)
 		if err != nil {
 			service.dep.Logger.Error("start pprof server failed", log.Error(err))
 			panic(err)
