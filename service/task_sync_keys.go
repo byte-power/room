@@ -67,14 +67,23 @@ func SyncKeysTask(upsertTryTimes int, noWrittenDuration time.Duration, rateLimit
 			for _, model := range models {
 				ratelimitBucket.Take()
 				if err = syncRoomData(dep.DB, dep.Redis, model, time.Now(), upsertTryTimes); err != nil {
+					if isRetryErrorForUpdateInTx(err) {
+						recordTaskError(
+							dep.Logger, dep.Metric,
+							SyncKeysTaskName, err,
+							"sync_keys.retry_error",
+							map[string]string{
+								"hash_tag": model.HashTag,
+								"keys":     strings.Join(model.Keys, " "),
+							},
+						)
+						continue
+					}
 					recordTaskError(
 						dep.Logger, dep.Metric, SyncKeysTaskName,
 						err, "sync_room_data",
 						map[string]string{"hash_tag": model.HashTag, "keys": strings.Join(model.Keys, " ")},
 					)
-					if isRetryErrorForUpdateInTx(err) {
-						continue
-					}
 					return
 				}
 				processCount += 1

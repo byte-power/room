@@ -196,6 +196,25 @@ const (
 	HashTagKeysStatusCleaned    HashTagKeysStatus = "cleaned"
 )
 
+type hashTagKeysStatusConflictError struct {
+	hashTag string
+	err     error
+}
+
+func (err *hashTagKeysStatusConflictError) Error() string {
+	var s string
+	if err.err != nil {
+		s = fmt.Sprintf("hash_tag %s status update conflict %s", err.hashTag, err.err.Error())
+	} else {
+		s = fmt.Sprintf("hash_tag %s status update conflict", err.hashTag)
+	}
+	return s
+}
+
+func (err *hashTagKeysStatusConflictError) Unwrap() error {
+	return err.err
+}
+
 type roomHashTagKeys struct {
 	tableName struct{} `pg:"_"`
 
@@ -234,7 +253,7 @@ func (model *roomHashTagKeys) SetStatusAsSynced(db *base.DBCluster, t time.Time)
 		return err
 	}
 	if result.RowsAffected() != 1 {
-		return errNoRowsUpdated
+		return &hashTagKeysStatusConflictError{hashTag: model.HashTag, err: errNoRowsUpdated}
 	}
 	return nil
 }
@@ -254,7 +273,7 @@ func (model *roomHashTagKeys) SetStatusAsCleaned(db *base.DBCluster, t time.Time
 		return err
 	}
 	if result.RowsAffected() != 1 {
-		return errNoRowsUpdated
+		return &hashTagKeysStatusConflictError{hashTag: model.HashTag, err: errNoRowsUpdated}
 	}
 	return nil
 }

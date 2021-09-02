@@ -69,14 +69,6 @@ func CleanKeysTask(inactiveDuration time.Duration, rateLimitPerSecond int) {
 			keyCount, cleanKeysErr := cleanHashTagKeys(dep, model)
 			err = cleanKeysErr
 			if err != nil {
-				recordTaskError(
-					dep.Logger, dep.Metric,
-					CleanKeysTaskName, err,
-					"clean_keys",
-					map[string]string{
-						"hash_tag": model.HashTag,
-						"keys":     strings.Join(model.Keys, " "),
-					})
 				if errors.Is(err, ErrAccessAfterRecord) || errors.Is(err, errLoadKeysLockFailed) || isRetryErrorForUpdateInTx(err) {
 					recordTaskError(
 						dep.Logger, dep.Metric,
@@ -90,6 +82,14 @@ func CleanKeysTask(inactiveDuration time.Duration, rateLimitPerSecond int) {
 					excludedHashTags = append(excludedHashTags, model.HashTag)
 					continue
 				}
+				recordTaskError(
+					dep.Logger, dep.Metric,
+					CleanKeysTaskName, err,
+					"clean_keys",
+					map[string]string{
+						"hash_tag": model.HashTag,
+						"keys":     strings.Join(model.Keys, " "),
+					})
 				return
 			}
 			processHashTagCount = processHashTagCount + 1
@@ -123,11 +123,6 @@ func cleanHashTagKeys(dep base.Dependency, model *roomHashTagKeys) (int64, error
 	}
 	err = model.SetStatusAsCleaned(dep.DB, time.Now())
 	if err != nil {
-		dep.Logger.Error(
-			"clean_keys.set_hash_tag_keys_model_status",
-			log.String("hash_tag", model.HashTag),
-			log.String("keys", strings.Join(model.Keys, " ")),
-			log.Error(err))
 		return 0, err
 	}
 	return n, nil
