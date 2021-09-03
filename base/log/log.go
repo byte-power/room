@@ -46,6 +46,10 @@ func (l *Logger) Errorm(subject string, values map[string]interface{}) {
 	l.logPairs(LevelError, subject, convertStrMapToLogPairs(values))
 }
 
+func (l *Logger) Logm(level Level, subject string, values map[string]interface{}) {
+	l.logPairs(level, subject, convertStrMapToLogPairs(values))
+}
+
 func (l *Logger) logPairs(level Level, subject string, pairs []LogPair) {
 	for _, it := range l.outpers {
 		if level >= it.Level() {
@@ -64,6 +68,10 @@ func (l *Logger) Warn(subject string, pairs ...LogPair) {
 }
 func (l *Logger) Error(subject string, pairs ...LogPair) {
 	l.logPairs(LevelError, subject, pairs)
+}
+
+func (l *Logger) Log(level Level, subject string, pairs ...LogPair) {
+	l.logPairs(level, subject, pairs)
 }
 
 type LogPair struct {

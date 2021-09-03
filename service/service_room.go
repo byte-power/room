@@ -73,33 +73,33 @@ func NewRoomService(config *base.RoomServerConfig, dep base.Dependency, host str
 }
 
 func (service *RoomService) Run() {
-	service.dep.Logger.Info("starting room server...", log.String("address", service.address))
+	service.logWithAddressAndPid(log.LevelInfo, "server.start")
 	service.server = redcon.NewServer(service.address, service.connServeHandler, service.connAcceptHandler, service.connCloseHandler)
 	service.server.AcceptError = service.connAcceptErrorHandler
 	listener, err := greuse.Listen("tcp", service.address)
 	if err != nil {
-		service.dep.Logger.Error("start room server failed", log.Error(err))
+		service.logWithAddressAndPid(log.LevelError, "error.server.listen", log.Error(err))
 		panic(err)
 	}
 	go func() {
 		if err := service.server.Serve(listener); err != nil {
-			service.dep.Logger.Error("serve room server failed", log.Error(err))
+			service.logWithAddressAndPid(log.LevelError, "error.server.serve", log.Error(err))
 			panic(err)
 		}
 	}()
 
 	// start pprof server
 	if service.config.EnablePProf {
-		service.dep.Logger.Info("starting pprof server...", log.String("address", service.pprofAddress))
+		service.logWithAddressAndPid(log.LevelInfo, "server.pprof_start")
 		service.pprofServer = &http.Server{Handler: nil}
 		listener, err := greuse.Listen("tcp", service.pprofAddress)
 		if err != nil {
-			service.dep.Logger.Error("start pprof server failed", log.Error(err))
+			service.logWithAddressAndPid(log.LevelError, "error.server.pprof_listen", log.Error(err))
 			panic(err)
 		}
 		go func() {
 			if err := service.pprofServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-				service.dep.Logger.Error("serve pprof server failed", log.Error(err))
+				service.logWithAddressAndPid(log.LevelError, "error.server.pprof_serve", log.Error(err))
 				panic(err)
 			}
 		}()
@@ -108,32 +108,33 @@ func (service *RoomService) Run() {
 
 func (service *RoomService) Stop() {
 	if err := service.server.Close(); err != nil {
-		service.dep.Logger.Error("close room server error", log.Error(err))
+		service.logWithAddressAndPid(log.LevelError, "error.server.close", log.Error(err))
 	}
 	if service.pprofServer != nil {
 		if err := service.pprofServer.Close(); err != nil {
-			service.dep.Logger.Error("close pprof server error", log.Error(err))
+			service.logWithAddressAndPid(log.LevelError, "error.server.pprof_close", log.Error(err))
 		}
 	}
 }
 
 func (service *RoomService) connAcceptHandler(conn redcon.Conn) bool {
 	service.dep.Metric.MetricIncrease("connection.accept")
-	service.dep.Metric.MetricGauge("connection.total", atomic.AddInt64(&connectionTotal, 1))
+	connectionCount := atomic.AddInt64(&connectionTotal, 1)
+	service.dep.Metric.MetricGauge("connection.total", connectionCount)
 	service.dep.Metric.MetricGauge("transaction.total", transactionManager.transactionCount())
-	service.dep.Logger.Debug(
-		"accept incomming request",
+	service.logWithAddressAndPid(
+		log.LevelDebug, "connection.accept",
 		log.String("local_addr", conn.NetConn().LocalAddr().String()),
 		log.String("remote_addr", conn.RemoteAddr()),
 		log.Int("transaction_count", transactionManager.transactionCount()),
-		log.Int("pid", service.pid),
+		log.Int64("connection_count", connectionCount),
 	)
 	return true
 }
 
 func (service *RoomService) connAcceptErrorHandler(err error) {
 	service.dep.Metric.MetricIncrease("error.accept")
-	service.dep.Logger.Error("accept error", log.Error(err))
+	service.logWithAddressAndPid(log.LevelError, "error.accept", log.Error(err))
 }
 
 func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Command) {
@@ -144,12 +145,10 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Comman
 	}
 
 	redisCluster := service.dep.Redis
-	logger := service.dep.Logger
 	metric := service.dep.Metric
 	metric.MetricIncrease("process.command")
-
-	logger.Debug(
-		"start to exec command",
+	service.logWithAddressAndPid(
+		log.LevelDebug, "command.start",
 		log.String("command", strings.Join(args, " ")),
 		log.String("remote_addr", conn.RemoteAddr()),
 		log.String("local_addr", conn.NetConn().LocalAddr().String()),
@@ -159,8 +158,8 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Comman
 	command, err := commands.ParseCommand(args)
 	if err != nil {
 		metric.MetricIncrease("error.parse_command")
-		logger.Error(
-			"parse command error",
+		service.logWithAddressAndPid(
+			log.LevelError, "error.parse_command",
 			log.String("command", strings.Join(args, " ")),
 			log.Error(err))
 		conn.WriteError(err.Error())
@@ -170,8 +169,8 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Comman
 	// Pre Porcess related keys
 	if err = preProcessCommand(service.dep, command, serveStartTime); err != nil {
 		metric.MetricIncrease("error.pre_process")
-		logger.Error(
-			"preprocess command error",
+		service.logWithAddressAndPid(
+			log.LevelError, "error.pre_process",
 			log.String("command", command.String()),
 			log.Error(err),
 		)
@@ -182,8 +181,8 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Comman
 	transaction, err := getTransactionIfNeeded(service.dep, conn, command)
 	if err != nil {
 		metric.MetricIncrease("error.get_transaction")
-		logger.Error(
-			"get transaction error",
+		service.logWithAddressAndPid(
+			log.LevelError, "error.get_transaction",
 			log.String("command", command.String()),
 			log.Error(err),
 		)
@@ -212,16 +211,16 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Comman
 	startTime := time.Now()
 	if err := sendCommandEvents(command, serveStartTime); err != nil {
 		metric.MetricIncrease("error.send_event")
-		logger.Error(
-			"send event error",
+		service.logWithAddressAndPid(
+			log.LevelError, "error.send_event",
 			log.String("command", strings.Join(args, " ")),
 			log.Error(err),
 		)
 	}
 	metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
 	duration := time.Since(serveStartTime)
-	logger.Debug(
-		"end to exec command",
+	service.logWithAddressAndPid(
+		log.LevelDebug, "command.end",
 		log.String("command", command.String()),
 		log.String("result", result.String()),
 		log.String("duration", duration.String()),
@@ -324,28 +323,40 @@ func sendCommandEvents(command commands.Commander, accessTime time.Time) error {
 	return nil
 }
 
-func (server *RoomService) connCloseHandler(conn redcon.Conn, err error) {
-	metric := server.dep.Metric
+func (service *RoomService) connCloseHandler(conn redcon.Conn, err error) {
+	metric := service.dep.Metric
 	metric.MetricIncrease("connection.close")
 	transactionManager.removeTransaction(conn, commands.TransactionCloseReasonConnClosed)
 	transactionCount := transactionManager.transactionCount()
-	logger := server.dep.Logger
+	connectionCount := atomic.AddInt64(&connectionTotal, -1)
 	if err == nil {
-		logger.Debug(
-			"connection is closed",
+		service.logWithAddressAndPid(
+			log.LevelDebug, "connection.close",
 			log.String("remote_addr", conn.RemoteAddr()),
 			log.String("local_addr", conn.NetConn().LocalAddr().String()),
 			log.Int("transaction_count", transactionCount),
+			log.Int64("connection_count", connectionCount),
 		)
 	} else {
-		logger.Error(
-			"connection is closed",
+		metric.MetricIncrease("error.conn_close")
+		service.logWithAddressAndPid(
+			log.LevelError, "error.conn_close",
 			log.String("remote_addr", conn.RemoteAddr()),
 			log.String("local_addr", conn.NetConn().LocalAddr().String()),
 			log.Int("transaction_count", transactionCount),
+			log.Int64("connection_count", connectionCount),
 			log.Error(err),
 		)
 	}
-	metric.MetricGauge("connection.total", atomic.AddInt64(&connectionTotal, -1))
+	metric.MetricGauge("connection.total", connectionCount)
 	metric.MetricGauge("transaction.total", transactionCount)
+}
+
+func (service *RoomService) logWithAddressAndPid(level log.Level, subject string, logPairs ...log.LogPair) {
+	pairs := append(
+		logPairs,
+		log.String("address", service.address),
+		log.Int("pid", service.pid),
+	)
+	service.dep.Logger.Log(level, subject, pairs...)
 }
