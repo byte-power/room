@@ -4,6 +4,7 @@ import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
 	"bytepower_room/service"
+	"errors"
 	"fmt"
 	"time"
 
@@ -28,6 +29,7 @@ func main() {
 	if err := base.InitRoomTask(*configPath); err != nil {
 		panic(err)
 	}
+	dep := base.GetTaskDependency()
 	coordinatorConfig := base.GetTaskConfig().Coordinator
 	coordinator := task.NewCoordinatorFromRedisCluster(coordinatorConfig.Name, coordinatorConfig.Addrs)
 
@@ -37,7 +39,7 @@ func main() {
 		upsertTryTimes := syncKeyTaskConfig.UpSertTryTimes
 		noWrittenDuration := syncKeyTaskConfig.NoWrittenDuration
 		rateLimitPerSecond := syncKeyTaskConfig.RateLimitPerSecond
-		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask, upsertTryTimes, noWrittenDuration, rateLimitPerSecond).
+		job, err := task.Periodic(syncKeyTask, service.SyncKeysTask, dep, upsertTryTimes, noWrittenDuration, rateLimitPerSecond).
 			EveryMinutes(syncKeyTaskConfig.IntervalMinutes).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
@@ -51,19 +53,18 @@ func main() {
 		cleanKeyTaskInterval := cleanKeyTaskConfig.IntervalMinutes
 		inactiveDuration := cleanKeyTaskConfig.InactiveDuration
 		rateLimtPerSecond := cleanKeyTaskConfig.RateLimitPerSecond
-		job, err := task.Periodic(cleanKeyTask, service.CleanKeysTask, inactiveDuration, rateLimtPerSecond).
+		job, err := task.Periodic(cleanKeyTask, service.CleanKeysTask, dep, inactiveDuration, rateLimtPerSecond).
 			EveryMinutes(cleanKeyTaskInterval).AtSecondInMinute(20)
 		if err != nil {
 			panic(err)
 		}
 		job.SetCoordinate(coordinator)
 	}
-	go monitorScheduler()
+	go monitorScheduler(dep.Logger)
 	task.StartScheduler()
 }
 
-func monitorScheduler() {
-	logger := base.GetTaskDependency().Logger
+func monitorScheduler(logger *log.Logger) {
 	for {
 		count := task.JobCount()
 		logger.Info("job_count", log.Int("count", count))
@@ -71,7 +72,7 @@ func monitorScheduler() {
 		allJobStats := task.JobStats()
 		for jobName, jobStats := range allJobStats {
 			for _, stat := range jobStats {
-				if !stat.IsSuccess && !task.IsCoordinateError(stat.Err) {
+				if !stat.IsSuccess && !canErrorBeIgnored(stat.Err) {
 					logger.Info(
 						"job stats",
 						log.String("name", jobName),
@@ -82,4 +83,8 @@ func monitorScheduler() {
 		}
 		time.Sleep(5 * time.Second)
 	}
+}
+
+func canErrorBeIgnored(err error) bool {
+	return task.IsCoordinateError(err) || errors.Is(err, task.ErrJobTimeout)
 }
