@@ -19,9 +19,8 @@ const SyncKeysTaskName = "sync_keys"
 // find keys to sync
 // select * from table where status = "syncing";
 // update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-func SyncKeysTask(upsertTryTimes int, noWrittenDuration time.Duration, rateLimitPerSecond int) {
+func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
-	dep := base.GetTaskDependency()
 	logTaskStart(
 		dep.Logger,
 		SyncKeysTaskName, startTime,

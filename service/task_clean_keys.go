@@ -17,9 +17,8 @@ const CleanKeysTaskName = "clean_keys"
 // find keys to clean
 // select * from table where status != "cleaned" and accessed_at < ?;
 // update table set status = "cheaned" where hash_tag = "xxx" and version = "xxx"
-func CleanKeysTask(inactiveDuration time.Duration, rateLimitPerSecond int) {
+func CleanKeysTask(dep base.Dependency, inactiveDuration time.Duration, rateLimitPerSecond int) {
 	startTime := time.Now()
-	dep := base.GetTaskDependency()
 	logTaskStart(
 		dep.Logger,
 		CleanKeysTaskName,
