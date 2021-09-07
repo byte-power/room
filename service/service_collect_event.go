@@ -133,7 +133,8 @@ loop:
 }
 
 func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
-	if err := event.Check(); err != nil {
+	var err error
+	if err = event.Check(); err != nil {
 		return err
 	}
 	config := service.config.SaveEvent
@@ -141,7 +142,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 	defer cancel()
 	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
 	for i := 0; i < config.RetryTimes; i++ {
-		err := upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
+		err = upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
 		if err != nil {
 			if isRetryErrorForUpdateInTx(err) {
 				service.recordError("save_event_retry", err, map[string]string{"event": event.String()})
@@ -152,7 +153,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 		}
 		break
 	}
-	return nil
+	return err
 }
 
 func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
@@ -348,4 +349,8 @@ func writeSuccessResponse(writer http.ResponseWriter, count int) error {
 	}
 	_, err = writer.Write(bodyInBytes)
 	return err
+}
+
+func SaveEvent(ctx context.Context, db *base.DBCluster, event base.HashTagEvent, saveTime time.Time) error {
+	return upsertHashTagKeysRecordByEvent(ctx, db, event, saveTime)
 }
