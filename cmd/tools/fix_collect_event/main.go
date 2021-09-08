@@ -39,7 +39,7 @@ func main() {
 		logger.Printf("parse_file_error:%s\n", err.Error())
 		return
 	}
-	if err = base.InitCollectEventService(*configPath); err != nil {
+	if err = base.InitCollectEvent(*configPath); err != nil {
 		panic(err)
 	}
 	db := base.GetCollectEventDependency().DB
