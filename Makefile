@@ -1,4 +1,4 @@
-version=1.2.1
+version=1.3.0
 serverExec=room_server
 taskExec=room_task
 collectEventExec=room_collect_event
