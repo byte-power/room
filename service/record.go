@@ -13,6 +13,7 @@ const (
 	metricLoadKeyFromDBError          = "error.loadkey.db"
 	metricLoadKeyIntoRedisError       = "error.loadkey.redis"
 	metricLoadKeyCheckNeedToLoadError = "error.loadkey.check_need_to_load"
+	metricLoadKeyRetryTimeoutError    = "error.loadkey.retry.timeout"
 
 	metricLoadKeySuccess                  = "loadkey.success"
 	metricLoadKeySuccessDuration          = "loadkey.duration"
@@ -23,6 +24,7 @@ const (
 	metricLoadKeyFromDBNotFoundDuration   = "loadkey.db.not_found.duration"
 	metricLoadKeyIntoRedisSuccess         = "loadkey.redis.success"
 	metricLoadKeyIntoRedisSuccessDuration = "loadkey.redis.success.duration"
+	metricLoadKeyRetryLockFailed          = "loadkey.retry.lock_failed"
 )
 
 func recordLoadKeyError(logger *log.Logger, metric *base.MetricClient, hashTag string, err error, duration time.Duration, count int) {
@@ -35,14 +37,23 @@ func recordLoadKeyError(logger *log.Logger, metric *base.MetricClient, hashTag s
 	metric.MetricIncrease(metricLoadKeyError)
 }
 
-func recordLoadKeyRetryError(logger *log.Logger, metric *base.MetricClient, hashTag string, err error, times, count int) {
+func recordLoadKeyRetryTimeoutError(logger *log.Logger, metric *base.MetricClient, hashTag string, err error, times, count int) {
 	logger.Error(
-		metricLoadKeyRetryError,
+		metricLoadKeyRetryTimeoutError,
 		log.String("hash_tag", hashTag),
 		log.Int("count", count),
 		log.Int("load_times", times),
 		log.Error(err))
-	metric.MetricIncrease(metricLoadKeyRetryError)
+	metric.MetricIncrease(metricLoadKeyRetryTimeoutError)
+}
+
+func recordLoadKeyRetryLockFailed(logger *log.Logger, metric *base.MetricClient, hashTag string, times, count int) {
+	logger.Info(
+		metricLoadKeyRetryLockFailed,
+		log.String("hash_tag", hashTag),
+		log.Int("count", count),
+		log.Int("load_times", times))
+	metric.MetricIncrease(metricLoadKeyRetryLockFailed)
 }
 
 func recordLoadKeyCheckNeedToLoadError(logger *log.Logger, metric *base.MetricClient, hashTag string, err error) {

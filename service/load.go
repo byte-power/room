@@ -282,9 +282,14 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 		loaded, count, loadErr := hashTag.Load(loadTimeout)
 		if loadErr != nil {
 			err = loadErr
-			if isRetryLoadError(err) {
+			if errors.Is(err, errLoadKeysLockFailed) {
+				recordLoadKeyRetryLockFailed(dep.Logger, dep.Metric, tagName, i+1, count)
 				time.Sleep(loadRetryInterval)
-				recordLoadKeyRetryError(dep.Logger, dep.Metric, tagName, err, i+1, count)
+				continue
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				recordLoadKeyRetryTimeoutError(dep.Logger, dep.Metric, tagName, err, i+1, count)
+				time.Sleep(loadRetryInterval)
 				continue
 			}
 			recordLoadKeyError(dep.Logger, dep.Metric, tagName, err, time.Since(startTime), count)
@@ -420,8 +425,4 @@ func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 	}
 	_, err := pipeline.Exec(ctx)
 	return err
-}
-
-func isRetryLoadError(err error) bool {
-	return errors.Is(err, errLoadKeysLockFailed) || errors.Is(err, context.DeadlineExceeded)
 }
