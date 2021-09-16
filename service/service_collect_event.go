@@ -5,6 +5,7 @@ import (
 	"bytepower_room/base/log"
 	"context"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"strconv"
 	"sync/atomic"
@@ -38,6 +39,8 @@ type CollectEventService struct {
 	stopCh                  chan bool
 	stop                    int32
 	server                  *http.Server
+	serverRequestCtx        context.Context
+	serverRequestCtxCancel  context.CancelFunc
 }
 
 func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
@@ -50,6 +53,7 @@ func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Log
 	if db == nil {
 		return nil, errors.New("db should not be nil")
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	service := &CollectEventService{
 		config:                  config,
 		eventBuffer:             make(chan base.HashTagEvent, config.BufferLimit),
@@ -61,6 +65,8 @@ func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Log
 		stopCh:                  make(chan bool),
 		stop:                    0,
 		server:                  nil,
+		serverRequestCtx:        ctx,
+		serverRequestCtxCancel:  cancel,
 	}
 	return service, nil
 }
@@ -70,7 +76,6 @@ func (service *CollectEventService) Config() *base.RoomCollectEventConfig {
 }
 
 func (service *CollectEventService) Run() {
-	service.wg.Add(1)
 	go service.startServer()
 	for i := 0; i < service.config.SaveEvent.WorkerCount; i++ {
 		service.wg.Add(1)
@@ -81,10 +86,6 @@ func (service *CollectEventService) Run() {
 }
 
 func (service *CollectEventService) startServer() {
-	defer func() {
-		service.logger.Info(fmt.Sprintf("%s: stop server", CollectEventServiceName))
-		service.wg.Done()
-	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", service.postEventsHandler)
 	service.server = &http.Server{
@@ -93,19 +94,23 @@ func (service *CollectEventService) startServer() {
 		ReadTimeout:  time.Duration(service.config.Server.ReadTimeoutMS) * time.Millisecond,
 		WriteTimeout: time.Duration(service.config.Server.WriteTimeoutMS) * time.Millisecond,
 		IdleTimeout:  time.Duration(service.config.Server.IdleTimeoutMS) * time.Millisecond,
+		BaseContext:  func(_ net.Listener) context.Context { return service.serverRequestCtx },
 	}
-	go func() {
-		if err := service.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			service.recordError("listen_serve", err, nil)
-		}
-	}()
+	if err := service.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		service.recordError("listen_serve", err, nil)
+	}
+}
 
-	<-service.stopCh
+func (service *CollectEventService) stopServer() {
 	if err := service.server.Shutdown(context.TODO()); err != nil {
 		service.recordError("close_server", err, nil)
 	} else {
-		service.logger.Info(fmt.Sprintf("%s: close server success", CollectEventServiceName))
+		service.logger.Info("shutdown server success")
 	}
+	service.serverRequestCtxCancel()
+	// wait 1 second for cancel process.
+	time.Sleep(time.Second)
+	service.logger.Info("cancel all server requests with context cancel function")
 }
 
 func (service *CollectEventService) saveEvents() {
@@ -193,6 +198,7 @@ func (service *CollectEventService) AddEvents(events []base.HashTagEvent) error 
 }
 
 func (service *CollectEventService) Stop() {
+	service.stopServer()
 	if atomic.CompareAndSwapInt32(&service.stop, 0, 1) {
 		close(service.stopCh)
 		service.wg.Wait()
