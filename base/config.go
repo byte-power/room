@@ -207,6 +207,11 @@ type RoomCollectEventConfig struct {
 
 	BufferLimit int `yaml:"buffer_limit"`
 
+	RawAggInterval string `yaml:"agg_interval"`
+	AggInterval    time.Duration
+
+	ServerShutdownTimeoutSeconds int `yaml:"server_shutdown_timeout_seconds"`
+
 	RawMonitorInterval string `yaml:"monitor_interval"`
 	MonitorInterval    time.Duration
 
@@ -229,6 +234,12 @@ func (config RoomCollectEventConfig) check() error {
 	if config.BufferLimit <= 0 {
 		return fmt.Errorf("buffer_limit is %d, it should be greater than 0", config.BufferLimit)
 	}
+	if config.RawAggInterval == "" {
+		return errors.New("agg_interval should not be empty")
+	}
+	if config.ServerShutdownTimeoutSeconds <= 0 {
+		return fmt.Errorf("server_shutdown_timeout_seconds is %d, it should be greater than 0", config.ServerShutdownTimeoutSeconds)
+	}
 	if config.RawMonitorInterval == "" {
 		return errors.New("monitor_interval should not be empty")
 	}
@@ -243,7 +254,13 @@ func (config *RoomCollectEventConfig) init() error {
 		return fmt.Errorf("room_collect_event.%w", err)
 	}
 
-	duration, err := time.ParseDuration(config.RawMonitorInterval)
+	duration, err := time.ParseDuration(config.RawAggInterval)
+	if err != nil {
+		return fmt.Errorf("agg_interval.%w", err)
+	}
+	config.AggInterval = duration
+
+	duration, err = time.ParseDuration(config.RawMonitorInterval)
 	if err != nil {
 		return fmt.Errorf("monitor_interval is inavlid %w", err)
 	}

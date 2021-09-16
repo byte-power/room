@@ -35,6 +35,7 @@ func main() {
 	}
 
 	config := base.GetCollectEventConfig()
+	serviceName := "collect_event_service"
 	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric, dep.DB)
 	if err != nil {
 		panic(err)
@@ -49,9 +50,9 @@ func main() {
 	sig := <-signalCh
 
 	dep.Logger.Info(
-		fmt.Sprintf("signal received, closing %s ...", service.CollectEventServiceName),
+		fmt.Sprintf("signal received, closing %s ...", serviceName),
 		log.String("signal", sig.String()))
 
 	collectEventService.Stop()
-	dep.Logger.Info(fmt.Sprintf("close %s success", service.CollectEventServiceName))
+	dep.Logger.Info(fmt.Sprintf("close %s success", serviceName))
 }

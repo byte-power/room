@@ -95,6 +95,8 @@ collect_event:
 
   buffer_limit: 10240000
   monitor_interval: "15s"
+  agg_interval: "10m"
+  server_shutdown_timeout_seconds: 5
   server:
     url: "127.0.0.1:8080"
     read_timeout_ms: 1000

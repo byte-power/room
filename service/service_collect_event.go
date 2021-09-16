@@ -3,6 +3,7 @@ package service
 import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
+	"bytepower_room/utility"
 	"context"
 	"io/ioutil"
 	"net"
@@ -19,28 +20,39 @@ import (
 const (
 	HTTPHeaderContentType = "Content-Type"
 	HTTPContentTypeJSON   = "application/json"
+	eventFilePrefix       = "collect_event_"
 )
 
 const (
-	metricEventInBuffer     = "event_in_buffer.total"
-	metricRequestBodyLength = "request_body_length.total"
+	metricEventCountInEventBuffer          = "event_in_buffer.total"
+	metricEventCountInCollectedEventBuffer = "event_in_collected_buffer.total"
+	metricAggregatedEventCount             = "aggregated_event.total"
+	metricRequestBodyLength                = "request_body_length.total"
 )
 
-const CollectEventServiceName = "collect_event_service"
-
 type CollectEventService struct {
-	config                  *base.RoomCollectEventConfig
+	config *base.RoomCollectEventConfig
+
 	eventBuffer             chan base.HashTagEvent
 	eventCountInEventBuffer int64
-	logger                  *log.Logger
-	metric                  *base.MetricClient
-	db                      *base.DBCluster
-	wg                      sync.WaitGroup
-	stopCh                  chan bool
-	stop                    int32
-	server                  *http.Server
-	serverRequestCtx        context.Context
-	serverRequestCtxCancel  context.CancelFunc
+
+	mutex  sync.Mutex
+	events map[string]base.HashTagEvent
+
+	collectedEventBuffer             chan base.HashTagEvent
+	eventCountInCollectedEventBuffer int64
+
+	logger *log.Logger
+	metric *base.MetricClient
+	db     *base.DBCluster
+
+	wg     sync.WaitGroup
+	stopCh chan bool
+	stop   int32
+
+	server                 *http.Server
+	serverRequestCtx       context.Context
+	serverRequestCtxCancel context.CancelFunc
 }
 
 func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
@@ -55,18 +67,28 @@ func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Log
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &CollectEventService{
-		config:                  config,
+		config: config,
+
 		eventBuffer:             make(chan base.HashTagEvent, config.BufferLimit),
 		eventCountInEventBuffer: 0,
-		logger:                  logger,
-		metric:                  metric,
-		db:                      db,
-		wg:                      sync.WaitGroup{},
-		stopCh:                  make(chan bool),
-		stop:                    0,
-		server:                  nil,
-		serverRequestCtx:        ctx,
-		serverRequestCtxCancel:  cancel,
+
+		mutex:  sync.Mutex{},
+		events: make(map[string]base.HashTagEvent),
+
+		collectedEventBuffer:             make(chan base.HashTagEvent, config.BufferLimit),
+		eventCountInCollectedEventBuffer: 0,
+
+		logger: logger,
+		metric: metric,
+		db:     db,
+
+		wg:     sync.WaitGroup{},
+		stopCh: make(chan bool),
+		stop:   0,
+
+		server:                 nil,
+		serverRequestCtx:       ctx,
+		serverRequestCtxCancel: cancel,
 	}
 	return service, nil
 }
@@ -81,6 +103,13 @@ func (service *CollectEventService) Run() {
 		service.wg.Add(1)
 		go service.saveEvents()
 	}
+
+	service.wg.Add(1)
+	go service.aggregateEvents()
+
+	service.wg.Add(1)
+	go service.collectAggregatedEvents()
+
 	service.wg.Add(1)
 	go service.mointor(service.config.MonitorInterval)
 }
@@ -102,7 +131,9 @@ func (service *CollectEventService) startServer() {
 }
 
 func (service *CollectEventService) stopServer() {
-	if err := service.server.Shutdown(context.TODO()); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(service.config.ServerShutdownTimeoutSeconds)*time.Second)
+	defer cancel()
+	if err := service.server.Shutdown(ctx); err != nil {
 		service.recordError("close_server", err, nil)
 	} else {
 		service.logger.Info("shutdown server success")
@@ -113,9 +144,83 @@ func (service *CollectEventService) stopServer() {
 	service.logger.Info("cancel all server requests with context cancel function")
 }
 
+// returns when channel `service.stopCh` is closed.
+func (service *CollectEventService) aggregateEvents() {
+	defer func() {
+		service.logger.Info("stop aggregate events")
+		service.wg.Done()
+	}()
+
+loop:
+	for {
+		select {
+		case event := <-service.eventBuffer:
+			atomic.AddInt64(&service.eventCountInEventBuffer, -1)
+			if err := service.aggregateEvent(event); err != nil {
+				service.recordError("agg_event", err, map[string]string{"event": event.String()})
+			}
+		case <-service.stopCh:
+			break loop
+		}
+	}
+}
+
+func (service *CollectEventService) aggregateEvent(event base.HashTagEvent) error {
+	if event.WriteTime.IsZero() {
+		event.Keys = utility.NewStringSet([]string{}...)
+	}
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	var newEvent base.HashTagEvent
+	var err error
+	if savedEvent, ok := service.events[event.HashTag]; ok {
+		newEvent, err = base.MergeEvents(savedEvent, event)
+		if err != nil {
+			return err
+		}
+	} else {
+		newEvent = event
+	}
+	service.events[event.HashTag] = newEvent
+	return nil
+}
+
+func (service *CollectEventService) collectAggregatedEvents() {
+	ticker := time.NewTicker(service.config.AggInterval)
+	defer func() {
+		service.logger.Info("stop collect aggregated events")
+		ticker.Stop()
+		service.wg.Done()
+	}()
+loop:
+	for {
+		select {
+		case <-ticker.C:
+			events := service.collectEvents()
+			for _, event := range events {
+				service.collectedEventBuffer <- event
+				atomic.AddInt64(&service.eventCountInCollectedEventBuffer, 1)
+			}
+		case <-service.stopCh:
+			break loop
+		}
+	}
+}
+
+func (service *CollectEventService) collectEvents() []base.HashTagEvent {
+	events := make([]base.HashTagEvent, 0)
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	for hashTag, event := range service.events {
+		events = append(events, event)
+		delete(service.events, hashTag)
+	}
+	return events
+}
+
 func (service *CollectEventService) saveEvents() {
 	defer func() {
-		service.logger.Info(fmt.Sprintf("%s: stop save events", CollectEventServiceName))
+		service.logger.Info("stop save events")
 		service.wg.Done()
 	}()
 loop:
@@ -183,8 +288,8 @@ func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
 		return nil
 	default:
 		return fmt.Errorf(
-			"%s: buffer is full with limit %d, event %s is discarded",
-			CollectEventServiceName, service.config.BufferLimit, event.String())
+			"buffer is full with limit %d, event %s is discarded",
+			service.config.BufferLimit, event.String())
 	}
 }
 
@@ -207,8 +312,14 @@ func (service *CollectEventService) Stop() {
 }
 
 func (service *CollectEventService) drainEvents() {
-	close(service.eventBuffer)
-	for event := range service.eventBuffer {
+	startTime := time.Now()
+	service.closeAndEmptifyChannel(service.collectedEventBuffer, &service.eventCountInCollectedEventBuffer)
+	service.closeAndEmptifyChannel(service.eventBuffer, &service.eventCountInEventBuffer)
+
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	service.logger.Info("draining events", log.Int("count", len(service.events)))
+	for _, event := range service.events {
 		err := service.saveEvent(event)
 		if err != nil {
 			service.recordError(
@@ -217,12 +328,23 @@ func (service *CollectEventService) drainEvents() {
 			)
 		}
 	}
+	service.logger.Info("events are drained", log.String("duration", time.Since(startTime).String()))
+}
+
+func (service *CollectEventService) closeAndEmptifyChannel(ch chan base.HashTagEvent, counter *int64) {
+	close(ch)
+	for event := range ch {
+		atomic.AddInt64(counter, -1)
+		if err := service.aggregateEvent(event); err != nil {
+			service.recordError("agg_event", err, map[string]string{"event": event.String()})
+		}
+	}
 }
 
 func (service *CollectEventService) mointor(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer func() {
-		service.logger.Info(fmt.Sprintf("%s: stop monitor", CollectEventServiceName))
+		service.logger.Info("stop monitor")
 		ticker.Stop()
 		service.wg.Done()
 	}()
@@ -230,11 +352,19 @@ loop:
 	for {
 		select {
 		case <-ticker.C:
-			service.recordGauge(metricEventInBuffer, atomic.LoadInt64(&service.eventCountInEventBuffer))
+			service.recordGauge(metricEventCountInEventBuffer, atomic.LoadInt64(&service.eventCountInEventBuffer))
+			service.recordGauge(metricEventCountInCollectedEventBuffer, atomic.LoadInt64(&service.eventCountInCollectedEventBuffer))
+			service.recordGauge(metricAggregatedEventCount, service.GetAggregatedEventCount())
 		case <-service.stopCh:
 			break loop
 		}
 	}
+}
+
+func (service *CollectEventService) GetAggregatedEventCount() int64 {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	return int64(len(service.events))
 }
 
 func (service *CollectEventService) recordGauge(metricName string, count int64) {
@@ -248,17 +378,13 @@ func (service *CollectEventService) recordGaugeMetric(metricName string, count i
 
 func (service *CollectEventService) recordError(reason string, err error, info map[string]string) {
 	logPairs := make([]log.LogPair, 0)
-	logPairs = append(logPairs, log.String("service", CollectEventServiceName))
-	if reason != "" {
-		logPairs = append(logPairs, log.String("reason", reason))
-	}
 	for key, value := range info {
 		logPairs = append(logPairs, log.String(key, value))
 	}
 	if err != nil {
 		logPairs = append(logPairs, log.Error(err))
 	}
-	service.logger.Error(fmt.Sprintf("%s error", CollectEventServiceName), logPairs...)
+	service.logger.Error(reason, logPairs...)
 
 	errorMetricName := "error"
 	service.metric.MetricIncrease(errorMetricName)
