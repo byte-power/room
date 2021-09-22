@@ -40,7 +40,7 @@ room_server 服务使用 RESP 协议，接收客户端的请求，并给出响�
 命令处理流程图中的各个步骤的详细说明如下：
 
 1. 根据 RESP 协议，解析客户端请求中的命令（如 set {abc}:def 100）
-2. 判断命令中的 keys （{abc}:def） 是否需要从 PostgreSQL 数据库中加载，如果需要加载，进行步骤 3，否则进行步骤 4
+2. 判断命令中 hash_tag (例子中的 abc) 下的 keys 是否需要从 PostgreSQL 数据库中加载，如果需要加载，进行步骤 3，否则进行步骤 4
 3. 从 PostgreSQL 数据库中加载数据至 redis cluster 中
 4. 更新 redis cluster 中 keys 所属 hash_tag（即例子中的 abc) 的 meta 信息（meta 信息文档稍后有说明）
 5. 以 proxy 的方式执行命令，将命令转发至 redis cluster，redis cluster 执行命令并返回结果，room 将结果返回给客户端
