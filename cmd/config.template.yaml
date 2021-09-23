@@ -97,16 +97,24 @@ collect_event:
   monitor_interval: "15s"
   agg_interval: "10m"
   server_shutdown_timeout_seconds: 5
+
   server:
     url: "127.0.0.1:8080"
     read_timeout_ms: 1000
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
-  save_event:
+
+  save_db:
     retry_times: 3
     retry_interval_ms: 20
     timeout_ms: 2000
-    worker_count: 2
+    file_age: "5m"
+    rate_limit_per_second: 100
+
+  save_file:
+    max_event_count: 1000
+    max_file_age: "10m"
+    file_directory: "/data/room"
 
   db_cluster:
     sharding_count: 5

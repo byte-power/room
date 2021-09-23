@@ -1,32 +1,40 @@
 package service
 
 import (
+	"bufio"
 	"bytepower_room/base"
 	"bytepower_room/base/log"
 	"bytepower_room/utility"
 	"context"
+	"io/fs"
 	"io/ioutil"
 	"net"
 	"net/http"
-	"strconv"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"go.uber.org/ratelimit"
 )
 
 const (
 	HTTPHeaderContentType = "Content-Type"
 	HTTPContentTypeJSON   = "application/json"
-	eventFilePrefix       = "collect_event_"
+	eventFilePrefix       = "collect_event"
 )
 
 const (
 	metricEventCountInEventBuffer          = "event_in_buffer.total"
 	metricEventCountInCollectedEventBuffer = "event_in_collected_buffer.total"
 	metricAggregatedEventCount             = "aggregated_event.total"
+	metricEventFileCount                   = "event_file.total"
 	metricRequestBodyLength                = "request_body_length.total"
 )
 
@@ -51,8 +59,9 @@ type CollectEventService struct {
 	stop   int32
 
 	server                 *http.Server
-	serverRequestCtx       context.Context
 	serverRequestCtxCancel context.CancelFunc
+
+	file *EventFile
 }
 
 func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
@@ -65,7 +74,13 @@ func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Log
 	if db == nil {
 		return nil, errors.New("db should not be nil")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	file, err := NewEventFile(
+		logger, metric, config.SaveFile.FileDirectory,
+		config.SaveFile.MaxEventCount, config.SaveFile.MaxFileAge)
+	if err != nil {
+		return nil, fmt.Errorf("new event file error %w", err)
+	}
+	logger.Info("create event file", log.String("name", file.Name()))
 	service := &CollectEventService{
 		config: config,
 
@@ -86,10 +101,25 @@ func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Log
 		stopCh: make(chan bool),
 		stop:   0,
 
-		server:                 nil,
-		serverRequestCtx:       ctx,
-		serverRequestCtxCancel: cancel,
+		file: file,
 	}
+
+	service.file.StartFileRotation()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/events", service.postEventsHandler)
+	ctx, cancel := context.WithCancel(context.Background())
+	server := &http.Server{
+		Addr:         service.config.Server.URL,
+		Handler:      mux,
+		ReadTimeout:  time.Duration(service.config.Server.ReadTimeoutMS) * time.Millisecond,
+		WriteTimeout: time.Duration(service.config.Server.WriteTimeoutMS) * time.Millisecond,
+		IdleTimeout:  time.Duration(service.config.Server.IdleTimeoutMS) * time.Millisecond,
+		BaseContext:  func(_ net.Listener) context.Context { return ctx },
+	}
+	service.server = server
+	service.serverRequestCtxCancel = cancel
+
 	return service, nil
 }
 
@@ -98,11 +128,8 @@ func (service *CollectEventService) Config() *base.RoomCollectEventConfig {
 }
 
 func (service *CollectEventService) Run() {
+	service.wg.Add(1)
 	go service.startServer()
-	for i := 0; i < service.config.SaveEvent.WorkerCount; i++ {
-		service.wg.Add(1)
-		go service.saveEvents()
-	}
 
 	service.wg.Add(1)
 	go service.aggregateEvents()
@@ -111,47 +138,32 @@ func (service *CollectEventService) Run() {
 	go service.collectAggregatedEvents()
 
 	service.wg.Add(1)
+	go service.saveEventsToFile()
+
+	service.wg.Add(1)
+	go service.saveEventsToDB()
+
+	service.wg.Add(1)
 	go service.mointor(service.config.MonitorInterval)
 }
 
 func (service *CollectEventService) startServer() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/events", service.postEventsHandler)
-	service.server = &http.Server{
-		Addr:         service.config.Server.URL,
-		Handler:      mux,
-		ReadTimeout:  time.Duration(service.config.Server.ReadTimeoutMS) * time.Millisecond,
-		WriteTimeout: time.Duration(service.config.Server.WriteTimeoutMS) * time.Millisecond,
-		IdleTimeout:  time.Duration(service.config.Server.IdleTimeoutMS) * time.Millisecond,
-		BaseContext:  func(_ net.Listener) context.Context { return service.serverRequestCtx },
-	}
+	defer func() {
+		service.logger.Info("stop server")
+		service.wg.Done()
+	}()
 	if err := service.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		service.recordError("listen_serve", err, nil)
 	}
 }
 
-func (service *CollectEventService) stopServer() {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(service.config.ServerShutdownTimeoutSeconds)*time.Second)
-	defer cancel()
-	if err := service.server.Shutdown(ctx); err != nil {
-		service.recordError("close_server", err, nil)
-	} else {
-		service.logger.Info("shutdown server success")
-	}
-	service.serverRequestCtxCancel()
-	// wait 1 second for cancel process.
-	time.Sleep(time.Second)
-	service.logger.Info("cancel all server requests with context cancel function")
-}
-
 // returns when channel `service.stopCh` is closed.
 func (service *CollectEventService) aggregateEvents() {
 	defer func() {
-		service.logger.Info("stop aggregate events")
+		service.logger.Info("stop events aggregation")
 		service.wg.Done()
 	}()
 
-loop:
 	for {
 		select {
 		case event := <-service.eventBuffer:
@@ -160,7 +172,7 @@ loop:
 				service.recordError("agg_event", err, map[string]string{"event": event.String()})
 			}
 		case <-service.stopCh:
-			break loop
+			return
 		}
 	}
 }
@@ -192,7 +204,6 @@ func (service *CollectEventService) collectAggregatedEvents() {
 		ticker.Stop()
 		service.wg.Done()
 	}()
-loop:
 	for {
 		select {
 		case <-ticker.C:
@@ -202,7 +213,7 @@ loop:
 				atomic.AddInt64(&service.eventCountInCollectedEventBuffer, 1)
 			}
 		case <-service.stopCh:
-			break loop
+			return
 		}
 	}
 }
@@ -218,29 +229,182 @@ func (service *CollectEventService) collectEvents() []base.HashTagEvent {
 	return events
 }
 
-func (service *CollectEventService) saveEvents() {
+func (service *CollectEventService) saveEventsToFile() {
 	defer func() {
-		service.logger.Info("stop save events")
+		service.logger.Info("stop save events to file")
 		service.wg.Done()
 	}()
-loop:
 	for {
 		select {
-		case event, ok := <-service.eventBuffer:
-			if !ok {
-				break loop
+		case event := <-service.collectedEventBuffer:
+			atomic.AddInt64(&service.eventCountInCollectedEventBuffer, -1)
+			err := service.file.Write(event)
+			if err != nil {
+				service.recordError("save_events_to_file", err, map[string]string{"event": event.String()})
 			}
-			atomic.AddInt64(&service.eventCountInEventBuffer, -1)
-			if err := service.saveEvent(event); err != nil {
-				service.recordError(
-					"save_event", err,
-					map[string]string{"event": event.String()},
-				)
-			}
+
 		case <-service.stopCh:
-			break loop
+			return
 		}
 	}
+}
+
+func (service *CollectEventService) saveEventsToDB() {
+	defer func() {
+		service.logger.Info("stop save events to db")
+		service.wg.Done()
+	}()
+
+	directory := service.config.SaveFile.FileDirectory
+	metricMsg := "save_events_to_db"
+	interval := 5 * time.Second
+	for {
+		files, err := listEventFilesInDirectory(directory)
+		if err != nil {
+			service.recordError(metricMsg, err, map[string]string{"dir": directory})
+			time.Sleep(interval)
+			continue
+		}
+		for _, file := range files {
+			name := file.Name()
+			info, err := file.Info()
+			if err != nil {
+				service.recordError(
+					fmt.Sprintf("%s.get_file_info", metricMsg),
+					err,
+					map[string]string{"name": name},
+				)
+				continue
+			}
+			startTime := time.Now()
+			if info.ModTime().Add(service.config.SaveDB.FileAge).Before(startTime) {
+				service.logger.Info(
+					"start to save events from file to database",
+					log.String("name", name),
+					log.String("start_time", startTime.String()),
+				)
+				fullName := path.Join(directory, name)
+				count, quit, errs := service.saveEventsFromFileToDB(fullName)
+				if len(errs) != 0 {
+					service.recordError(
+						fmt.Sprintf("%s.count", metricMsg),
+						fmt.Errorf("%d errors", len(errs)),
+						map[string]string{
+							"name":  name,
+							"count": fmt.Sprint(count),
+						},
+					)
+				} else {
+					service.logger.Info(
+						"end to save events from file to database",
+						log.String("name", name),
+						log.Int("count", count),
+						log.String("duration", time.Since(startTime).String()),
+					)
+					service.recordSuccessWithCount(metricMsg, count)
+					service.recordSuccessWithDuration(metricMsg, time.Since(startTime))
+				}
+				if quit {
+					service.logger.Info("quit signal received")
+					return
+				}
+				if !quit {
+					if len(errs) != 0 {
+						// rename file
+						backupName := path.Join(directory, fmt.Sprintf("%s.bak", name))
+						if err := os.Rename(fullName, backupName); err != nil {
+							service.recordError(
+								fmt.Sprintf("%s.backup_file", metricMsg),
+								err,
+								map[string]string{"name": fullName, "backup": backupName},
+							)
+						} else {
+							service.logger.Info(
+								"backup file success",
+								log.String("name", fullName),
+								log.String("backup", backupName),
+							)
+						}
+					} else {
+						if err := os.Remove(fullName); err != nil {
+							service.recordError(
+								fmt.Sprintf("%s.remove_file", metricMsg),
+								err,
+								map[string]string{"name": fullName},
+							)
+						} else {
+							service.logger.Info(
+								"delete file success",
+								log.String("name", fullName),
+							)
+						}
+					}
+				}
+			}
+		}
+		time.Sleep(interval)
+	}
+}
+
+func (service *CollectEventService) saveEventsFromFileToDB(name string) (int, bool, []error) {
+	var errors []error
+	var successCount int
+	var quit bool
+	metricMsg := "save_events_to_db"
+	file, err := os.Open(name)
+	if err != nil {
+		errors = append(errors, err)
+		service.recordError(fmt.Sprintf("%s.open_file", metricMsg), err, map[string]string{"name": name})
+		return successCount, quit, errors
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			service.recordError(
+				fmt.Sprintf("%s.close_file", metricMsg),
+				err,
+				map[string]string{"name": name},
+			)
+		}
+	}()
+	scanner := bufio.NewScanner(file)
+	ratelimitBucket := ratelimit.New(service.config.SaveDB.RateLimitPerSecond)
+loop:
+	for scanner.Scan() {
+		var event base.HashTagEvent
+		err := json.Unmarshal(scanner.Bytes(), &event)
+		if err != nil {
+			errors = append(errors, err)
+			service.recordError(
+				fmt.Sprintf("%s.unmarshal_event", metricMsg),
+				err,
+				map[string]string{
+					"name":  name,
+					"event": scanner.Text(),
+				},
+			)
+			continue
+		}
+		select {
+		case <-service.stopCh:
+			quit = true
+			break loop
+		default:
+			ratelimitBucket.Take()
+			if err := service.saveEvent(event); err != nil {
+				errors = append(errors, err)
+				service.recordError(
+					fmt.Sprintf("%s.save_event", metricMsg),
+					err,
+					map[string]string{
+						"name":  name,
+						"event": scanner.Text(),
+					})
+				continue
+			}
+			successCount += 1
+		}
+	}
+	return successCount, quit, errors
 }
 
 func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
@@ -248,7 +412,7 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 	if err = event.Check(); err != nil {
 		return err
 	}
-	config := service.config.SaveEvent
+	config := service.config.SaveDB
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
@@ -256,13 +420,13 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 		err = upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
 		if err != nil {
 			if isRetryErrorForUpdateInTx(err) {
-				service.recordError(
-					"save_event_retry",
-					err,
-					map[string]string{
-						"event":       event.String(),
-						"retry_times": strconv.Itoa(i),
-					})
+				service.logger.Warn(
+					"save_event_to_db_retry",
+					log.Error(err),
+					log.String("event", event.String()),
+					log.Int("retry_times", i),
+				)
+				service.recordSuccessWithCount("save_event_to_db_retry", 1)
 				time.Sleep(retryInterval)
 				continue
 			}
@@ -273,29 +437,61 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 	return err
 }
 
-func (service *CollectEventService) AddEvent(event base.HashTagEvent) error {
+func (service *CollectEventService) mointor(interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer func() {
-		if r := recover(); r != nil {
-			service.recordError("add_event_panic", fmt.Errorf("%+v", r), nil)
-		}
+		service.logger.Info("stop monitor")
+		ticker.Stop()
+		service.wg.Done()
 	}()
-	if err := event.Check(); err != nil {
+	for {
+		select {
+		case <-ticker.C:
+			service.recordGauge(metricEventCountInEventBuffer, atomic.LoadInt64(&service.eventCountInEventBuffer))
+			service.recordGauge(metricEventCountInCollectedEventBuffer, atomic.LoadInt64(&service.eventCountInCollectedEventBuffer))
+			service.recordGauge(metricAggregatedEventCount, service.GetAggregatedEventCount())
+			service.recordGauge(metricEventFileCount, service.GetEventFileCount())
+		case <-service.stopCh:
+			return
+		}
+	}
+}
+
+func (service *CollectEventService) GetAggregatedEventCount() int64 {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	return int64(len(service.events))
+}
+
+func (service *CollectEventService) GetEventFileCount() int64 {
+	directory := service.config.SaveFile.FileDirectory
+	files, err := listEventFilesInDirectory(directory)
+	if err != nil {
+		service.recordError("get_event_file_count", err, map[string]string{"dir": directory})
+		return 0
+	}
+	return int64(len(files))
+}
+
+func (service *CollectEventService) addEvent(event base.HashTagEvent) error {
+	var err error
+	if err = event.Check(); err != nil {
 		return err
 	}
 	select {
 	case service.eventBuffer <- event:
 		atomic.AddInt64(&service.eventCountInEventBuffer, 1)
-		return nil
 	default:
-		return fmt.Errorf(
+		err = fmt.Errorf(
 			"buffer is full with limit %d, event %s is discarded",
 			service.config.BufferLimit, event.String())
 	}
+	return err
 }
 
-func (service *CollectEventService) AddEvents(events []base.HashTagEvent) error {
+func (service *CollectEventService) addEvents(events []base.HashTagEvent) error {
 	for _, event := range events {
-		if err := service.AddEvent(event); err != nil {
+		if err := service.addEvent(event); err != nil {
 			return err
 		}
 	}
@@ -303,15 +499,30 @@ func (service *CollectEventService) AddEvents(events []base.HashTagEvent) error 
 }
 
 func (service *CollectEventService) Stop() {
-	service.stopServer()
 	if atomic.CompareAndSwapInt32(&service.stop, 0, 1) {
+		service.stopServer()
 		close(service.stopCh)
 		service.wg.Wait()
 		service.drainEvents()
 	}
 }
 
+func (service *CollectEventService) stopServer() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(service.config.ServerShutdownTimeoutSeconds)*time.Second)
+	defer cancel()
+	if err := service.server.Shutdown(ctx); err != nil {
+		service.recordError("close_server", err, nil)
+	} else {
+		service.logger.Info("shutdown server success")
+	}
+	service.serverRequestCtxCancel()
+	// wait 1 second for cancel process.
+	time.Sleep(time.Second)
+	service.logger.Info("cancel all server requests with context cancel function")
+}
+
 func (service *CollectEventService) drainEvents() {
+	defer service.file.Close()
 	startTime := time.Now()
 	service.closeAndEmptifyChannel(service.collectedEventBuffer, &service.eventCountInCollectedEventBuffer)
 	service.closeAndEmptifyChannel(service.eventBuffer, &service.eventCountInEventBuffer)
@@ -320,10 +531,10 @@ func (service *CollectEventService) drainEvents() {
 	defer service.mutex.Unlock()
 	service.logger.Info("draining events", log.Int("count", len(service.events)))
 	for _, event := range service.events {
-		err := service.saveEvent(event)
+		err := service.file.Write(event)
 		if err != nil {
 			service.recordError(
-				"save_event", err,
+				"save_event_to_file", err,
 				map[string]string{"event": event.String()},
 			)
 		}
@@ -341,30 +552,22 @@ func (service *CollectEventService) closeAndEmptifyChannel(ch chan base.HashTagE
 	}
 }
 
-func (service *CollectEventService) mointor(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer func() {
-		service.logger.Info("stop monitor")
-		ticker.Stop()
-		service.wg.Done()
-	}()
-loop:
-	for {
-		select {
-		case <-ticker.C:
-			service.recordGauge(metricEventCountInEventBuffer, atomic.LoadInt64(&service.eventCountInEventBuffer))
-			service.recordGauge(metricEventCountInCollectedEventBuffer, atomic.LoadInt64(&service.eventCountInCollectedEventBuffer))
-			service.recordGauge(metricAggregatedEventCount, service.GetAggregatedEventCount())
-		case <-service.stopCh:
-			break loop
+func listEventFilesInDirectory(directory string) ([]fs.DirEntry, error) {
+	eventFiles := make([]fs.DirEntry, 0)
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return eventFiles, err
+	}
+	for _, file := range files {
+		if isEventFile(file.Name()) {
+			eventFiles = append(eventFiles, file)
 		}
 	}
+	return eventFiles, nil
 }
 
-func (service *CollectEventService) GetAggregatedEventCount() int64 {
-	service.mutex.Lock()
-	defer service.mutex.Unlock()
-	return int64(len(service.events))
+func isEventFile(name string) bool {
+	return strings.HasPrefix(name, eventFilePrefix) && strings.HasSuffix(name, ".log")
 }
 
 func (service *CollectEventService) recordGauge(metricName string, count int64) {
@@ -451,7 +654,7 @@ func (service *CollectEventService) postEventsHandler(writer http.ResponseWriter
 		}
 	}
 
-	err = service.AddEvents(events)
+	err = service.addEvents(events)
 	if err != nil {
 		service.recordError("add_event", err, map[string]string{"body": string(body)})
 		if err = writeErrorResponse(writer, http.StatusInternalServerError, err); err != nil {
@@ -492,4 +695,215 @@ func writeSuccessResponse(writer http.ResponseWriter, count int) error {
 
 func SaveEvent(ctx context.Context, db *base.DBCluster, event base.HashTagEvent, saveTime time.Time) error {
 	return upsertHashTagKeysRecordByEvent(ctx, db, event, saveTime)
+}
+
+type EventFile struct {
+	name      string
+	directory string
+
+	f *os.File
+
+	eventCount    int32
+	maxEventCount int32
+
+	createdAt time.Time
+	maxAge    time.Duration
+
+	logger *log.Logger
+	metric *base.MetricClient
+
+	mutex sync.Mutex
+
+	stopCh chan bool
+}
+
+func NewEventFile(
+	logger *log.Logger, metric *base.MetricClient,
+	directory string, maxEventCount int, maxAge time.Duration,
+) (*EventFile, error) {
+
+	if logger == nil {
+		return nil, errors.New("logger should not be nil")
+	}
+	if metric == nil {
+		return nil, errors.New("metric should not be nil")
+	}
+	if directory == "" {
+		return nil, errors.New("directory is nil")
+	}
+	if maxEventCount <= 0 {
+		return nil, errors.New("maxEventCount should be greater than 0")
+	}
+	if maxAge <= 0 {
+		return nil, errors.New("duration should be greater than 0")
+	}
+	currentTime := time.Now()
+	name := generateEventFileName(currentTime, os.Getpid())
+	f, err := os.Create(filepath.Join(directory, name))
+	if err != nil {
+		return nil, err
+	}
+	file := &EventFile{
+		directory: directory,
+		name:      name,
+
+		f: f,
+
+		eventCount:    0,
+		maxEventCount: int32(maxEventCount),
+
+		createdAt: currentTime,
+		maxAge:    maxAge,
+
+		logger: logger,
+		metric: metric,
+
+		mutex: sync.Mutex{},
+
+		stopCh: make(chan bool),
+	}
+	return file, nil
+}
+
+func generateEventFileName(t time.Time, pid int) string {
+	return fmt.Sprintf(
+		"%s_%d_%s_%s.log",
+		eventFilePrefix, pid,
+		t.Format("20060102_150405"),
+		utility.GenerateFixedLengthRandomString(4),
+	)
+}
+
+func (file *EventFile) Write(event base.HashTagEvent) error {
+	bytes, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	_, err = file.f.Write(bytes)
+	if err != nil {
+		return err
+	}
+	atomic.AddInt32(&file.eventCount, 1)
+	return nil
+}
+
+func (file *EventFile) StartFileRotation() {
+	file.logger.Info("start file rotation")
+	rotateCheckInterval := 5 * time.Second
+	ticker := time.NewTicker(rotateCheckInterval)
+
+	defer func() {
+		ticker.Stop()
+		file.logger.Info("stop file rotation")
+	}()
+
+	for {
+		select {
+		case <-ticker.C:
+			currentTime := time.Now()
+			if !file.needToRotateFile(currentTime) {
+				continue
+			}
+			oldFileName := file.Name()
+			if err := file.rotateFile(currentTime); err != nil {
+				file.recordError(
+					"rotate_file", err,
+					map[string]string{
+						"old_name": oldFileName,
+						"name":     file.Name(),
+					})
+			} else {
+				file.recordSuccess(
+					"rotate_file", 1,
+					map[string]string{
+						"old_name": oldFileName,
+						"name":     file.Name(),
+					},
+				)
+			}
+		case <-file.stopCh:
+			return
+		}
+	}
+}
+
+func (file *EventFile) rotateFile(t time.Time) error {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+
+	if err := file.f.Close(); err != nil {
+		return err
+	}
+	oldName := file.name
+	eventCount := atomic.LoadInt32(&file.eventCount)
+	createdAt := file.createdAt
+	name := generateEventFileName(t, os.Getpid())
+	file.name = name
+	atomic.StoreInt32(&file.eventCount, 0)
+	f, err := os.Create(filepath.Join(file.directory, name))
+	if err != nil {
+		return err
+	}
+	file.f = f
+	file.createdAt = t
+	file.logger.Info(
+		"rotate file success",
+		log.String("name", name),
+		log.String("old_name", oldName),
+		log.Int32("event_count", eventCount),
+		log.String("created_at", createdAt.String()),
+		log.String("rotate_at", t.String()),
+	)
+	return nil
+}
+
+func (file *EventFile) recordError(reason string, err error, info map[string]string) {
+	logPairs := make([]log.LogPair, 0)
+	for key, value := range info {
+		logPairs = append(logPairs, log.String(key, value))
+	}
+	if err != nil {
+		logPairs = append(logPairs, log.Error(err))
+	}
+	file.logger.Error(reason, logPairs...)
+
+	errorMetricName := "error.event_file"
+	file.metric.MetricIncrease(errorMetricName)
+	specificErrorMetricName := fmt.Sprintf("%s.%s", errorMetricName, reason)
+	file.metric.MetricIncrease(specificErrorMetricName)
+}
+
+func (file *EventFile) recordSuccess(metricName string, count int, info map[string]string) {
+	metricName = fmt.Sprintf("event_file.%s", metricName)
+	logPairs := make([]log.LogPair, 0)
+	for key, value := range info {
+		logPairs = append(logPairs, log.String(key, value))
+	}
+	file.logger.Info(metricName, logPairs...)
+	file.metric.MetricCount(metricName, count)
+}
+
+func (file *EventFile) needToRotateFile(t time.Time) bool {
+	return file.createdAt.Add(file.maxAge).Before(t) || atomic.LoadInt32(&file.eventCount) > file.maxEventCount
+}
+
+func (file *EventFile) Name() string {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	return file.name
+}
+
+func (file *EventFile) FullName() string {
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	return filepath.Join(file.directory, file.name)
+}
+
+func (file *EventFile) Close() error {
+	close(file.stopCh)
+	file.mutex.Lock()
+	defer file.mutex.Unlock()
+	return file.f.Close()
 }
