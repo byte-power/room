@@ -425,6 +425,10 @@ loop:
 			successCount += 1
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		service.recordError(fmt.Sprintf("%s.scan", metricMsg), err, map[string]string{"name": name})
+		errors = append(errors, err)
+	}
 	return successCount, quit, errors
 }
 
@@ -813,7 +817,7 @@ func (file *EventFile) Write(event base.HashTagEvent) error {
 	}
 	file.mutex.Lock()
 	defer file.mutex.Unlock()
-	_, err = file.f.Write(bytes)
+	_, err = file.f.Write(append(bytes, '\n'))
 	if err != nil {
 		return err
 	}
