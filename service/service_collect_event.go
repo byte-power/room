@@ -108,7 +108,7 @@ func NewCollectEventService(
 		file: file,
 	}
 
-	service.file.StartFileRotation()
+	go service.file.StartFileRotation()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", service.postEventsHandler)
