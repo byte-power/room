@@ -64,7 +64,12 @@ type CollectEventService struct {
 	file *EventFile
 }
 
-func NewCollectEventService(config *base.RoomCollectEventConfig, logger *log.Logger, metric *base.MetricClient, db *base.DBCluster) (*CollectEventService, error) {
+func NewCollectEventService(
+	config *base.RoomCollectEventConfig,
+	logger *log.Logger, metric *base.MetricClient,
+	db *base.DBCluster,
+) (*CollectEventService, error) {
+
 	if logger == nil {
 		return nil, errors.New("logger should not be nil")
 	}
@@ -266,87 +271,104 @@ func (service *CollectEventService) saveEventsToDB() {
 			continue
 		}
 		for _, file := range files {
-			name := file.Name()
-			info, err := file.Info()
-			if err != nil {
-				service.recordError(
-					fmt.Sprintf("%s.get_file_info", metricMsg),
-					err,
-					map[string]string{"name": name},
-				)
-				continue
-			}
-			startTime := time.Now()
-			if info.ModTime().Add(service.config.SaveDB.FileAge).Before(startTime) {
-				service.logger.Info(
-					"start to save events from file to database",
-					log.String("name", name),
-					log.String("start_time", startTime.String()),
-				)
-				fullName := path.Join(directory, name)
-				count, quit, errs := service.saveEventsFromFileToDB(fullName)
-				if len(errs) != 0 {
-					service.recordError(
-						fmt.Sprintf("%s.count", metricMsg),
-						fmt.Errorf("%d errors", len(errs)),
-						map[string]string{
-							"name":  name,
-							"count": fmt.Sprint(count),
-						},
-					)
-				} else {
-					service.logger.Info(
-						"end to save events from file to database",
-						log.String("name", name),
-						log.Int("count", count),
-						log.String("duration", time.Since(startTime).String()),
-					)
-					service.recordSuccessWithCount(metricMsg, count)
-					service.recordSuccessWithDuration(metricMsg, time.Since(startTime))
-				}
-				if quit {
-					service.logger.Info("quit signal received")
-					return
-				}
-				if !quit {
-					if len(errs) != 0 {
-						// rename file
-						backupName := path.Join(directory, fmt.Sprintf("%s.bak", name))
-						if err := os.Rename(fullName, backupName); err != nil {
-							service.recordError(
-								fmt.Sprintf("%s.backup_file", metricMsg),
-								err,
-								map[string]string{"name": fullName, "backup": backupName},
-							)
-						} else {
-							service.logger.Info(
-								"backup file success",
-								log.String("name", fullName),
-								log.String("backup", backupName),
-							)
-						}
-					} else {
-						if err := os.Remove(fullName); err != nil {
-							service.recordError(
-								fmt.Sprintf("%s.remove_file", metricMsg),
-								err,
-								map[string]string{"name": fullName},
-							)
-						} else {
-							service.logger.Info(
-								"delete file success",
-								log.String("name", fullName),
-							)
-						}
-					}
-				}
+			quit := service.saveEventsFromFileToDB(file, time.Now(), metricMsg)
+			if quit {
+				service.logger.Info("quit signal received, stop save events to db")
+				return
 			}
 		}
 		time.Sleep(interval)
 	}
 }
 
-func (service *CollectEventService) saveEventsFromFileToDB(name string) (int, bool, []error) {
+func (service *CollectEventService) saveEventsFromFileToDB(file fs.DirEntry, processStartTime time.Time, metricMsg string) bool {
+	directory := service.config.SaveFile.FileDirectory
+	needProcess, err := isEventFileNeededToProcess(file, service.config.SaveDB.FileAge, processStartTime)
+	if err != nil {
+		service.recordError(
+			fmt.Sprintf("%s.check_need_process", metricMsg),
+			err, map[string]string{"name": file.Name()},
+		)
+		return false
+	}
+	if !needProcess {
+		return false
+	}
+
+	name := file.Name()
+	service.logger.Info(
+		"start to save events from file to database",
+		log.String("name", name),
+		log.String("start_time", processStartTime.String()),
+	)
+	fullName := path.Join(directory, name)
+	count, quit, errs := service._saveEventsFromFileToDB(fullName)
+	if len(errs) != 0 {
+		service.recordError(
+			fmt.Sprintf("%s.error_count", metricMsg),
+			fmt.Errorf("%d errors", len(errs)),
+			map[string]string{
+				"name":  name,
+				"count": fmt.Sprint(count),
+			},
+		)
+	} else {
+		service.logger.Info(
+			"end to save events from file to database",
+			log.String("name", name),
+			log.Int("count", count),
+			log.String("duration", time.Since(processStartTime).String()),
+		)
+		service.recordSuccessWithCount(metricMsg, count)
+		service.recordSuccessWithDuration(metricMsg, time.Since(processStartTime))
+	}
+	if quit {
+		return quit
+	}
+	// rename file if has errors
+	if len(errs) != 0 {
+		backupName := path.Join(directory, fmt.Sprintf("%s.bak", name))
+		if err := os.Rename(fullName, backupName); err != nil {
+			service.recordError(
+				fmt.Sprintf("%s.backup_file", metricMsg),
+				err,
+				map[string]string{"name": fullName, "backup": backupName},
+			)
+		} else {
+			service.logger.Info(
+				"backup file success",
+				log.String("name", fullName),
+				log.String("backup", backupName),
+			)
+		}
+		return quit
+	}
+
+	// remove file if has errors
+	if err := os.Remove(fullName); err != nil {
+		service.recordError(
+			fmt.Sprintf("%s.remove_file", metricMsg),
+			err,
+			map[string]string{"name": fullName},
+		)
+	} else {
+		service.logger.Info(
+			"remove file success",
+			log.String("name", fullName),
+		)
+	}
+	return quit
+}
+
+func isEventFileNeededToProcess(file os.DirEntry, fileAge time.Duration, t time.Time) (bool, error) {
+	info, err := file.Info()
+	if err != nil {
+		return false, err
+	}
+	return info.ModTime().Add(fileAge).Before(t), nil
+}
+
+func (service *CollectEventService) _saveEventsFromFileToDB(name string) (int, bool, []error) {
 	var errors []error
 	var successCount int
 	var quit bool
@@ -522,7 +544,17 @@ func (service *CollectEventService) stopServer() {
 }
 
 func (service *CollectEventService) drainEvents() {
-	defer service.file.Close()
+	metricMsg := "drain_events"
+	defer func() {
+		if err := service.file.Close(); err != nil {
+			service.recordError(
+				fmt.Sprintf("%s.close_file", metricMsg),
+				err,
+				map[string]string{"name": service.file.Name()},
+			)
+		}
+	}()
+
 	startTime := time.Now()
 	service.closeAndEmptifyChannel(service.collectedEventBuffer, &service.eventCountInCollectedEventBuffer)
 	service.closeAndEmptifyChannel(service.eventBuffer, &service.eventCountInEventBuffer)
@@ -534,7 +566,8 @@ func (service *CollectEventService) drainEvents() {
 		err := service.file.Write(event)
 		if err != nil {
 			service.recordError(
-				"save_event_to_file", err,
+				fmt.Sprintf("%s.save_event_to_file", metricMsg),
+				err,
 				map[string]string{"event": event.String()},
 			)
 		}
@@ -807,21 +840,15 @@ func (file *EventFile) StartFileRotation() {
 				continue
 			}
 			oldFileName := file.Name()
-			if err := file.rotateFile(currentTime); err != nil {
-				file.recordError(
-					"rotate_file", err,
-					map[string]string{
-						"old_name": oldFileName,
-						"name":     file.Name(),
-					})
+			err := file.rotateFile(currentTime)
+			logInfo := map[string]string{
+				"old_name": oldFileName,
+				"name":     file.Name(),
+			}
+			if err != nil {
+				file.recordError("rotate_file", err, logInfo)
 			} else {
-				file.recordSuccess(
-					"rotate_file", 1,
-					map[string]string{
-						"old_name": oldFileName,
-						"name":     file.Name(),
-					},
-				)
+				file.recordSuccess("rotate_file", 1, logInfo)
 			}
 		case <-file.stopCh:
 			return
