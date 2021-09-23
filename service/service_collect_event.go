@@ -6,7 +6,6 @@ import (
 	"bytepower_room/base/log"
 	"bytepower_room/utility"
 	"context"
-	"io/fs"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -281,7 +280,7 @@ func (service *CollectEventService) saveEventsToDB() {
 	}
 }
 
-func (service *CollectEventService) saveEventsFromFileToDB(file fs.DirEntry, processStartTime time.Time, metricMsg string) bool {
+func (service *CollectEventService) saveEventsFromFileToDB(file os.DirEntry, processStartTime time.Time, metricMsg string) bool {
 	directory := service.config.SaveFile.FileDirectory
 	needProcess, err := isEventFileNeededToProcess(file, service.config.SaveDB.FileAge, processStartTime)
 	if err != nil {
@@ -585,8 +584,8 @@ func (service *CollectEventService) closeAndEmptifyChannel(ch chan base.HashTagE
 	}
 }
 
-func listEventFilesInDirectory(directory string) ([]fs.DirEntry, error) {
-	eventFiles := make([]fs.DirEntry, 0)
+func listEventFilesInDirectory(directory string) ([]os.DirEntry, error) {
+	eventFiles := make([]os.DirEntry, 0)
 	files, err := os.ReadDir(directory)
 	if err != nil {
 		return eventFiles, err
