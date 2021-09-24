@@ -325,6 +325,10 @@ func (service *CollectEventService) saveEventsToDB() {
 				return
 			}
 		}
+		if atomic.LoadInt32(&service.stop) == 1 {
+			service.logger.Info(fmt.Sprintf("service is stopped, stop %s", jobName))
+			return
+		}
 		time.Sleep(interval)
 	}
 }
