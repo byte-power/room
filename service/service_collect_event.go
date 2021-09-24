@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 
@@ -31,8 +32,11 @@ const (
 
 const (
 	metricEventCountInEventBuffer          = "event_in_buffer.total"
+	metricEventBufferMemoryUsage           = "event_buffer_memory_usage.total"
 	metricEventCountInCollectedEventBuffer = "event_in_collected_buffer.total"
+	metricCollectedEventBufferMemoryUsage  = "collected_event_buffer_memory_usage.total"
 	metricAggregatedEventCount             = "aggregated_event.total"
+	metricAggregatedEventMemoryUsage       = "aggregated_event_memory_usage.total"
 	metricEventFileCount                   = "event_file.total"
 	metricRequestBodyLength                = "request_body_length.total"
 )
@@ -526,8 +530,11 @@ func (service *CollectEventService) mointor(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			service.recordGauge(metricEventCountInEventBuffer, atomic.LoadInt64(&service.eventCountInEventBuffer))
+			service.recordGauge(metricEventBufferMemoryUsage, int64(reflect.TypeOf(service.eventBuffer).Size()))
 			service.recordGauge(metricEventCountInCollectedEventBuffer, atomic.LoadInt64(&service.eventCountInCollectedEventBuffer))
+			service.recordGauge(metricCollectedEventBufferMemoryUsage, int64(reflect.TypeOf(service.collectedEventBuffer).Size()))
 			service.recordGauge(metricAggregatedEventCount, service.GetAggregatedEventCount())
+			service.recordGauge(metricAggregatedEventMemoryUsage, service.GetAggregatedEventMemoryUsage())
 			service.recordGauge(metricEventFileCount, service.GetEventFileCount())
 		case <-service.stopCh:
 			return
@@ -539,6 +546,12 @@ func (service *CollectEventService) GetAggregatedEventCount() int64 {
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
 	return int64(len(service.events))
+}
+
+func (service *CollectEventService) GetAggregatedEventMemoryUsage() int64 {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	return int64(reflect.TypeOf(service.events).Size())
 }
 
 func (service *CollectEventService) GetEventFileCount() int64 {
