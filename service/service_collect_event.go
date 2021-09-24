@@ -152,10 +152,18 @@ func (service *CollectEventService) Run() {
 }
 
 func (service *CollectEventService) startServer() {
+	jobName := "collect event server"
 	defer func() {
-		service.logger.Info("stop server")
+		service.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()),
+		)
 		service.wg.Done()
 	}()
+	service.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()),
+	)
 	if err := service.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		service.recordError("listen_serve", err, nil)
 	}
@@ -163,10 +171,16 @@ func (service *CollectEventService) startServer() {
 
 // returns when channel `service.stopCh` is closed.
 func (service *CollectEventService) aggregateEvents() {
+	jobName := "events aggregation"
 	defer func() {
-		service.logger.Info("stop events aggregation")
+		service.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()))
 		service.wg.Done()
 	}()
+	service.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()))
 
 	for {
 		select {
@@ -202,12 +216,20 @@ func (service *CollectEventService) aggregateEvent(event base.HashTagEvent) erro
 }
 
 func (service *CollectEventService) collectAggregatedEvents() {
+	jobName := "collect aggregated events"
 	ticker := time.NewTicker(service.config.AggInterval)
 	defer func() {
-		service.logger.Info("stop collect aggregated events")
+		service.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()),
+		)
 		ticker.Stop()
 		service.wg.Done()
 	}()
+	service.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()),
+	)
 	for {
 		select {
 		case <-ticker.C:
@@ -234,17 +256,31 @@ func (service *CollectEventService) collectEvents() []base.HashTagEvent {
 }
 
 func (service *CollectEventService) saveEventsToFile() {
+	jobName := "save events to file"
+	metricMsg := "save_events_to_file"
+
 	defer func() {
-		service.logger.Info("stop save events to file")
+		service.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()),
+		)
 		service.wg.Done()
 	}()
+
+	service.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()),
+	)
+
 	for {
 		select {
 		case event := <-service.collectedEventBuffer:
 			atomic.AddInt64(&service.eventCountInCollectedEventBuffer, -1)
 			err := service.file.Write(event)
 			if err != nil {
-				service.recordError("save_events_to_file", err, map[string]string{"event": event.String()})
+				service.recordError(metricMsg, err, map[string]string{"event": event.String()})
+			} else {
+				service.recordSuccessWithCount(metricMsg, 1)
 			}
 
 		case <-service.stopCh:
@@ -254,13 +290,22 @@ func (service *CollectEventService) saveEventsToFile() {
 }
 
 func (service *CollectEventService) saveEventsToDB() {
+	jobName := "save events to db"
+	metricMsg := "save_events_to_db"
+
 	defer func() {
-		service.logger.Info("stop save events to db")
+		service.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()),
+		)
 		service.wg.Done()
 	}()
+	service.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()),
+	)
 
 	directory := service.config.SaveFile.FileDirectory
-	metricMsg := "save_events_to_db"
 	interval := 5 * time.Second
 	for {
 		files, err := listEventFilesInDirectory(directory)
@@ -272,7 +317,7 @@ func (service *CollectEventService) saveEventsToDB() {
 		for _, file := range files {
 			quit := service.saveEventsFromFileToDB(file, time.Now(), metricMsg)
 			if quit {
-				service.logger.Info("quit signal received, stop save events to db")
+				service.logger.Info(fmt.Sprintf("quit signal received, stop %s", jobName))
 				return
 			}
 		}
@@ -301,7 +346,7 @@ func (service *CollectEventService) saveEventsFromFileToDB(file os.DirEntry, pro
 		log.String("start_time", processStartTime.String()),
 	)
 	fullName := path.Join(directory, name)
-	count, quit, errs := service._saveEventsFromFileToDB(fullName)
+	count, quit, errs := service._saveEventsFromFileToDB(fullName, metricMsg)
 	if len(errs) != 0 {
 		service.recordError(
 			fmt.Sprintf("%s.error_count", metricMsg),
@@ -367,11 +412,10 @@ func isEventFileNeededToProcess(file os.DirEntry, fileAge time.Duration, t time.
 	return info.ModTime().Add(fileAge).Before(t), nil
 }
 
-func (service *CollectEventService) _saveEventsFromFileToDB(name string) (int, bool, []error) {
+func (service *CollectEventService) _saveEventsFromFileToDB(name, metricMsg string) (int, bool, []error) {
 	var errors []error
 	var successCount int
 	var quit bool
-	metricMsg := "save_events_to_db"
 	file, err := os.Open(name)
 	if err != nil {
 		errors = append(errors, err)
@@ -463,12 +507,21 @@ func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
 }
 
 func (service *CollectEventService) mointor(interval time.Duration) {
+	jobName := "mointor"
+
 	ticker := time.NewTicker(interval)
 	defer func() {
-		service.logger.Info("stop monitor")
+		service.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()),
+		)
 		ticker.Stop()
 		service.wg.Done()
 	}()
+	service.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()),
+	)
 	for {
 		select {
 		case <-ticker.C:
@@ -569,10 +622,14 @@ func (service *CollectEventService) drainEvents() {
 		err := service.file.Write(event)
 		if err != nil {
 			service.recordError(
-				fmt.Sprintf("%s.save_event_to_file", metricMsg),
+				fmt.Sprintf("%s.save_events_to_file", metricMsg),
 				err,
 				map[string]string{"event": event.String()},
 			)
+		} else {
+			service.recordSuccessWithCount(
+				fmt.Sprintf("%s.save_events_to_file", metricMsg),
+				1)
 		}
 	}
 	service.logger.Info("events are drained", log.String("duration", time.Since(startTime).String()))
@@ -826,13 +883,20 @@ func (file *EventFile) Write(event base.HashTagEvent) error {
 }
 
 func (file *EventFile) StartFileRotation() {
-	file.logger.Info("start file rotation")
+	jobName := "file rotation"
+	file.logger.Info(
+		fmt.Sprintf("start %s", jobName),
+		log.String("time", time.Now().String()),
+	)
 	rotateCheckInterval := 5 * time.Second
 	ticker := time.NewTicker(rotateCheckInterval)
 
 	defer func() {
 		ticker.Stop()
-		file.logger.Info("stop file rotation")
+		file.logger.Info(
+			fmt.Sprintf("stop %s", jobName),
+			log.String("time", time.Now().String()),
+		)
 	}()
 
 	for {
