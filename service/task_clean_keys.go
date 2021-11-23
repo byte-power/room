@@ -5,6 +5,7 @@ import (
 	"bytepower_room/base/log"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -31,7 +32,16 @@ func CleanKeysTask(dep base.Dependency, inactiveDuration time.Duration, rateLimi
 	accessedAt := startTime.Add(-inactiveDuration)
 	var err error
 	defer func() {
-		if err == nil {
+		if panicInfo := recover(); panicInfo != nil {
+			recordTaskError(
+				dep.Logger, dep.Metric, SyncKeysTaskName,
+				errTaskPanic, "panic",
+				map[string]string{
+					"info":  fmt.Sprintf("%+v", panicInfo),
+					"stack": string(debug.Stack()),
+				},
+			)
+		} else if err == nil {
 			recordTaskSuccess(dep.Logger, dep.Metric, CleanKeysTaskName, time.Since(startTime))
 		}
 	}()

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 )
 
 const SyncKeysTaskName = "sync_keys"
+
+var errTaskPanic = errors.New("task panic")
 
 // find keys to sync
 // select * from table where status = "syncing";
@@ -32,7 +35,16 @@ func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration tim
 	count := 1000
 	var err error
 	defer func() {
-		if err == nil {
+		if panicInfo := recover(); panicInfo != nil {
+			recordTaskError(
+				dep.Logger, dep.Metric, SyncKeysTaskName,
+				errTaskPanic, "panic",
+				map[string]string{
+					"info":  fmt.Sprintf("%+v", panicInfo),
+					"stack": string(debug.Stack()),
+				},
+			)
+		} else if err == nil {
 			recordTaskSuccess(dep.Logger, dep.Metric, SyncKeysTaskName, time.Since(startTime))
 		}
 	}()
