@@ -34,15 +34,20 @@ func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration tim
 
 	count := 1000
 	var err error
+	var lastModel *roomHashTagKeys
+	lastTableIndex := 0
 	defer func() {
 		if panicInfo := recover(); panicInfo != nil {
+			info := make(map[string]string)
+			if lastModel != nil {
+				info["hash_tag"] = lastModel.HashTag
+				info["table_index"] = fmt.Sprintf("%d", lastTableIndex)
+			}
+			info["info"] = fmt.Sprintf("%+v", panicInfo)
+			info["stack"] = string(debug.Stack())
 			recordTaskError(
 				dep.Logger, dep.Metric, SyncKeysTaskName,
-				errTaskPanic, "panic",
-				map[string]string{
-					"info":  fmt.Sprintf("%+v", panicInfo),
-					"stack": string(debug.Stack()),
-				},
+				errTaskPanic, "panic", info,
 			)
 		} else if err == nil {
 			recordTaskSuccess(dep.Logger, dep.Metric, SyncKeysTaskName, time.Since(startTime))
@@ -74,9 +79,11 @@ func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration tim
 				break
 			}
 			tableIndex = index
+			lastTableIndex = index
 			processCount := 0
 			for _, model := range models {
 				ratelimitBucket.Take()
+				lastModel = model
 				if err = syncRoomData(dep.DB, dep.Redis, model, time.Now(), upsertTryTimes); err != nil {
 					if isRetryErrorForUpdateInTx(err) {
 						recordTaskError(
