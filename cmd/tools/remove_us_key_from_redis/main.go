@@ -22,7 +22,7 @@ const (
 var (
 	redisClusterAddr = pflag.StringP("redis_cluster_addr", "r", "", "redis cluster address, in host:port format")
 	roomAddr         = pflag.StringP("room_addr", "m", "", "room server address, in host:port format")
-	rate             = pflag.IntP("rate", "r", 100, "redis server and room server access rate per second, default is 100")
+	serviceLimit     = pflag.IntP("limit", "l", 100, "redis server and room server access rate per second, default is 100")
 	dryRun           = pflag.BoolP("dryrun", "d", true, "is dry run or not")
 	roomLimit        ratelimit.Limiter
 )
@@ -38,8 +38,8 @@ func parseAndCheckCommandOptions() error {
 	if dryRun == nil {
 		return errors.New("parameter dryrun should be set")
 	}
-	if rate == nil || *rate == 0 {
-		return errors.New("parameter rate should be set")
+	if serviceLimit == nil || *serviceLimit == 0 {
+		return errors.New("parameter limit should be set")
 	}
 	return nil
 }
@@ -50,16 +50,16 @@ func main() {
 		logger.Fatalf("command options error %s\n", err)
 	}
 	// roomLimit is shared by all goroutines
-	roomLimit = ratelimit.New(*rate)
+	roomLimit = ratelimit.New(*serviceLimit)
 	logger.Printf(
-		"start task, redis_cluster=%s, room=%s, dryrun=%t, rate=%d\n",
-		*redisClusterAddr, *roomAddr, *dryRun, *rate)
+		"start task, redis_cluster=%s, room=%s, dryrun=%t, limit=%d\n",
+		*redisClusterAddr, *roomAddr, *dryRun, *serviceLimit)
 	opts := &redis.ClusterOptions{
 		Addrs: []string{*redisClusterAddr},
 	}
 	startTime := time.Now()
 	clusterClient := redis.NewClusterClient(opts)
-	err := clusterClient.ForEachSlave(context.TODO(), removeUserSegmentKeyFromRedis)
+	err := clusterClient.ForEachMaster(context.TODO(), removeUserSegmentKeyFromRedis)
 	if err != nil {
 		logger.Fatalf("process redis error %s\n", err)
 	}
@@ -70,7 +70,7 @@ func removeUserSegmentKeyFromRedis(ctx context.Context, client *redis.Client) er
 	serverAddr := client.Options().Addr
 	logPrefix := getServerLogPrefix(serverAddr)
 	logFileName := getLogFileName(serverAddr)
-	f, err := os.Open(logFileName)
+	f, err := os.Create(logFileName)
 	if err != nil {
 		return fmt.Errorf("open log file %s error %w", logFileName, err)
 	}
@@ -78,12 +78,12 @@ func removeUserSegmentKeyFromRedis(ctx context.Context, client *redis.Client) er
 	logger := log.New(f, logPrefix, log.LstdFlags)
 	roomClient := redis.NewClient(&redis.Options{Addr: *roomAddr})
 	startTime := time.Now()
-	limit := ratelimit.New(*rate)
+	limit := ratelimit.New(*serviceLimit)
 	var cursor uint64 = 0
 	totalKeyCount := 0
 	skipKeyCount := 0
 	processKeyCount := 0
-	logger.Printf("start to process, room server %s, dryrun %t rate %d\n", *roomAddr, *dryRun, *rate)
+	logger.Printf("start to process, room server %s, dryrun %t limit %d\n", *roomAddr, *dryRun, *serviceLimit)
 	for {
 		limit.Take()
 		logger.Printf("scan cursor %d\n", cursor)
@@ -95,7 +95,7 @@ func removeUserSegmentKeyFromRedis(ctx context.Context, client *redis.Client) er
 		for _, key := range keys {
 			if isUserSegmentKey(key) {
 				processKeyCount += 1
-				logger.Printf("perpare to process key: %s\n", key)
+				logger.Printf("prepare to process key: %s\n", key)
 				if *dryRun {
 					continue
 				}
