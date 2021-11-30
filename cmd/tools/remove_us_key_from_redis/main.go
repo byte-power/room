@@ -144,5 +144,5 @@ func isUserSegmentKey(key string) bool {
 		moduleName == "user_segment" &&
 		strings.HasPrefix(uidWithBraces, "{UU") &&
 		strings.HasSuffix(uidWithBraces, "}") &&
-		suffix == "data"
+		(suffix == "data" || suffix == "id")
 }

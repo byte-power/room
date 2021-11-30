@@ -163,24 +163,25 @@ func loadRoomDataModels(db *base.DBCluster, tableIndex int, startID string, coun
 }
 
 func processModel(db *base.DBCluster, limit ratelimit.Limiter, model *roomDataModelV2) (bool, error) {
-	key := findUserSegmentKey(model.Value)
-	if key == "" {
+	keys := findUserSegmentKeys(model.Value)
+	if len(keys) == 0 {
 		return false, nil
 	}
 	if *dryRun {
 		return true, nil
 	}
-	err := removeUserSegmentKeyFromDatabase(db, limit, model, key)
+	err := removeUserSegmentKeyFromDatabase(db, limit, model, keys)
 	return true, err
 }
 
-func findUserSegmentKey(values map[string]RedisValue) string {
+func findUserSegmentKeys(values map[string]RedisValue) []string {
+	keys := make([]string, 0)
 	for key := range values {
 		if isUserSegmentKey(key) {
-			return key
+			keys = append(keys, key)
 		}
 	}
-	return ""
+	return keys
 }
 
 func isUserSegmentKey(key string) bool {
@@ -196,15 +197,15 @@ func isUserSegmentKey(key string) bool {
 		moduleName == "user_segment" &&
 		strings.HasPrefix(uidWithBraces, "{UU") &&
 		strings.HasSuffix(uidWithBraces, "}") &&
-		suffix == "data"
+		(suffix == "data" || suffix == "id")
 }
 
-func removeUserSegmentKeyFromDatabase(db *base.DBCluster, limit ratelimit.Limiter, model *roomDataModelV2, key string) error {
+func removeUserSegmentKeyFromDatabase(db *base.DBCluster, limit ratelimit.Limiter, model *roomDataModelV2, keys []string) error {
 	var err error
 	retryTimes := 3
 	for i := 0; i < retryTimes; i++ {
 		limit.Take()
-		err = _removeUserSegmentKeyFromDatabase(db, model, key)
+		err = _removeUserSegmentKeyFromDatabase(db, model, keys)
 		if err == nil {
 			return nil
 		}
@@ -216,13 +217,20 @@ func removeUserSegmentKeyFromDatabase(db *base.DBCluster, limit ratelimit.Limite
 	return err
 }
 
-func _removeUserSegmentKeyFromDatabase(db *base.DBCluster, model *roomDataModelV2, key string) error {
+func _removeUserSegmentKeyFromDatabase(db *base.DBCluster, model *roomDataModelV2, keys []string) error {
 	query, err := db.Model(model)
 	if err != nil {
 		return err
 	}
 	currentTime := time.Now()
-	result, err := query.Set("value=value-?", key).
+	s := "value=value"
+	interfaceKeys := make([]interface{}, 0, len(keys))
+	for _, key := range keys {
+		s = s + "-?"
+		interfaceKeys = append(interfaceKeys, key)
+	}
+
+	result, err := query.Set(s, interfaceKeys...).
 		Set("updated_at=?", currentTime).
 		Set("version=?", model.Version+1).
 		WherePK().
