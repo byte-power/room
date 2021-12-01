@@ -186,18 +186,28 @@ func findUserSegmentKeys(values map[string]RedisValue) []string {
 
 func isUserSegmentKey(key string) bool {
 	parts := strings.Split(key, ":")
-	if len(parts) != 4 {
-		return false
+	if len(parts) == 4 {
+		appID := parts[0]
+		moduleName := parts[1]
+		uidWithBraces := parts[2]
+		suffix := parts[3]
+		return len(appID) == 7 &&
+			moduleName == "user_segment" &&
+			strings.HasPrefix(uidWithBraces, "{UU") &&
+			strings.HasSuffix(uidWithBraces, "}") &&
+			(suffix == "data" || suffix == "id" || suffix == "changes")
 	}
-	appID := parts[0]
-	moduleName := parts[1]
-	uidWithBraces := parts[2]
-	suffix := parts[3]
-	return len(appID) == 7 &&
-		moduleName == "user_segment" &&
-		strings.HasPrefix(uidWithBraces, "{UU") &&
-		strings.HasSuffix(uidWithBraces, "}") &&
-		(suffix == "data" || suffix == "id")
+	if len(parts) == 3 {
+		appIDWithBraces := parts[0]
+		moduleName := parts[1]
+		suffix := parts[2]
+		return len(appIDWithBraces) == 9 &&
+			strings.HasPrefix(appIDWithBraces, "{") &&
+			strings.HasSuffix(appIDWithBraces, "}") &&
+			moduleName == "user_segment" &&
+			suffix == "segment"
+	}
+	return false
 }
 
 func removeUserSegmentKeyFromDatabase(db *base.DBCluster, limit ratelimit.Limiter, model *roomDataModelV2, keys []string) error {
