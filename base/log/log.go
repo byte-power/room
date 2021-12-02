@@ -87,6 +87,10 @@ func Int(k string, v int) LogPair {
 	return LogPair{key: k, value: v}
 }
 
+func Int32(k string, v int32) LogPair {
+	return LogPair{key: k, value: v}
+}
+
 func Int64(k string, v int64) LogPair {
 	return LogPair{key: k, value: v}
 }
