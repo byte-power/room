@@ -14,6 +14,7 @@ require (
 	github.com/tidwall/redcon v1.4.0
 	go.uber.org/ratelimit v0.2.0
 	go.uber.org/zap v1.16.0
+	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4 // indirect
 	golang.org/x/tools v0.0.0-20201022035929-9cf592e881e9 // indirect
 	gopkg.in/alexcesaro/statsd.v2 v2.0.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
@@ -21,3 +22,5 @@ require (
 )
 
 replace github.com/go-redis/redis/v8 v8.4.3 => github.com/byte-power/redis/v8 v8.4.3
+
+replace github.com/vmihailenco/bufpool v0.1.11 => github.com/byte-power/bufpool v0.1.13
