@@ -137,6 +137,10 @@ var supportedCommands = map[string]NewCommandFunc{
 	"exec":    NewExecCommand,
 	"discard": NewDiscardCommand,
 	"unwatch": NewUnwatchCommand,
+
+	//script commands
+	"eval":    NewEvalCommand,
+	"evalsha": NewEvalShaCommand,
 }
 
 type RESPType string
@@ -376,7 +380,7 @@ func convertSliceToRESPData(slice []interface{}) RESPData {
 		case int, int8, int16, int32, int64:
 			value = append(value, RESPData{DataType: IntegerRespType, Value: reflect.ValueOf(v).Int()})
 		case uint, uint8, uint16, uint32, uint64:
-			value = append(value, RESPData{DataType: IntegerRespType, Value: reflect.ValueOf(v).Int()})
+			value = append(value, RESPData{DataType: IntegerRespType, Value: reflect.ValueOf(v).Uint()})
 		case error:
 			value = append(value, RESPData{DataType: ErrorRespType, Value: v})
 		case []interface{}:
