@@ -179,7 +179,7 @@ func (data RESPData) String() string {
 	return result
 }
 
-func convertErrorToRESPData(err error) RESPData {
+func ConvertErrorToRESPData(err error) RESPData {
 	if err == redis.Nil {
 		return RESPData{DataType: NilRespType, Value: nil}
 	}
@@ -271,7 +271,7 @@ func ParseCommand(args []string) (Commander, error) {
 func ExecuteCommand(redisCluster *redis.ClusterClient, command Commander) RESPData {
 	cmd := command.Cmd()
 	if err := redisCluster.Process(contextTODO, cmd); err != nil {
-		return convertErrorToRESPData(err)
+		return ConvertErrorToRESPData(err)
 	}
 
 	return convertCmdResultToRESPData(cmd)
@@ -308,28 +308,28 @@ func convertCmdResultToRESPData(cmd redis.Cmder) RESPData {
 	case *redis.StatusCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = RESPData{DataType: SimpleStringRespType, Value: r}
 		}
 	case *redis.IntCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = RESPData{DataType: IntegerRespType, Value: r}
 		}
 	case *redis.StringCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = RESPData{DataType: BulkStringRespType, Value: r}
 		}
 	case *redis.IntSliceCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = RESPData{DataType: ArrayRespType}
 			value := make([]RESPData, 0)
@@ -341,7 +341,7 @@ func convertCmdResultToRESPData(cmd redis.Cmder) RESPData {
 	case *redis.StringSliceCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = RESPData{DataType: ArrayRespType}
 			value := make([]RESPData, 0)
@@ -353,14 +353,14 @@ func convertCmdResultToRESPData(cmd redis.Cmder) RESPData {
 	case *redis.SliceCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = convertSliceToRESPData(r)
 		}
 	case *redis.CommandsInfoCmd:
 		r, err := command.Result()
 		if err != nil {
-			result = convertErrorToRESPData(err)
+			result = ConvertErrorToRESPData(err)
 		} else {
 			result = RESPData{DataType: ArrayRespType}
 			value := make([]RESPData, 0)
@@ -372,7 +372,7 @@ func convertCmdResultToRESPData(cmd redis.Cmder) RESPData {
 			result.Value = value
 		}
 	default:
-		result = convertErrorToRESPData(errors.New("ERR invalid response data format"))
+		result = ConvertErrorToRESPData(errors.New("ERR invalid response data format"))
 	}
 	return result
 }
@@ -395,7 +395,7 @@ func convertSliceToRESPData(slice []interface{}) RESPData {
 		case []interface{}:
 			value = append(value, convertSliceToRESPData(v))
 		default:
-			value = append(value, convertErrorToRESPData(errors.New("ERR: invalid response")))
+			value = append(value, ConvertErrorToRESPData(errors.New("ERR: invalid response")))
 		}
 	}
 	data.Value = value
