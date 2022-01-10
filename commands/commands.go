@@ -277,6 +277,19 @@ func ExecuteCommand(redisCluster *redis.ClusterClient, command Commander) RESPDa
 	return convertCmdResultToRESPData(cmd)
 }
 
+func ExecuteCommands(ctx context.Context, redisCluster *redis.ClusterClient, commands []Commander) []RESPData {
+	result := make([]RESPData, 0, len(commands))
+	pipeline := redisCluster.Pipeline()
+	for _, command := range commands {
+		pipeline.Process(ctx, command.Cmd())
+	}
+	cmds, _ := pipeline.Exec(ctx)
+	for _, cmd := range cmds {
+		result = append(result, convertCmdResultToRESPData(cmd))
+	}
+	return result
+}
+
 func ExtractHashTagFromKey(key string) string {
 	leftBraceIndex := strings.Index(key, "{")
 	if leftBraceIndex == -1 {
