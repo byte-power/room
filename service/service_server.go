@@ -137,95 +137,97 @@ func (service *RoomService) connAcceptErrorHandler(err error) {
 	service.logWithAddressAndPid(log.LevelError, "error.accept", log.Error(err))
 }
 
-func (service *RoomService) connServeHandler(conn redcon.Conn, cmd redcon.Command) {
+func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Command) {
 	serveStartTime := time.Now()
-	args := make([]string, len(cmd.Args))
-	for index, arg := range cmd.Args {
-		args[index] = string(arg)
-	}
-
-	redisCluster := service.dep.Redis
-	metric := service.dep.Metric
-	metric.MetricIncrease("process.command")
-	service.logWithAddressAndPid(
-		log.LevelDebug, "command.start",
-		log.String("command", strings.Join(args, " ")),
-		log.String("remote_addr", conn.RemoteAddr()),
-		log.String("local_addr", conn.NetConn().LocalAddr().String()),
-	)
-
-	// Parse command
-	command, err := commands.ParseCommand(args)
-	if err != nil {
-		metric.MetricIncrease("error.parse_command")
-		service.logWithAddressAndPid(
-			log.LevelError, "error.parse_command",
-			log.String("command", strings.Join(args, " ")),
-			log.Error(err))
-		conn.WriteError(err.Error())
-		return
-	}
-
-	// Pre Porcess related keys
-	if err = preProcessCommand(service.dep, command, serveStartTime); err != nil {
-		metric.MetricIncrease("error.pre_process")
-		service.logWithAddressAndPid(
-			log.LevelError, "error.pre_process",
-			log.String("command", command.String()),
-			log.Error(err),
-		)
-		conn.WriteError(err.Error())
-		return
-	}
-
-	transaction, err := getTransactionIfNeeded(service.dep, conn, command)
-	if err != nil {
-		metric.MetricIncrease("error.get_transaction")
-		service.logWithAddressAndPid(
-			log.LevelError, "error.get_transaction",
-			log.String("command", command.String()),
-			log.Error(err),
-		)
-		conn.WriteError(err.Error())
-		return
-	}
-
-	var result commands.RESPData
-	if transaction != nil {
-		metric.MetricIncrease("process.transaction")
-		startTime := time.Now()
-		result = transaction.Process(command)
-		if command.Name() == "exec" {
-			metric.MetricTimeDuration("process.transaction.duration", time.Since(startTime))
+	for _, cmd := range cmds {
+		args := make([]string, len(cmd.Args))
+		for index, arg := range cmd.Args {
+			args[index] = string(arg)
 		}
-		if transaction.IsClosed() {
-			transactionManager.removeTransaction(conn, commands.TransactionCloseReasonTxClosed)
-		}
-	} else {
-		metric.MetricIncrease("process.single_command")
-		startTime := time.Now()
-		result = commands.ExecuteCommand(redisCluster, command)
-		metric.MetricTimeDuration("process.single_connamd.duration", time.Since(startTime))
-	}
-	writeDataToConnection(conn, result)
-	startTime := time.Now()
-	if err := sendCommandEvents(command, serveStartTime); err != nil {
-		metric.MetricIncrease("error.send_event")
+
+		redisCluster := service.dep.Redis
+		metric := service.dep.Metric
+		metric.MetricIncrease("process.command")
 		service.logWithAddressAndPid(
-			log.LevelError, "error.send_event",
+			log.LevelDebug, "command.start",
 			log.String("command", strings.Join(args, " ")),
-			log.Error(err),
+			log.String("remote_addr", conn.RemoteAddr()),
+			log.String("local_addr", conn.NetConn().LocalAddr().String()),
 		)
+
+		// Parse command
+		command, err := commands.ParseCommand(args)
+		if err != nil {
+			metric.MetricIncrease("error.parse_command")
+			service.logWithAddressAndPid(
+				log.LevelError, "error.parse_command",
+				log.String("command", strings.Join(args, " ")),
+				log.Error(err))
+			conn.WriteError(err.Error())
+			return
+		}
+
+		// Pre Porcess related keys
+		if err = preProcessCommand(service.dep, command, serveStartTime); err != nil {
+			metric.MetricIncrease("error.pre_process")
+			service.logWithAddressAndPid(
+				log.LevelError, "error.pre_process",
+				log.String("command", command.String()),
+				log.Error(err),
+			)
+			conn.WriteError(err.Error())
+			return
+		}
+
+		transaction, err := getTransactionIfNeeded(service.dep, conn, command)
+		if err != nil {
+			metric.MetricIncrease("error.get_transaction")
+			service.logWithAddressAndPid(
+				log.LevelError, "error.get_transaction",
+				log.String("command", command.String()),
+				log.Error(err),
+			)
+			conn.WriteError(err.Error())
+			return
+		}
+
+		var result commands.RESPData
+		if transaction != nil {
+			metric.MetricIncrease("process.transaction")
+			startTime := time.Now()
+			result = transaction.Process(command)
+			if command.Name() == "exec" {
+				metric.MetricTimeDuration("process.transaction.duration", time.Since(startTime))
+			}
+			if transaction.IsClosed() {
+				transactionManager.removeTransaction(conn, commands.TransactionCloseReasonTxClosed)
+			}
+		} else {
+			metric.MetricIncrease("process.single_command")
+			startTime := time.Now()
+			result = commands.ExecuteCommand(redisCluster, command)
+			metric.MetricTimeDuration("process.single_connamd.duration", time.Since(startTime))
+		}
+		writeDataToConnection(conn, result)
+		startTime := time.Now()
+		if err := sendCommandEvents(command, serveStartTime); err != nil {
+			metric.MetricIncrease("error.send_event")
+			service.logWithAddressAndPid(
+				log.LevelError, "error.send_event",
+				log.String("command", strings.Join(args, " ")),
+				log.Error(err),
+			)
+		}
+		metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
+		duration := time.Since(serveStartTime)
+		service.logWithAddressAndPid(
+			log.LevelDebug, "command.end",
+			log.String("command", command.String()),
+			log.String("result", result.String()),
+			log.String("duration", duration.String()),
+		)
+		metric.MetricTimeDuration("process.command.duration", duration)
 	}
-	metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
-	duration := time.Since(serveStartTime)
-	service.logWithAddressAndPid(
-		log.LevelDebug, "command.end",
-		log.String("command", command.String()),
-		log.String("result", result.String()),
-		log.String("duration", duration.String()),
-	)
-	metric.MetricTimeDuration("process.command.duration", duration)
 }
 
 func isTransactionNeeded(command commands.Commander) bool {

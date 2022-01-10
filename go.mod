@@ -24,3 +24,5 @@ require (
 replace github.com/go-redis/redis/v8 v8.4.3 => github.com/byte-power/redis/v8 v8.4.3
 
 replace github.com/vmihailenco/bufpool v0.1.11 => github.com/byte-power/bufpool v0.1.13
+
+replace github.com/tidwall/redcon v1.4.0 => ../redcon
