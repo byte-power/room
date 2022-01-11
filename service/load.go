@@ -266,6 +266,12 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 	if err != nil {
 		return err
 	}
+	hashTagCacheService := base.GetHashTagLoadedCache()
+	_, loaded := hashTagCacheService.Get(tagName)
+	if loaded {
+		hashTagCacheService.Set(tagName, true, 0)
+		return hashTag.meta.UpdateAccessTime(accessTime, accessMode)
+	}
 	loadRetryTimes := base.GetServerConfig().LoadKey.GetRetryTimes()
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
@@ -276,6 +282,7 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 			return needToLoadErr
 		}
 		if !needToLoad {
+			hashTagCacheService.Set(tagName, true, 0)
 			return hashTag.meta.UpdateAccessTime(accessTime, accessMode)
 		}
 		startTime := time.Now()
@@ -298,6 +305,7 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 		if loaded {
 			recordLoadKeySuccess(dep.Logger, dep.Metric, tagName, time.Since(startTime), count)
 		}
+		hashTagCacheService.Set(tagName, true, 0)
 		return hashTag.meta.UpdateAccessTime(accessTime, accessMode)
 	}
 	return err

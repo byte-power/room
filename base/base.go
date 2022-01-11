@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/patrickmn/go-cache"
 )
 
 var serverDependency Dependency
@@ -17,6 +18,7 @@ var taskDependency Dependency
 var collectEventDependency CollectEventDependency
 
 var hashTagEventService *HashTagEventService
+var hashTagLoadedCache *cache.Cache
 
 var serverConfig *RoomServerConfig
 var taskConfig *RoomTaskConfig
@@ -79,6 +81,8 @@ func InitRoomServer(configPath string) error {
 	if err != nil {
 		return err
 	}
+
+	hashTagLoadedCache = cache.New(serverConfig.LoadKey.GetCacheDuration(), serverConfig.LoadKey.GetCacheCheckInterval())
 
 	logger.Info(
 		"init room server service",
@@ -165,6 +169,10 @@ func InitCollectEvent(configPath string) error {
 
 func GetHashTagEventService() *HashTagEventService {
 	return hashTagEventService
+}
+
+func GetHashTagLoadedCache() *cache.Cache {
+	return hashTagLoadedCache
 }
 
 func GetServerConfig() *RoomServerConfig {
