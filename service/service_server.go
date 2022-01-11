@@ -139,95 +139,108 @@ func (service *RoomService) connAcceptErrorHandler(err error) {
 
 func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Command) {
 	serveStartTime := time.Now()
+
+	redisCluster := service.dep.Redis
+	metric := service.dep.Metric
+
+	cmdCount := len(cmds)
+	toBeExecutedCommands := make([]commands.Commander, 0, cmdCount)
+	allCommands := make([]commands.Commander, 0, cmdCount)
+	results := make([]commands.RESPData, 0, cmdCount)
+
+	metric.MetricCount("process.command", cmdCount)
+
 	for _, cmd := range cmds {
-		args := make([]string, len(cmd.Args))
-		for index, arg := range cmd.Args {
-			args[index] = string(arg)
-		}
-
-		redisCluster := service.dep.Redis
-		metric := service.dep.Metric
-		metric.MetricIncrease("process.command")
-		service.logWithAddressAndPid(
-			log.LevelDebug, "command.start",
-			log.String("command", strings.Join(args, " ")),
-			log.String("remote_addr", conn.RemoteAddr()),
-			log.String("local_addr", conn.NetConn().LocalAddr().String()),
-		)
-
-		// Parse command
-		command, err := commands.ParseCommand(args)
+		command, err := service.preProcessCommand(cmd, serveStartTime)
 		if err != nil {
-			metric.MetricIncrease("error.parse_command")
-			service.logWithAddressAndPid(
-				log.LevelError, "error.parse_command",
-				log.String("command", strings.Join(args, " ")),
-				log.Error(err))
-			conn.WriteError(err.Error())
-			return
-		}
-
-		// Pre Porcess related keys
-		if err = preProcessCommand(service.dep, command, serveStartTime); err != nil {
 			metric.MetricIncrease("error.pre_process")
 			service.logWithAddressAndPid(
 				log.LevelError, "error.pre_process",
 				log.String("command", command.String()),
 				log.Error(err),
 			)
-			conn.WriteError(err.Error())
-			return
+			results = append(results, commands.ConvertErrorToRESPData(err))
+			continue
 		}
 
-		transaction, err := getTransactionIfNeeded(service.dep, conn, command)
-		if err != nil {
-			metric.MetricIncrease("error.get_transaction")
-			service.logWithAddressAndPid(
-				log.LevelError, "error.get_transaction",
-				log.String("command", command.String()),
-				log.Error(err),
-			)
-			conn.WriteError(err.Error())
-			return
-		}
-
-		var result commands.RESPData
+		allCommands = append(allCommands, command)
+		transaction := getTransactionIfNeeded(service.dep, conn, command)
 		if transaction != nil {
+			results = append(results, commands.ExecuteCommands(context.TODO(), redisCluster, toBeExecutedCommands)...)
+			toBeExecutedCommands = nil
 			metric.MetricIncrease("process.transaction")
 			startTime := time.Now()
-			result = transaction.Process(command)
-			if command.Name() == "exec" {
-				metric.MetricTimeDuration("process.transaction.duration", time.Since(startTime))
-			}
+			results = append(results, transaction.Process(command))
 			if transaction.IsClosed() {
 				transactionManager.removeTransaction(conn, commands.TransactionCloseReasonTxClosed)
+				metric.MetricTimeDuration(fmt.Sprintf("process.transaction.by_%s.duration", command.Name()), time.Since(startTime))
 			}
 		} else {
-			metric.MetricIncrease("process.single_command")
-			startTime := time.Now()
-			result = commands.ExecuteCommand(redisCluster, command)
-			metric.MetricTimeDuration("process.single_connamd.duration", time.Since(startTime))
+			toBeExecutedCommands = append(toBeExecutedCommands, command)
 		}
+	}
+	results = append(results, commands.ExecuteCommands(context.TODO(), redisCluster, toBeExecutedCommands)...)
+	for _, result := range results {
 		writeDataToConnection(conn, result)
-		startTime := time.Now()
+	}
+	service.sendEvents(allCommands, serveStartTime)
+	service.recordCommands(allCommands, results, serveStartTime)
+}
+
+func (service *RoomService) preProcessCommand(cmd redcon.Command, serveStartTime time.Time) (commands.Commander, error) {
+	args := make([]string, 0, len(cmd.Args))
+	for _, arg := range cmd.Args {
+		args = append(args, string(arg))
+	}
+
+	// Parse command
+	command, err := commands.ParseCommand(args)
+	if err != nil {
+		return nil, err
+	}
+
+	// Pre Porcess related keys
+	if err = preProcessCommand(service.dep, command, serveStartTime); err != nil {
+		return nil, err
+	}
+	return command, nil
+}
+
+func (service *RoomService) sendEvents(cmds []commands.Commander, serveStartTime time.Time) {
+	startTime := time.Now()
+	metric := service.dep.Metric
+	for _, command := range cmds {
 		if err := sendCommandEvents(command, serveStartTime); err != nil {
 			metric.MetricIncrease("error.send_event")
 			service.logWithAddressAndPid(
 				log.LevelError, "error.send_event",
-				log.String("command", strings.Join(args, " ")),
+				log.String("command", command.String()),
 				log.Error(err),
 			)
 		}
-		metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
-		duration := time.Since(serveStartTime)
+	}
+	metric.MetricTimeDuration("process.send_event.duration", time.Since(startTime))
+}
+
+func (service *RoomService) recordCommands(cmds []commands.Commander, results []commands.RESPData, serveStartTime time.Time) {
+	duration := time.Since(serveStartTime)
+	if service.config.IsDebug {
+		commandsStrSlice := make([]string, 0, len(cmds))
+		for _, command := range cmds {
+			commandsStrSlice = append(commandsStrSlice, command.String())
+		}
+		resultsStrSlice := make([]string, 0, len(results))
+		for _, result := range results {
+			resultsStrSlice = append(resultsStrSlice, result.String())
+		}
 		service.logWithAddressAndPid(
-			log.LevelDebug, "command.end",
-			log.String("command", command.String()),
-			log.String("result", result.String()),
+			log.LevelDebug, "commands.end",
+			log.String("commands", strings.Join(commandsStrSlice, " ")),
+			log.String("results", strings.Join(resultsStrSlice, " ")),
 			log.String("duration", duration.String()),
 		)
-		metric.MetricTimeDuration("process.command.duration", duration)
 	}
+	service.dep.Metric.MetricTimeDuration("process.commands.duration", duration)
 }
 
 func isTransactionNeeded(command commands.Commander) bool {
@@ -254,7 +267,7 @@ func preProcessCommand(dep base.Dependency, command commands.Commander, accessTi
 	return nil
 }
 
-func getTransactionIfNeeded(dep base.Dependency, conn redcon.Conn, command commands.Commander) (*commands.Transaction, error) {
+func getTransactionIfNeeded(dep base.Dependency, conn redcon.Conn, command commands.Commander) *commands.Transaction {
 	logger := dep.Logger
 	metric := dep.Metric
 	transaction := transactionManager.getTransaction(conn)
@@ -271,7 +284,7 @@ func getTransactionIfNeeded(dep base.Dependency, conn redcon.Conn, command comma
 			)
 		}
 	}
-	return transaction, nil
+	return transaction
 }
 
 func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {

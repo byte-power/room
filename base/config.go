@@ -67,6 +67,7 @@ func (config Config) check() error {
 
 type RoomServerConfig struct {
 	EnablePProf         bool                      `yaml:"enable_pprof"`
+	IsDebug             bool                      `yaml:"is_debug"`
 	Log                 map[string]interface{}    `yaml:"log"`
 	Metric              MetricConfig              `yaml:"metric"`
 	LoadKey             LoadKeyConfig             `yaml:"load_key"`

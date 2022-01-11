@@ -1,5 +1,6 @@
 server:
   enable_pprof: true
+  is_debug: true
 
   log:
     console:
