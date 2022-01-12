@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/go-redis/redis/v8"
@@ -277,15 +278,37 @@ func ExecuteCommand(redisCluster *redis.ClusterClient, command Commander) RESPDa
 	return convertCmdResultToRESPData(cmd)
 }
 
-func ExecuteCommands(ctx context.Context, redisCluster *redis.ClusterClient, commands []Commander) []RESPData {
-	result := make([]RESPData, 0, len(commands))
+type CommandOrderSet struct {
+	cmds map[int]Commander
+}
+
+func NewCommandOrderSet() CommandOrderSet {
+	return CommandOrderSet{cmds: make(map[int]Commander)}
+}
+
+func (c CommandOrderSet) getSortedIndexes() []int {
+	indexes := make([]int, 0, len(c.cmds))
+	for index := range c.cmds {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	return indexes
+}
+
+func (c CommandOrderSet) AddCommand(index int, cmd Commander) {
+	c.cmds[index] = cmd
+}
+
+func (c CommandOrderSet) Execute(ctx context.Context, redisCluster *redis.ClusterClient) map[int]RESPData {
+	indexes := c.getSortedIndexes()
+	result := make(map[int]RESPData, len(c.cmds))
 	pipeline := redisCluster.Pipeline()
-	for _, command := range commands {
-		pipeline.Process(ctx, command.Cmd())
+	for _, index := range indexes {
+		pipeline.Process(ctx, c.cmds[index].Cmd())
 	}
 	cmds, _ := pipeline.Exec(ctx)
-	for _, cmd := range cmds {
-		result = append(result, convertCmdResultToRESPData(cmd))
+	for i, index := range indexes {
+		result[index] = convertCmdResultToRESPData(cmds[i])
 	}
 	return result
 }

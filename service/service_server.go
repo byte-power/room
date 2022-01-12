@@ -144,13 +144,13 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 	metric := service.dep.Metric
 
 	cmdCount := len(cmds)
-	toBeExecutedCommands := make([]commands.Commander, 0, cmdCount)
+	toBeExecutedCommands := commands.NewCommandOrderSet()
 	allCommands := make([]commands.Commander, 0, cmdCount)
-	results := make([]commands.RESPData, 0, cmdCount)
+	results := make([]commands.RESPData, cmdCount)
 
-	metric.MetricCount("process.command", cmdCount)
+	metric.MetricCount("receive.command", cmdCount)
 
-	for _, cmd := range cmds {
+	for index, cmd := range cmds {
 		command, err := service.preProcessCommand(cmd, serveStartTime)
 		if err != nil {
 			metric.MetricIncrease("error.pre_process")
@@ -159,27 +159,33 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 				log.String("command", command.String()),
 				log.Error(err),
 			)
-			results = append(results, commands.ConvertErrorToRESPData(err))
+			results[index] = commands.ConvertErrorToRESPData(err)
 			continue
 		}
 
 		allCommands = append(allCommands, command)
 		transaction := getTransactionIfNeeded(service.dep, conn, command)
 		if transaction != nil {
-			results = append(results, commands.ExecuteCommands(context.TODO(), redisCluster, toBeExecutedCommands)...)
-			toBeExecutedCommands = nil
-			metric.MetricIncrease("process.transaction")
+			resultMap := toBeExecutedCommands.Execute(context.TODO(), redisCluster)
+			for index, result := range resultMap {
+				results[index] = result
+			}
+			toBeExecutedCommands = commands.NewCommandOrderSet()
 			startTime := time.Now()
-			results = append(results, transaction.Process(command))
+			results[index] = transaction.Process(command)
 			if transaction.IsClosed() {
 				transactionManager.removeTransaction(conn, commands.TransactionCloseReasonTxClosed)
+				metric.MetricIncrease(fmt.Sprintf("process.transaction.by_%s", command.Name()))
 				metric.MetricTimeDuration(fmt.Sprintf("process.transaction.by_%s.duration", command.Name()), time.Since(startTime))
 			}
 		} else {
-			toBeExecutedCommands = append(toBeExecutedCommands, command)
+			toBeExecutedCommands.AddCommand(index, command)
 		}
 	}
-	results = append(results, commands.ExecuteCommands(context.TODO(), redisCluster, toBeExecutedCommands)...)
+	resultMap := toBeExecutedCommands.Execute(context.TODO(), redisCluster)
+	for index, result := range resultMap {
+		results[index] = result
+	}
 	for _, result := range results {
 		writeDataToConnection(conn, result)
 	}
