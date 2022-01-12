@@ -156,7 +156,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 			metric.MetricIncrease("error.pre_process")
 			service.logWithAddressAndPid(
 				log.LevelError, "error.pre_process",
-				log.String("command", command.String()),
+				log.String("command", string(cmd.Raw)),
 				log.Error(err),
 			)
 			results[index] = commands.ConvertErrorToRESPData(err)

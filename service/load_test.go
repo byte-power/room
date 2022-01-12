@@ -82,11 +82,17 @@ func testSetMetaKeyCleaned(hashTag string) {
 	redisCluster.Del(context.TODO(), metaKey)
 }
 
+func testCleanLocalloadedCache(hashTag string) {
+	cacheService := base.GetHashTagLoadedCache()
+	cacheService.Delete(hashTag)
+}
+
 func TestLoadKeyNotExist(t *testing.T) {
 	hashTag := "a"
 	currentTime := time.Now()
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
+	testCleanLocalloadedCache(hashTag)
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
@@ -148,6 +154,7 @@ func TestLoadKeyString(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	// load data
+	testCleanLocalloadedCache(hashTag)
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
@@ -229,6 +236,7 @@ func TestLoadKeyList(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
+	testCleanLocalloadedCache(hashTag)
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
@@ -309,6 +317,7 @@ func TestLoadKeyHash(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
+	testCleanLocalloadedCache(hashTag)
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
@@ -387,6 +396,7 @@ func TestLoadKeySet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
+	testCleanLocalloadedCache(hashTag)
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
@@ -476,6 +486,7 @@ func TestLoadKeyZSet(t *testing.T) {
 	testInsertRoomData(hashTag, value)
 	testSetMetaKeyCleaned(hashTag)
 
+	testCleanLocalloadedCache(hashTag)
 	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 

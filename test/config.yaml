@@ -1,5 +1,6 @@
 server:
   enable_pprof: true
+  is_debug: true
 
   log:
     console:
@@ -13,6 +14,8 @@ server:
     retry_times: 5
     retry_interval: "2ms"
     load_timeout: "2000ms"
+    cache_duration: "30m"
+    cache_check_interval: "1m"
 
   hash_tag_event_service:
     event_report:
@@ -23,7 +26,7 @@ server:
       request_worker_count: 3
       request_conn_keep_alive_interval: "30s"
       request_idle_conn_timeout: "90s"
-      request_max_conn: 100
+      request_max_conn: 2
     agg_interval : "1m"
     buffer_limit: 10240000
     monitor_interval: "15s"
@@ -34,8 +37,8 @@ server:
       - "127.0.0.1:30002"
       - "127.0.0.1:30003"
 
-    pool_size: 600
-    min_idle_conns: 300
+    pool_size: 10
+    min_idle_conns: 0
     dial_timeout_ms: 1000
     pool_timeout_ms: 1000
     idle_timeout_second: 14400
@@ -48,11 +51,11 @@ server:
     idle_check_frequency_second: 60
 
   db_cluster:
-    sharding_count: 5
+    sharding_count: 2
     shardings:
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
+      - url: postgres://room:room123@127.0.0.1:5432/room_dev?sslmode=disable
+        pool_size: 10
+        min_idle_conns: 0
         dial_timeout_ms: 1000
         pool_timeout_ms: 1000
         idle_timeout_second: 14400
@@ -66,23 +69,6 @@ server:
 
         start_index: 0
         end_index: 1
-
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 2
-        end_index: 4
 
 collect_event:
   metric:
@@ -95,23 +81,33 @@ collect_event:
 
   buffer_limit: 10240000
   monitor_interval: "15s"
+  agg_interval: "10m"
+  server_shutdown_timeout_seconds: 5
+
   server:
     url: "127.0.0.1:8080"
     read_timeout_ms: 1000
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
-  save_event:
+
+  save_db:
     retry_times: 3
     retry_interval_ms: 20
     timeout_ms: 2000
-    worker_count: 2
+    file_age: "5m"
+    rate_limit_per_second: 100
+
+  save_file:
+    max_event_count: 1000
+    max_file_age: "10m"
+    file_directory: "/Users/zhoufeng/work/work/room/data"
 
   db_cluster:
-    sharding_count: 5
+    sharding_count: 2
     shardings:
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
+      - url: postgres://room:room123@127.0.0.1:5432/room_dev?sslmode=disable
+        pool_size: 10
+        min_idle_conns: 0
         dial_timeout_ms: 1000
         pool_timeout_ms: 1000
         idle_timeout_second: 14400
@@ -125,23 +121,6 @@ collect_event:
 
         start_index: 0
         end_index: 1
-
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 2
-        end_index: 4
 
 task:
   log:
@@ -158,8 +137,8 @@ task:
       - "127.0.0.1:30002"
       - "127.0.0.1:30003"
 
-    pool_size: 600
-    min_idle_conns: 300
+    pool_size: 10
+    min_idle_conns: 0
     dial_timeout_ms: 1000
     pool_timeout_ms: 1000
     idle_timeout_second: 14400
@@ -172,11 +151,11 @@ task:
     idle_check_frequency_second: 60
 
   db_cluster:
-    sharding_count: 5
+    sharding_count: 2
     shardings:
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
+      - url: postgres://room:room123@127.0.0.1:5432/room_dev?sslmode=disable
+        pool_size: 10
+        min_idle_conns: 0
         dial_timeout_ms: 1000
         pool_timeout_ms: 1000
         idle_timeout_second: 14400
@@ -191,22 +170,6 @@ task:
         start_index: 0
         end_index: 1
 
-      - url: postgres://root:root123@127.0.0.1:5433/room_service?sslmode=disable
-        pool_size: 100
-        min_idle_conns: 10
-        dial_timeout_ms: 1000
-        pool_timeout_ms: 1000
-        idle_timeout_second: 14400
-        read_timeout_ms: 100
-        write_timeout_ms: 100
-        max_retries: 5
-        min_retry_backoff_ms: 1
-        max_retry_backoff_ms: 5
-        max_conn_age_second: 3600
-        idle_check_frequency_second: 60
-
-        start_index: 2
-        end_index: 4
 
   coordinator:
     name: "room_sync"
