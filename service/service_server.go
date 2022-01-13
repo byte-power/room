@@ -160,6 +160,11 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 				log.Error(err),
 			)
 			results[index] = commands.ConvertErrorToRESPData(err)
+			transaction := transactionManager.getTransaction(conn)
+			if transaction != nil {
+				metric.MetricIncrease("error.in_transaction")
+				transactionManager.removeTransaction(conn, commands.TransactionCloseReasonInvalidCommand)
+			}
 			continue
 		}
 

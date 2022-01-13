@@ -13,6 +13,7 @@ type TransactionCloseReason string
 const (
 	TransactionCloseReasonTxClosed                 TransactionCloseReason = "transaction is closed"
 	TransactionCloseReasonConnClosed               TransactionCloseReason = "connection is closed"
+	TransactionCloseReasonInvalidCommand           TransactionCloseReason = "command is invalid"
 	TransactionCloseReasonDiscard                  TransactionCloseReason = "execute discard command"
 	TransactionCloseReasonUnwatch                  TransactionCloseReason = "execute unwatch command"
 	TransactionCloseReasonExec                     TransactionCloseReason = "execute exec command"
@@ -292,7 +293,7 @@ func NewExecCommand(args []string) (Commander, error) {
 }
 
 func (command *ExecCommand) Cmd() redis.Cmder {
-	return redis.NewCmd(contextTODO, command.name)
+	return redis.NewSliceCmd(contextTODO, command.name)
 }
 
 type DiscardCommand struct {
