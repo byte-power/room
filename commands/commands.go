@@ -278,15 +278,15 @@ func ExecuteCommand(redisCluster *redis.ClusterClient, command Commander) RESPDa
 	return convertCmdResultToRESPData(cmd)
 }
 
-type CommandOrderSet struct {
+type CommandBatch struct {
 	cmds map[int]Commander
 }
 
-func NewCommandOrderSet() CommandOrderSet {
-	return CommandOrderSet{cmds: make(map[int]Commander)}
+func NewCommandBatch() CommandBatch {
+	return CommandBatch{cmds: make(map[int]Commander)}
 }
 
-func (c CommandOrderSet) getSortedIndexes() []int {
+func (c CommandBatch) getSortedIndexes() []int {
 	indexes := make([]int, 0, len(c.cmds))
 	for index := range c.cmds {
 		indexes = append(indexes, index)
@@ -295,11 +295,11 @@ func (c CommandOrderSet) getSortedIndexes() []int {
 	return indexes
 }
 
-func (c CommandOrderSet) AddCommand(index int, cmd Commander) {
+func (c CommandBatch) AddCommand(index int, cmd Commander) {
 	c.cmds[index] = cmd
 }
 
-func (c CommandOrderSet) Execute(ctx context.Context, redisCluster *redis.ClusterClient) map[int]RESPData {
+func (c CommandBatch) Execute(ctx context.Context, redisCluster *redis.ClusterClient) map[int]RESPData {
 	indexes := c.getSortedIndexes()
 	result := make(map[int]RESPData, len(c.cmds))
 	pipeline := redisCluster.Pipeline()

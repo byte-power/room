@@ -144,7 +144,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 	metric := service.dep.Metric
 
 	cmdCount := len(cmds)
-	toBeExecutedCommands := commands.NewCommandOrderSet()
+	toBeExecutedCommandBatch := commands.NewCommandBatch()
 	allCommands := make([]commands.Commander, 0, cmdCount)
 	results := make([]commands.RESPData, cmdCount)
 
@@ -166,11 +166,11 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 		allCommands = append(allCommands, command)
 		transaction := getTransactionIfNeeded(service.dep, conn, command)
 		if transaction != nil {
-			resultMap := toBeExecutedCommands.Execute(context.TODO(), redisCluster)
+			resultMap := toBeExecutedCommandBatch.Execute(context.TODO(), redisCluster)
 			for index, result := range resultMap {
 				results[index] = result
 			}
-			toBeExecutedCommands = commands.NewCommandOrderSet()
+			toBeExecutedCommandBatch = commands.NewCommandBatch()
 			startTime := time.Now()
 			results[index] = transaction.Process(command)
 			if transaction.IsClosed() {
@@ -179,10 +179,10 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 				metric.MetricTimeDuration(fmt.Sprintf("process.transaction.by_%s.duration", command.Name()), time.Since(startTime))
 			}
 		} else {
-			toBeExecutedCommands.AddCommand(index, command)
+			toBeExecutedCommandBatch.AddCommand(index, command)
 		}
 	}
-	resultMap := toBeExecutedCommands.Execute(context.TODO(), redisCluster)
+	resultMap := toBeExecutedCommandBatch.Execute(context.TODO(), redisCluster)
 	for index, result := range resultMap {
 		results[index] = result
 	}
