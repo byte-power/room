@@ -7,6 +7,8 @@ github.com/byte-power/bufpool v0.1.13 h1:O0k+U2JnU1vFjX0haOOpSj/FDBr0GbMZAdObhK3
 github.com/byte-power/bufpool v0.1.13/go.mod h1:AFf/MOy3l2CFTKbxwt0mp2MwnqjNEs5H/UxrkA5jxTQ=
 github.com/byte-power/gorich v1.0.5 h1:ZOlB4lHhw4sPo2EYZaDpXxcTC4PuxPL/2u/AurV8pBQ=
 github.com/byte-power/gorich v1.0.5/go.mod h1:NYYsMne80C3zKG0EGaBPdz2vFQ6Nj7ptlpqn6pP1+Zo=
+github.com/byte-power/redcon v1.4.4 h1:P+e2rAc/sG4rhD5SvbI+645o2sIeBGbxyVS5FB6iaO8=
+github.com/byte-power/redcon v1.4.4/go.mod h1:d3d1wXkiW7bDizXaHqEiHrh3RWvCNVu51Ix6YN0B5aA=
 github.com/byte-power/redis/v8 v8.4.3 h1:EzDoREl7WQESwajFzBkmUDax3IK3z4RDOLe06Q498qg=
 github.com/byte-power/redis/v8 v8.4.3/go.mod h1:A1tbYoHSa1fXwN+//ljcCYYJeLmVrwL9hbQN45Jdy0M=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=

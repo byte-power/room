@@ -12,7 +12,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.6.1
-	github.com/tidwall/redcon v1.4.0
+	github.com/tidwall/redcon v1.4.4
 	go.uber.org/ratelimit v0.2.0
 	go.uber.org/zap v1.16.0
 	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4 // indirect
@@ -26,4 +26,4 @@ replace github.com/go-redis/redis/v8 v8.4.3 => github.com/byte-power/redis/v8 v8
 
 replace github.com/vmihailenco/bufpool v0.1.11 => github.com/byte-power/bufpool v0.1.13
 
-replace github.com/tidwall/redcon v1.4.0 => ../redcon
+replace github.com/tidwall/redcon v1.4.4 => github.com/byte-power/redcon v1.4.4
