@@ -149,6 +149,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 	results := make([]commands.RESPData, cmdCount)
 
 	metric.MetricCount("receive.command", cmdCount)
+	metric.MetricGauge("command.batch.total", cmdCount)
 
 	for index, cmd := range cmds {
 		command, err := service.preProcessCommand(cmd, serveStartTime)
