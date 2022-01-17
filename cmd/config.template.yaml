@@ -1,5 +1,6 @@
 server:
   enable_pprof: true
+  is_debug: true
 
   log:
     console:
@@ -13,6 +14,8 @@ server:
     retry_times: 5
     retry_interval: "2ms"
     load_timeout: "2000ms"
+    cache_duration: "30m"
+    cache_check_interval: "1m"
 
   hash_tag_event_service:
     event_report:

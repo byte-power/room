@@ -13,6 +13,7 @@ type TransactionCloseReason string
 const (
 	TransactionCloseReasonTxClosed                 TransactionCloseReason = "transaction is closed"
 	TransactionCloseReasonConnClosed               TransactionCloseReason = "connection is closed"
+	TransactionCloseReasonInvalidCommand           TransactionCloseReason = "command is invalid"
 	TransactionCloseReasonDiscard                  TransactionCloseReason = "execute discard command"
 	TransactionCloseReasonUnwatch                  TransactionCloseReason = "execute unwatch command"
 	TransactionCloseReasonExec                     TransactionCloseReason = "execute exec command"
@@ -83,13 +84,13 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR WATCH inside MULTI is not allowed")}
 	}
 	if len(keys) == 0 {
-		return convertErrorToRESPData(newWrongNumberOfArgumentsError("watch"))
+		return ConvertErrorToRESPData(newWrongNumberOfArgumentsError("watch"))
 	}
 
 	if transaction.tx != nil {
 		if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.watchedKeys, keys...)...) {
 			if err := transaction.reset(TransactionCloseReasonResetInWatch, TransactionStatusInited); err != nil {
-				return convertErrorToRESPData(err)
+				return ConvertErrorToRESPData(err)
 			}
 		}
 	}
@@ -100,13 +101,13 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 			if err == errTxKeysNotInSameSlot {
 				transaction.Close(TransactionCloseReasonWatchedKeysNotInSameSlot)
 			}
-			return convertErrorToRESPData(err)
+			return ConvertErrorToRESPData(err)
 		}
 		transaction.tx = tx
 	}
 
 	if _, err := transaction.tx.Watch(contextTODO, keys...).Result(); err != nil {
-		return convertErrorToRESPData(err)
+		return ConvertErrorToRESPData(err)
 	}
 	transaction.watchedKeys = append(transaction.watchedKeys, keys...)
 	transaction.status = TransactionStatusInited
@@ -127,13 +128,13 @@ func (transaction *Transaction) addCommand(command Commander) RESPData {
 
 func (transaction *Transaction) exec() RESPData {
 	if !transaction.isStarted() {
-		return convertErrorToRESPData(errors.New("ERR EXEC without MULTI"))
+		return ConvertErrorToRESPData(errors.New("ERR EXEC without MULTI"))
 	}
 	defer func() {
 		transaction.Close(TransactionCloseReasonExec)
 	}()
 	if !redis.AreKeysInSameSlot(transaction.keys...) {
-		return convertErrorToRESPData(errTxKeysNotInSameSlot)
+		return ConvertErrorToRESPData(errTxKeysNotInSameSlot)
 	}
 	if len(transaction.watchedKeys) != 0 && !redis.AreKeysInSameSlot(append(transaction.keys, transaction.watchedKeys...)...) {
 		if transaction.tx != nil {
@@ -148,7 +149,7 @@ func (transaction *Transaction) exec() RESPData {
 	if transaction.tx == nil {
 		tx, err := newRedisTransaction(transaction.dep.Redis, transaction.keys...)
 		if err != nil {
-			return convertErrorToRESPData(err)
+			return ConvertErrorToRESPData(err)
 		}
 		transaction.tx = tx
 	}
@@ -156,13 +157,13 @@ func (transaction *Transaction) exec() RESPData {
 	pipeline := transaction.tx.TxPipeline()
 	for _, cmd := range transaction.commands {
 		if err := pipeline.Process(contextTODO, cmd); err != nil {
-			return convertErrorToRESPData(err)
+			return ConvertErrorToRESPData(err)
 		}
 	}
 
 	commands, err := pipeline.Exec(contextTODO)
 	if err != nil {
-		return convertErrorToRESPData(err)
+		return ConvertErrorToRESPData(err)
 	}
 
 	result := RESPData{DataType: ArrayRespType}
@@ -196,10 +197,10 @@ func (transaction *Transaction) Status() TransactionStatus {
 
 func (transaction *Transaction) discard() RESPData {
 	if !transaction.isStarted() {
-		return convertErrorToRESPData(errors.New("ERR DISCARD without MULTI"))
+		return ConvertErrorToRESPData(errors.New("ERR DISCARD without MULTI"))
 	}
 	if err := transaction.Close(TransactionCloseReasonDiscard); err != nil {
-		return convertErrorToRESPData(err)
+		return ConvertErrorToRESPData(err)
 	}
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
@@ -210,7 +211,7 @@ func (transaction *Transaction) unwatch() RESPData {
 		return transaction.addCommand(command)
 	}
 	if err := transaction.Close(TransactionCloseReasonUnwatch); err != nil {
-		return convertErrorToRESPData(err)
+		return ConvertErrorToRESPData(err)
 	}
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
@@ -292,7 +293,7 @@ func NewExecCommand(args []string) (Commander, error) {
 }
 
 func (command *ExecCommand) Cmd() redis.Cmder {
-	return redis.NewCmd(contextTODO, command.name)
+	return redis.NewSliceCmd(contextTODO, command.name)
 }
 
 type DiscardCommand struct {

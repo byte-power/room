@@ -67,6 +67,7 @@ func (config Config) check() error {
 
 type RoomServerConfig struct {
 	EnablePProf         bool                      `yaml:"enable_pprof"`
+	IsDebug             bool                      `yaml:"is_debug"`
 	Log                 map[string]interface{}    `yaml:"log"`
 	Metric              MetricConfig              `yaml:"metric"`
 	LoadKey             LoadKeyConfig             `yaml:"load_key"`
@@ -118,6 +119,18 @@ func (config *RoomServerConfig) init() error {
 	}
 	config.LoadKey.loadTimeout = d
 
+	d, err = time.ParseDuration(config.LoadKey.RawCacheDuration)
+	if err != nil {
+		return fmt.Errorf("load_key.cache_duration=%s is invalid %w", config.LoadKey.RawCacheDuration, err)
+	}
+	config.LoadKey.cacheDuration = d
+
+	d, err = time.ParseDuration(config.LoadKey.RawCacheCheckInterval)
+	if err != nil {
+		return fmt.Errorf("load_key.cache_check_interval=%s is invalid %w", config.LoadKey.RawCacheCheckInterval, err)
+	}
+	config.LoadKey.cacheCheckInterval = d
+
 	d, err = time.ParseDuration(config.HashTagEventService.RawAggInterval)
 	if err != nil {
 		return fmt.Errorf("hash_tag_event_service.agg_interval.%w", err)
@@ -158,11 +171,15 @@ func (config *RoomServerConfig) init() error {
 }
 
 type LoadKeyConfig struct {
-	RetryTimes       int    `yaml:"retry_times"`
-	RawRetryInterval string `yaml:"retry_interval"`
-	RawLoadTimeout   string `yaml:"load_timeout"`
-	loadTimeout      time.Duration
-	retryInterval    time.Duration
+	RetryTimes            int    `yaml:"retry_times"`
+	RawRetryInterval      string `yaml:"retry_interval"`
+	RawLoadTimeout        string `yaml:"load_timeout"`
+	RawCacheDuration      string `yaml:"cache_duration"`
+	RawCacheCheckInterval string `yaml:"cache_check_interval"`
+	loadTimeout           time.Duration
+	retryInterval         time.Duration
+	cacheDuration         time.Duration
+	cacheCheckInterval    time.Duration
 }
 
 func (config LoadKeyConfig) check() error {
@@ -183,6 +200,20 @@ func (config LoadKeyConfig) check() error {
 	if d <= 0 {
 		return fmt.Errorf("load_timeout=%s, duration should be positive", config.RawLoadTimeout)
 	}
+	d, err = time.ParseDuration(config.RawCacheDuration)
+	if err != nil {
+		return fmt.Errorf("cache_duration=%s, should be in valid duration format", config.RawCacheDuration)
+	}
+	if d <= 0 {
+		return fmt.Errorf("cache_duration=%s, duration should be positive", config.RawCacheDuration)
+	}
+	d, err = time.ParseDuration(config.RawCacheCheckInterval)
+	if err != nil {
+		return fmt.Errorf("cache_check_interval=%s, should be in valid duration format", config.RawCacheCheckInterval)
+	}
+	if d <= 0 {
+		return fmt.Errorf("cache_check_interval=%s, duration should be positive", config.RawCacheCheckInterval)
+	}
 	return nil
 }
 
@@ -196,6 +227,14 @@ func (config LoadKeyConfig) GetRetryInterval() time.Duration {
 
 func (config LoadKeyConfig) GetLoadTimeout() time.Duration {
 	return config.loadTimeout
+}
+
+func (config LoadKeyConfig) GetCacheDuration() time.Duration {
+	return config.cacheDuration
+}
+
+func (config LoadKeyConfig) GetCacheCheckInterval() time.Duration {
+	return config.cacheCheckInterval
 }
 
 type RoomCollectEventConfig struct {

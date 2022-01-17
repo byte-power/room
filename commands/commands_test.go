@@ -3325,3 +3325,32 @@ var testCommandHashTagCases = []testCommandHashTagCase{
 		hashTag: "",
 	},
 }
+
+func TestCommandBatch(t *testing.T) {
+	defer testEmptyKeysInRedis("{b}2")
+
+	batch := NewCommandBatch()
+
+	command, _ := NewGetCommand([]string{"get", "{a}"})
+	batch.AddCommand(10, command)
+
+	command, _ = NewSetCommand([]string{"set", "{b}2", "2"})
+	batch.AddCommand(7, command)
+
+	command, _ = NewGetCommand([]string{"get", "{b}2"})
+	batch.AddCommand(14, command)
+
+	expectedResults := map[int]RESPData{
+		7:  {DataType: SimpleStringRespType, Value: "OK"},
+		10: {DataType: NilRespType, Value: nil},
+		14: {DataType: BulkStringRespType, Value: "2"},
+	}
+
+	dep := base.GetServerDependency()
+	results := batch.Execute(context.TODO(), dep.Redis)
+
+	for index, result := range results {
+		assert.Equal(t, expectedResults[index].DataType, result.DataType)
+		assert.Equal(t, expectedResults[index].Value, result.Value)
+	}
+}
