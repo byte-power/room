@@ -57,7 +57,7 @@ func newRedisTransaction(redisCluster *redis.ClusterClient, keys ...string) (*re
 }
 
 func (transaction *Transaction) multi() RESPData {
-	if transaction.isStarted() {
+	if transaction.IsStarted() {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR MULTI calls can not be nested")}
 	}
 	transaction.status = TransactionStatusStarted
@@ -80,7 +80,7 @@ func (transaction *Transaction) reset(reason TransactionCloseReason, status Tran
 }
 
 func (transaction *Transaction) watch(keys ...string) RESPData {
-	if transaction.isStarted() {
+	if transaction.IsStarted() {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR WATCH inside MULTI is not allowed")}
 	}
 	if len(keys) == 0 {
@@ -116,7 +116,7 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 
 func (transaction *Transaction) addCommand(command Commander) RESPData {
 	var result RESPData
-	if transaction.isStarted() {
+	if transaction.IsStarted() {
 		transaction.commands = append(transaction.commands, command.Cmd())
 		transaction.keys = append(transaction.keys, append(command.ReadKeys(), command.WriteKeys()...)...)
 		result = RESPData{DataType: SimpleStringRespType, Value: "QUEUED"}
@@ -127,7 +127,7 @@ func (transaction *Transaction) addCommand(command Commander) RESPData {
 }
 
 func (transaction *Transaction) exec() RESPData {
-	if !transaction.isStarted() {
+	if !transaction.IsStarted() {
 		return ConvertErrorToRESPData(errors.New("ERR EXEC without MULTI"))
 	}
 	defer func() {
@@ -187,7 +187,7 @@ func (transaction *Transaction) IsClosed() bool {
 	return transaction.status == TransactionStatusClosed
 }
 
-func (transaction *Transaction) isStarted() bool {
+func (transaction *Transaction) IsStarted() bool {
 	return transaction.status == TransactionStatusStarted
 }
 
@@ -196,7 +196,7 @@ func (transaction *Transaction) Status() TransactionStatus {
 }
 
 func (transaction *Transaction) discard() RESPData {
-	if !transaction.isStarted() {
+	if !transaction.IsStarted() {
 		return ConvertErrorToRESPData(errors.New("ERR DISCARD without MULTI"))
 	}
 	if err := transaction.Close(TransactionCloseReasonDiscard); err != nil {
@@ -206,7 +206,7 @@ func (transaction *Transaction) discard() RESPData {
 }
 
 func (transaction *Transaction) unwatch() RESPData {
-	if transaction.isStarted() {
+	if transaction.IsStarted() {
 		command, _ := NewUnwatchCommand([]string{"unwatch"})
 		return transaction.addCommand(command)
 	}

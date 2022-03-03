@@ -171,7 +171,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 
 		allCommands = append(allCommands, command)
 		transaction := getTransactionIfNeeded(service.dep, conn, command)
-		if transaction != nil {
+		if transaction != nil && (transaction.IsStarted() || isTransactionCommand(command)) {
 			resultMap := toBeExecutedCommandBatch.Execute(context.TODO(), redisCluster)
 			for index, result := range resultMap {
 				results[index] = result
@@ -257,6 +257,11 @@ func (service *RoomService) recordCommands(cmds []commands.Commander, results []
 
 func isTransactionNeeded(command commands.Commander) bool {
 	transactionCommands := []string{"watch", "multi"}
+	return utility.StringSliceContains(transactionCommands, command.Name())
+}
+
+func isTransactionCommand(command commands.Commander) bool {
+	transactionCommands := []string{"watch", "unwatch", "multi", "exec", "discard"}
 	return utility.StringSliceContains(transactionCommands, command.Name())
 }
 
