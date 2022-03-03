@@ -168,6 +168,11 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 			}
 			continue
 		}
+		service.logWithAddressAndPid(
+			log.LevelDebug,
+			"receive.command",
+			log.String("command", command.String()),
+		)
 
 		allCommands = append(allCommands, command)
 		transaction := getTransactionIfNeeded(service.dep, conn, command)
