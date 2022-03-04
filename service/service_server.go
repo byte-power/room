@@ -341,6 +341,8 @@ func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {
 				writeDataToConnection(conn, item)
 			}
 		}
+	case commands.NilArrayRespType:
+		conn.WriteRaw([]byte("*-1\r\n"))
 	}
 }
 

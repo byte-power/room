@@ -4,6 +4,8 @@ import (
 	"bytepower_room/base"
 	"bytepower_room/base/log"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -106,6 +108,11 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 		transaction.tx = tx
 	}
 
+	transaction.dep.Logger.Debug(
+		fmt.Sprintf(
+			"execute transaction command: %s %s",
+			"watch", strings.Join(keys, " "),
+		))
 	if _, err := transaction.tx.Watch(contextTODO, keys...).Result(); err != nil {
 		return ConvertErrorToRESPData(err)
 	}
@@ -156,6 +163,9 @@ func (transaction *Transaction) exec() RESPData {
 
 	pipeline := transaction.tx.TxPipeline()
 	for _, cmd := range transaction.commands {
+		transaction.dep.Logger.Debug(
+			fmt.Sprintf("execute transaction command: %s", cmd.String()),
+		)
 		if err := pipeline.Process(contextTODO, cmd); err != nil {
 			return ConvertErrorToRESPData(err)
 		}

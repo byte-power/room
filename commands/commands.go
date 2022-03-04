@@ -149,6 +149,7 @@ const (
 	IntegerRespType      RESPType = "integer"
 	ArrayRespType        RESPType = "array"
 	NilRespType          RESPType = "nil"
+	NilArrayRespType     RESPType = "nil_array"
 )
 
 type RESPData struct {
@@ -176,13 +177,18 @@ func (data RESPData) String() string {
 			result = result + item.String() + " "
 		}
 		result = result + " }"
+	case NilArrayRespType:
+		result = "na:na"
 	}
 	return result
 }
 
 func ConvertErrorToRESPData(err error) RESPData {
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return RESPData{DataType: NilRespType, Value: nil}
+	}
+	if errors.Is(err, redis.TxFailedErr) {
+		return RESPData{DataType: NilArrayRespType, Value: nil}
 	}
 	return RESPData{DataType: ErrorRespType, Value: err}
 }
