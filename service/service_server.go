@@ -168,10 +168,15 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 			}
 			continue
 		}
+		service.logWithAddressAndPid(
+			log.LevelDebug,
+			"receive.command",
+			log.String("command", command.String()),
+		)
 
 		allCommands = append(allCommands, command)
 		transaction := getTransactionIfNeeded(service.dep, conn, command)
-		if transaction != nil {
+		if transaction != nil && (transaction.IsStarted() || isTransactionCommand(command)) {
 			resultMap := toBeExecutedCommandBatch.Execute(context.TODO(), redisCluster)
 			for index, result := range resultMap {
 				results[index] = result
@@ -260,6 +265,11 @@ func isTransactionNeeded(command commands.Commander) bool {
 	return utility.StringSliceContains(transactionCommands, command.Name())
 }
 
+func isTransactionCommand(command commands.Commander) bool {
+	transactionCommands := []string{"watch", "unwatch", "multi", "exec", "discard"}
+	return utility.StringSliceContains(transactionCommands, command.Name())
+}
+
 func preProcessCommand(dep base.Dependency, command commands.Commander, accessTime time.Time) error {
 	logger := dep.Logger
 
@@ -331,6 +341,8 @@ func writeDataToConnection(conn redcon.Conn, data commands.RESPData) {
 				writeDataToConnection(conn, item)
 			}
 		}
+	case commands.NilArrayRespType:
+		conn.WriteRaw([]byte("*-1\r\n"))
 	}
 }
 
