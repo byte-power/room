@@ -357,12 +357,12 @@ func getItemCount(client *redis.ClusterClient, key, typ string) (int64, error) {
 }
 
 const (
-	metricHashTagBytes                 = "hash_tag_bytes"
-	metricHashTagKeys                  = "hash_tag_keys"
-	metricHashTagBytesOverLimit        = "hash_tag_bytes_over_limit"
-	metricHashTagKeyCountOverLimit     = "hash_tag_key_count_over_limit"
-	metircHashTagKeyBytesOverLimit     = "hash_tag_key_bytes_over_limit"
-	metricHashTagKeyItemCountOverLimit = "hash_tag_key_item_count_over_limit"
+	metricHashTagBytes                 = "size_monitor.hash_tag_bytes"
+	metricHashTagKeys                  = "size_monitor.hash_tag_keys"
+	metricHashTagBytesOverLimit        = "size_monitor.hash_tag_bytes_over_limit"
+	metricHashTagKeyCountOverLimit     = "size_monitor.hash_tag_key_count_over_limit"
+	metircHashTagKeyBytesOverLimit     = "size_monitor.hash_tag_key_bytes_over_limit"
+	metricHashTagKeyItemCountOverLimit = "size_monitor.hash_tag_key_item_count_over_limit"
 )
 
 func recordHashTagKeysSizeInfo(
