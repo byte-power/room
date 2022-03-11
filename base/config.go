@@ -479,6 +479,11 @@ type SyncKeyTaskConfig struct {
 
 	RawNoWrittenDuration string `yaml:"no_written_duration"`
 	NoWrittenDuration    time.Duration
+
+	HashTagSizeLimitBytes int64 `yaml:"hash_tag_size_limit_bytes"`
+	HashTagKeyCountLimit  int64 `yaml:"hash_tag_key_count_limit"`
+	KeySizeLimitBytes     int64 `yaml:"key_size_limit_bytes"`
+	KeyItemCountLimit     int64 `yaml:"key_item_count_limit"`
 }
 
 func (config SyncKeyTaskConfig) check() error {
@@ -493,6 +498,18 @@ func (config SyncKeyTaskConfig) check() error {
 	}
 	if config.RawNoWrittenDuration == "" {
 		return fmt.Errorf("no_written_duration should not be empty")
+	}
+	if config.HashTagSizeLimitBytes <= 0 {
+		return fmt.Errorf("hash_tag_size_limit_bytes is %d, it should be greater than 0", config.HashTagSizeLimitBytes)
+	}
+	if config.HashTagKeyCountLimit <= 0 {
+		return fmt.Errorf("hash_tag_key_count_limit is %d, it should be greater than 0", config.HashTagKeyCountLimit)
+	}
+	if config.KeySizeLimitBytes <= 0 {
+		return fmt.Errorf("key_size_limit_bytes is %d, it should be greater than 0", config.KeySizeLimitBytes)
+	}
+	if config.KeyItemCountLimit <= 0 {
+		return fmt.Errorf("key_item_count_limit is %d, it should be greater than 0", config.KeyItemCountLimit)
 	}
 	return nil
 }

@@ -233,6 +233,10 @@ task:
     upsert_try_times: 3
     no_written_duration: 1h
     rate_limit_per_second: 100
+    hash_tag_size_limit_bytes: 5242880 # 5MB
+    hash_tag_key_count_limit: 100
+    key_size_limit_bytes: 512000 # 500KB
+    key_item_count_limit: 500
     off: false
 
   clean_key_task:
