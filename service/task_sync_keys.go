@@ -301,7 +301,7 @@ func (info keySizeInfo) String() string {
 	return fmt.Sprintf("key=%s, memoryBytes=%d, itemCount=%d", info.key, info.memoryBytes, info.itemCount)
 }
 
-const memoryUsageSample = 20
+const memoryUsageSample = 10
 
 func getHashTagKeySizeInfo(client *redis.ClusterClient, hashTag string, keys []string) (hashTagKeysSizeInfo, error) {
 	hashTagInfo := hashTagKeysSizeInfo{hashTag: hashTag, keysSizeInfo: make([]keySizeInfo, 0)}
