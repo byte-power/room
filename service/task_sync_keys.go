@@ -22,15 +22,9 @@ var errTaskPanic = errors.New("task panic")
 // find keys to sync
 // select * from table where status = "syncing";
 // update table set status = "synced", syncedAt = time.Now() where hash_tag = "xxx" and version = xx
-func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration time.Duration, rateLimitPerSecond int) {
+func SyncKeysTask(dep base.Dependency, config base.SyncKeyTaskConfig) {
 	startTime := time.Now()
-	logTaskStart(
-		dep.Logger,
-		SyncKeysTaskName, startTime,
-		log.Int("upsert_try_times", upsertTryTimes),
-		log.String("no_written_duration", noWrittenDuration.String()),
-		log.Int("limit", rateLimitPerSecond),
-	)
+	logTaskStart(dep.Logger, SyncKeysTaskName, startTime, log.Any("config", config))
 
 	count := 1000
 	var err error
@@ -53,8 +47,8 @@ func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration tim
 			recordTaskSuccess(dep.Logger, dep.Metric, SyncKeysTaskName, time.Since(startTime))
 		}
 	}()
-	ratelimitBucket := ratelimit.New(rateLimitPerSecond)
-	writtenAt := startTime.Add(-noWrittenDuration)
+	ratelimitBucket := ratelimit.New(config.RateLimitPerSecond)
+	writtenAt := startTime.Add(-config.NoWrittenDuration)
 	conditions := [][]dbWhereCondition{
 		{
 			dbWhereCondition{column: "status", operator: "=?", parameter: HashTagKeysStatusNeedSynced},
@@ -84,7 +78,7 @@ func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration tim
 			for _, model := range models {
 				ratelimitBucket.Take()
 				lastModel = model
-				if err = syncRoomData(dep.DB, dep.Redis, model, time.Now(), upsertTryTimes); err != nil {
+				if err = syncRoomData(dep.DB, dep.Redis, model, time.Now(), config.UpSertTryTimes); err != nil {
 					if isRetryErrorForUpdateInTx(err) {
 						recordTaskError(
 							dep.Logger, dep.Metric,
@@ -104,6 +98,18 @@ func SyncKeysTask(dep base.Dependency, upsertTryTimes int, noWrittenDuration tim
 					)
 					return
 				}
+				ratelimitBucket.Take()
+				sizeInfo, err := getHashTagKeySizeInfo(dep.Redis, model.HashTag, model.Keys)
+				if err != nil {
+					recordTaskError(
+						dep.Logger, dep.Metric, SyncKeysTaskName,
+						err, "get_hash_tag_keys_size",
+						map[string]string{"hash_tag": model.HashTag, "keys": strings.Join(model.Keys, " ")},
+					)
+				} else {
+					recordHashTagKeysSizeInfo(dep.Logger, dep.Metric, sizeInfo, config)
+				}
+
 				processCount += 1
 			}
 			conditionStrs := make([]string, 0, len(condition))
@@ -263,4 +269,126 @@ func serializeNonStringValue(redisCluster *redis.ClusterClient, key, keyType str
 		return items, redis.Nil
 	}
 	return items, nil
+}
+
+type hashTagKeysSizeInfo struct {
+	hashTag      string
+	memoryBytes  int64
+	keysSizeInfo []keySizeInfo
+}
+
+func (info hashTagKeysSizeInfo) String() string {
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "hash_tag=%s, memoryBytes=%d, keys=[", info.hashTag, info.memoryBytes)
+	for _, keyInfo := range info.keysSizeInfo {
+		fmt.Fprintf(&builder, " (%s) ", keyInfo.String())
+	}
+	builder.WriteString("]")
+	return builder.String()
+}
+
+type keySizeInfo struct {
+	key         string
+	memoryBytes int64
+	itemCount   int64
+}
+
+func (info keySizeInfo) isEmpty() bool {
+	return info.key == "" || info.memoryBytes == 0 || info.itemCount == 0
+}
+
+func (info keySizeInfo) String() string {
+	return fmt.Sprintf("key=%s, memoryBytes=%d, itemCount=%d", info.key, info.memoryBytes, info.itemCount)
+}
+
+const memoryUsageSample = 10
+
+func getHashTagKeySizeInfo(client *redis.ClusterClient, hashTag string, keys []string) (hashTagKeysSizeInfo, error) {
+	hashTagInfo := hashTagKeysSizeInfo{hashTag: hashTag, keysSizeInfo: make([]keySizeInfo, 0)}
+	for _, key := range keys {
+		keyInfo, err := getKeySizeInfo(client, key)
+		if err != nil {
+			return hashTagKeysSizeInfo{}, err
+		}
+		if !keyInfo.isEmpty() {
+			hashTagInfo.keysSizeInfo = append(hashTagInfo.keysSizeInfo, keyInfo)
+			hashTagInfo.memoryBytes += keyInfo.memoryBytes
+		}
+	}
+	return hashTagInfo, nil
+}
+
+func getKeySizeInfo(client *redis.ClusterClient, key string) (keySizeInfo, error) {
+	ctx := context.TODO()
+	typ, err := client.Type(ctx, key).Result()
+	if err != nil {
+		return keySizeInfo{}, err
+	}
+	if typ == redisKeyNotExist {
+		return keySizeInfo{}, nil
+	}
+	itemCount, err := getItemCount(client, key, typ)
+	if err != nil {
+		return keySizeInfo{}, err
+	}
+	memorySize, err := client.MemoryUsage(ctx, key, memoryUsageSample).Result()
+	if err != nil {
+		return keySizeInfo{}, err
+	}
+	return keySizeInfo{key: key, memoryBytes: memorySize, itemCount: itemCount}, nil
+}
+
+func getItemCount(client *redis.ClusterClient, key, typ string) (int64, error) {
+	ctx := context.TODO()
+	switch typ {
+	case stringType:
+		return 0, nil
+	case listType:
+		return client.LLen(ctx, key).Result()
+	case hashType:
+		return client.HLen(ctx, key).Result()
+	case zsetType:
+		return client.ZCard(ctx, key).Result()
+	case setType:
+		return client.SCard(ctx, key).Result()
+	default:
+		return 0, fmt.Errorf("unsupported type %s", typ)
+	}
+}
+
+const (
+	metricHashTagBytes                 = "size_monitor.hash_tag_bytes"
+	metricHashTagKeys                  = "size_monitor.hash_tag_keys"
+	metricHashTagBytesOverLimit        = "size_monitor.hash_tag_bytes_over_limit"
+	metricHashTagKeyCountOverLimit     = "size_monitor.hash_tag_key_count_over_limit"
+	metircHashTagKeyBytesOverLimit     = "size_monitor.hash_tag_key_bytes_over_limit"
+	metricHashTagKeyItemCountOverLimit = "size_monitor.hash_tag_key_item_count_over_limit"
+)
+
+func recordHashTagKeysSizeInfo(
+	logger *log.Logger, metric *base.MetricClient,
+	hashTagSizeInfo hashTagKeysSizeInfo,
+	config base.SyncKeyTaskConfig) {
+
+	metric.MetricGauge(metricHashTagBytes, hashTagSizeInfo.memoryBytes)
+	metric.MetricGauge(metricHashTagKeys, len(hashTagSizeInfo.keysSizeInfo))
+	logSubject := "hash_tag_info"
+	if hashTagSizeInfo.memoryBytes >= config.HashTagSizeLimitBytes {
+		metric.MetricGauge(metricHashTagBytesOverLimit, hashTagSizeInfo.memoryBytes)
+		logger.Info(metricHashTagBytesOverLimit, log.String(logSubject, hashTagSizeInfo.String()))
+	}
+	if len(hashTagSizeInfo.keysSizeInfo) >= int(config.HashTagKeyCountLimit) {
+		metric.MetricGauge(metricHashTagKeyCountOverLimit, len(hashTagSizeInfo.keysSizeInfo))
+		logger.Info(metricHashTagKeyCountOverLimit, log.String(logSubject, hashTagSizeInfo.String()))
+	}
+	for _, info := range hashTagSizeInfo.keysSizeInfo {
+		if info.memoryBytes >= config.KeySizeLimitBytes {
+			metric.MetricGauge(metircHashTagKeyBytesOverLimit, info.memoryBytes)
+			logger.Info(metircHashTagKeyBytesOverLimit, log.String("key", info.key), log.String(logSubject, hashTagSizeInfo.String()))
+		}
+		if info.itemCount >= config.KeyItemCountLimit {
+			metric.MetricGauge(metricHashTagKeyItemCountOverLimit, info.itemCount)
+			logger.Info(metricHashTagKeyItemCountOverLimit, log.String("key", info.key), log.String(logSubject, hashTagSizeInfo.String()))
+		}
+	}
 }

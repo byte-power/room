@@ -2,6 +2,7 @@ package log
 
 import (
 	"bytepower_room/utility"
+	"fmt"
 )
 
 type Logger struct {
@@ -79,6 +80,10 @@ type LogPair struct {
 	value interface{}
 }
 
+func (p LogPair) String() string {
+	return fmt.Sprintf("%s: %v", p.key, p.value)
+}
+
 func String(k, v string) LogPair {
 	return LogPair{key: k, value: v}
 }
@@ -97,9 +102,7 @@ func Int64(k string, v int64) LogPair {
 
 func Error(err error) LogPair {
 	logPair := LogPair{key: "error"}
-	if err == nil {
-		logPair.value = "error_is_nil"
-	} else {
+	if err != nil {
 		logPair.value = err.Error()
 	}
 	return logPair
@@ -107,6 +110,10 @@ func Error(err error) LogPair {
 
 func Stack(stack []byte) LogPair {
 	return LogPair{key: "stack", value: utility.BytesToString(stack)}
+}
+
+func Any(k string, v interface{}) LogPair {
+	return LogPair{key: k, value: v}
 }
 
 func convertStrMapToLogPairs(values map[string]interface{}) []LogPair {
