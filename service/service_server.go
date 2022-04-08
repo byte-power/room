@@ -47,6 +47,7 @@ type RoomService struct {
 	pprofAddress string
 	pprofServer  *http.Server
 	pid          int
+	stopCh       chan bool
 }
 
 func NewRoomService(config *base.RoomServerConfig, dep base.Dependency, host string, port int) (*RoomService, error) {
@@ -68,7 +69,9 @@ func NewRoomService(config *base.RoomServerConfig, dep base.Dependency, host str
 		dep:          dep,
 		address:      fmt.Sprintf("%s:%d", host, port),
 		pprofAddress: fmt.Sprintf("%s:%d", host, port+10000),
-		pid:          os.Getpid()}
+		pid:          os.Getpid(),
+		stopCh:       make(chan bool),
+	}
 	return roomService, nil
 }
 
@@ -88,6 +91,8 @@ func (service *RoomService) Run() {
 		}
 	}()
 
+	go service.monitorConnections()
+
 	// start pprof server
 	if service.config.EnablePProf {
 		service.logWithAddressAndPid(log.LevelInfo, "server.pprof_start")
@@ -106,22 +111,53 @@ func (service *RoomService) Run() {
 	}
 }
 
-func (service *RoomService) Stop() {
-	if err := service.server.Close(); err != nil {
+func (service *RoomService) monitorConnections() {
+	metric := service.dep.Metric
+	ticker := time.NewTicker(service.config.MonitorConnectionInterval)
+	defer func() {
+		ticker.Stop()
+	}()
+loop:
+	for {
+		select {
+		case <-ticker.C:
+			connectionCount := service.server.OpenConnectionCount()
+			transactionCount := transactionManager.transactionCount()
+			service.logWithAddressAndPid(
+				log.LevelInfo, "connection.info",
+				log.Int("connection_count", connectionCount),
+				log.Int64("total_connection_count", atomic.LoadInt64(&connectionTotal)),
+				log.Int("transaction_count", transactionCount),
+			)
+			metric.MetricGauge("connection.total", connectionCount)
+			metric.MetricGauge("transaction.total", transactionCount)
+		case <-service.stopCh:
+			break loop
+		}
+	}
+}
+
+func (service *RoomService) Stop(waitDuration time.Duration) {
+	connErrs, err := service.server.Close(waitDuration)
+	if err != nil {
 		service.logWithAddressAndPid(log.LevelError, "error.server.close", log.Error(err))
+	}
+	if connErrs.Count != 0 {
+		for _, err := range connErrs.Errs {
+			service.logWithAddressAndPid(log.LevelError, "error.server.connection.close", log.Error(err))
+		}
 	}
 	if service.pprofServer != nil {
 		if err := service.pprofServer.Close(); err != nil {
 			service.logWithAddressAndPid(log.LevelError, "error.server.pprof_close", log.Error(err))
 		}
 	}
+	close(service.stopCh)
 }
 
 func (service *RoomService) connAcceptHandler(conn redcon.Conn) bool {
 	service.dep.Metric.MetricIncrease("connection.accept")
 	connectionCount := atomic.AddInt64(&connectionTotal, 1)
-	service.dep.Metric.MetricGauge("connection.total", connectionCount)
-	service.dep.Metric.MetricGauge("transaction.total", transactionManager.transactionCount())
 	service.logWithAddressAndPid(
 		log.LevelDebug, "connection.accept",
 		log.String("local_addr", conn.NetConn().LocalAddr().String()),
@@ -202,6 +238,13 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 	}
 	service.sendEvents(allCommands, serveStartTime)
 	service.recordCommands(allCommands, results, serveStartTime)
+	if service.server.IsServerClosing() && conn.InTx() {
+		service.logWithAddressAndPid(
+			log.LevelInfo,
+			"conn in tx, cannot close",
+			log.Any("conn", conn),
+		)
+	}
 }
 
 func (service *RoomService) preProcessCommand(cmd redcon.Command, serveStartTime time.Time) (commands.Commander, error) {
@@ -387,8 +430,6 @@ func (service *RoomService) connCloseHandler(conn redcon.Conn, err error) {
 			log.Error(err),
 		)
 	}
-	metric.MetricGauge("connection.total", connectionCount)
-	metric.MetricGauge("transaction.total", transactionCount)
 }
 
 func (service *RoomService) logWithAddressAndPid(level log.Level, subject string, logPairs ...log.LogPair) {

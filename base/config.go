@@ -12,6 +12,11 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	defaultGracefulShutdownWaitDuration = 5 * time.Second
+	defaultMonitorConnectionInterval    = 1 * time.Second
+)
+
 func newConfigFromFile(filePath string) (Config, error) {
 	config := Config{}
 	bs, err := readFileFromPath(filePath)
@@ -66,8 +71,15 @@ func (config Config) check() error {
 }
 
 type RoomServerConfig struct {
-	EnablePProf         bool                      `yaml:"enable_pprof"`
-	IsDebug             bool                      `yaml:"is_debug"`
+	EnablePProf bool `yaml:"enable_pprof"`
+	IsDebug     bool `yaml:"is_debug"`
+
+	RawGracefulShutdownWaitDuration string        `yaml:"graceful_shutdown_wait_duration"`
+	GracefulShutdownWaitDuration    time.Duration `yaml:"-"`
+
+	RawMonitorConnectionInterval string        `yaml:"monitor_connection_interval"`
+	MonitorConnectionInterval    time.Duration `yaml:"-"`
+
 	Log                 map[string]interface{}    `yaml:"log"`
 	Metric              MetricConfig              `yaml:"metric"`
 	LoadKey             LoadKeyConfig             `yaml:"load_key"`
@@ -105,6 +117,28 @@ func (config RoomServerConfig) check() error {
 func (config *RoomServerConfig) init() error {
 	if err := config.check(); err != nil {
 		return fmt.Errorf("room_server.%w", err)
+	}
+
+	rawGracefulShutdownWaitDuration := config.RawGracefulShutdownWaitDuration
+	if rawGracefulShutdownWaitDuration == "" {
+		config.GracefulShutdownWaitDuration = defaultGracefulShutdownWaitDuration
+	} else {
+		d, err := time.ParseDuration(rawGracefulShutdownWaitDuration)
+		if err != nil {
+			return fmt.Errorf("graceful_shutdown_wait_duration=%s is invalid", rawGracefulShutdownWaitDuration)
+		}
+		config.GracefulShutdownWaitDuration = d
+	}
+
+	rawMonitorConnectionInterval := config.RawMonitorConnectionInterval
+	if rawMonitorConnectionInterval == "" {
+		config.MonitorConnectionInterval = defaultMonitorConnectionInterval
+	} else {
+		d, err := time.ParseDuration(rawMonitorConnectionInterval)
+		if err != nil {
+			return fmt.Errorf("monitor_connection_interval=%s is invalid", rawMonitorConnectionInterval)
+		}
+		config.MonitorConnectionInterval = d
 	}
 
 	d, err := time.ParseDuration(config.LoadKey.RawRetryInterval)

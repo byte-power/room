@@ -22,6 +22,7 @@ func (manager *TransactionManager) addTransaction(conn redcon.Conn, tx *commands
 	oldTx := manager.connTransMap[conn]
 	delete(manager.connTransMap, conn)
 	manager.connTransMap[conn] = tx
+	conn.SetTxStatus(true)
 	manager.mutex.Unlock()
 	if oldTx != nil {
 		oldTx.Close(commands.TransactionCloseReasonReset)
@@ -38,6 +39,7 @@ func (manager *TransactionManager) removeTransaction(conn redcon.Conn, reason co
 	manager.mutex.Lock()
 	tx := manager.connTransMap[conn]
 	delete(manager.connTransMap, conn)
+	conn.SetTxStatus(false)
 	manager.mutex.Unlock()
 	if tx != nil {
 		tx.Close(reason)
