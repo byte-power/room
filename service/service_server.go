@@ -138,14 +138,22 @@ loop:
 }
 
 func (service *RoomService) Stop(waitDuration time.Duration) {
-	connErrs, err := service.server.Close(waitDuration)
+	closeResults, err := service.server.Close(waitDuration)
 	if err != nil {
 		service.logWithAddressAndPid(log.LevelError, "error.server.close", log.Error(err))
 	}
-	if connErrs.Count != 0 {
-		for _, err := range connErrs.Errs {
+	if len(closeResults.Errs) != 0 {
+		service.logWithAddressAndPid(
+			log.LevelError,
+			"error.server.connection.close.count",
+			log.Int("error_count", len(closeResults.Errs)),
+			log.Int("success_count", closeResults.Count),
+		)
+		for _, err := range closeResults.Errs {
 			service.logWithAddressAndPid(log.LevelError, "error.server.connection.close", log.Error(err))
 		}
+	} else {
+		service.logWithAddressAndPid(log.LevelInfo, "server.connection.close.count", log.Int("count", closeResults.Count))
 	}
 	if service.pprofServer != nil {
 		if err := service.pprofServer.Close(); err != nil {
