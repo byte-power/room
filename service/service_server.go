@@ -144,14 +144,15 @@ func (service *RoomService) Stop(waitDuration time.Duration) {
 	closeResults, err := service.server.Close(waitDuration)
 	if err != nil {
 		service.logWithAddressAndPid(log.LevelError, "error.server.close", log.Error(err))
-	}
-	if len(closeResults.Errs) != 0 {
+		service.dep.Metric.MetricIncrease("error.close.server")
+	} else if len(closeResults.Errs) != 0 {
 		service.logWithAddressAndPid(
 			log.LevelError,
 			"error.server.connection.close.count",
 			log.Int("error_count", len(closeResults.Errs)),
 			log.Int("success_count", closeResults.Count),
 		)
+		service.dep.Metric.MetricCount("error.close.connection", len(closeResults.Errs))
 		for _, err := range closeResults.Errs {
 			service.logWithAddressAndPid(log.LevelError, "error.server.connection.close", log.Error(err))
 		}
