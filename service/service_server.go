@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdLog "log"
 	"net/http"
 	"os"
 	"strings"
@@ -78,6 +79,8 @@ func NewRoomService(config *base.RoomServerConfig, dep base.Dependency, host str
 func (service *RoomService) Run() {
 	service.logWithAddressAndPid(log.LevelInfo, "server.start")
 	service.server = redcon.NewServer(service.address, service.connServeHandler, service.connAcceptHandler, service.connCloseHandler)
+	logger := stdLog.New(os.Stdout, "room redcon ", stdLog.LstdFlags)
+	service.server.SetLogger(logger)
 	service.server.AcceptError = service.connAcceptErrorHandler
 	listener, err := greuse.Listen("tcp", service.address)
 	if err != nil {

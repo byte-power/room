@@ -5,15 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	stdLog "log"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/patrickmn/go-cache"
-	"github.com/tidwall/redcon"
 )
 
 var serverDependency Dependency
@@ -46,8 +43,6 @@ func initService(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("init_db.%w", err)
 	}
-	redconLogger := stdLog.New(os.Stdout, fmt.Sprintf("%s %s", loggerName, "redcon"), stdLog.LstdFlags)
-	redcon.SetLogger(redconLogger)
 	return logger, metric, databaseCluster, nil
 }
 
