@@ -54,6 +54,7 @@ func readBytes(fp io.Reader) ([]byte, error) {
 type Config struct {
 	Server       RoomServerConfig       `yaml:"server"`
 	CollectEvent RoomCollectEventConfig `yaml:"collect_event"`
+	SaveEvent    RoomSaveEventConfig    `yaml:"save_event"`
 	Task         RoomTaskConfig         `yaml:"task"`
 }
 
@@ -63,6 +64,9 @@ func (config Config) check() error {
 	}
 	if err := config.CollectEvent.check(); err != nil {
 		return fmt.Errorf("room_collect_event.%w", err)
+	}
+	if err := config.SaveEvent.check(); err != nil {
+		return fmt.Errorf("room_save_event.%w", err)
 	}
 	if err := config.Task.check(); err != nil {
 		return fmt.Errorf("room_task.%w", err)
@@ -277,8 +281,6 @@ type RoomCollectEventConfig struct {
 
 	Server CollectEventServiceServerConfig `yaml:"server"`
 
-	SaveDB CollectEventServiceSaveDBConfig `yaml:"save_db"`
-
 	SaveFile CollectEventServiceSaveFileConfig `yaml:"save_file"`
 
 	BufferLimit int `yaml:"buffer_limit"`
@@ -290,8 +292,6 @@ type RoomCollectEventConfig struct {
 
 	RawMonitorInterval string `yaml:"monitor_interval"`
 	MonitorInterval    time.Duration
-
-	DB DBClusterConfig `yaml:"db_cluster"`
 }
 
 func (config RoomCollectEventConfig) check() error {
@@ -303,9 +303,6 @@ func (config RoomCollectEventConfig) check() error {
 	}
 	if err := config.Server.check(); err != nil {
 		return fmt.Errorf("server.%w", err)
-	}
-	if err := config.SaveDB.check(); err != nil {
-		return fmt.Errorf("save_db.%w", err)
 	}
 	if err := config.SaveFile.check(); err != nil {
 		return fmt.Errorf("save_file.%w", err)
@@ -322,9 +319,6 @@ func (config RoomCollectEventConfig) check() error {
 	if config.RawMonitorInterval == "" {
 		return errors.New("monitor_interval should not be empty")
 	}
-	if err := config.DB.check(); err != nil {
-		return fmt.Errorf("db_cluster.%w", err)
-	}
 	return nil
 }
 
@@ -333,13 +327,7 @@ func (config *RoomCollectEventConfig) init() error {
 		return fmt.Errorf("room_collect_event.%w", err)
 	}
 
-	duration, err := time.ParseDuration(config.SaveDB.RawFileAge)
-	if err != nil {
-		return fmt.Errorf("save_db.file_age.%w", err)
-	}
-	config.SaveDB.FileAge = duration
-
-	duration, err = time.ParseDuration(config.SaveFile.RawMaxFileAge)
+	duration, err := time.ParseDuration(config.SaveFile.RawMaxFileAge)
 	if err != nil {
 		return fmt.Errorf("save_file.max_file_age.%w", err)
 	}
@@ -382,36 +370,6 @@ func (config CollectEventServiceServerConfig) check() error {
 	return nil
 }
 
-type CollectEventServiceSaveDBConfig struct {
-	RetryTimes      int `yaml:"retry_times"`
-	RetryIntervalMS int `yaml:"retry_interval_ms"`
-	TimeoutMS       int `yaml:"timeout_ms"`
-
-	RawFileAge string `yaml:"file_age"`
-	FileAge    time.Duration
-
-	RateLimitPerSecond int `yaml:"rate_limit_per_second"`
-}
-
-func (config CollectEventServiceSaveDBConfig) check() error {
-	if config.RetryTimes <= 0 {
-		return fmt.Errorf("retry_times is %d, it should be greater than 0", config.RetryTimes)
-	}
-	if config.RetryIntervalMS <= 0 {
-		return fmt.Errorf("retry_interval_ms is %d, it should be greater than 0", config.RetryIntervalMS)
-	}
-	if config.TimeoutMS <= 0 {
-		return fmt.Errorf("timeout_ms is %d, it should be greater than 0", config.TimeoutMS)
-	}
-	if config.RawFileAge == "" {
-		return errors.New("file_age should not be empty")
-	}
-	if config.RateLimitPerSecond <= 0 {
-		return fmt.Errorf("rate_limit_per_second is %d, it should be greater than 0", config.RateLimitPerSecond)
-	}
-	return nil
-}
-
 type CollectEventServiceSaveFileConfig struct {
 	MaxEventCount int `yaml:"max_event_count"`
 
@@ -430,6 +388,79 @@ func (config CollectEventServiceSaveFileConfig) check() error {
 	}
 	if config.FileDirectory == "" {
 		return errors.New("file_directory should not be empty")
+	}
+	return nil
+}
+
+type RoomSaveEventConfig struct {
+	Log    map[string]interface{} `yaml:"log"`
+	Metric MetricConfig           `yaml:"metric"`
+
+	SaveDB SaveEventServiceSaveDBConfig `yaml:"save_db"`
+
+	DB DBClusterConfig `yaml:"db_cluster"`
+}
+
+func (config RoomSaveEventConfig) check() error {
+	if len(config.Log) == 0 {
+		return errors.New("log should not be empty")
+	}
+	if err := config.Metric.check(); err != nil {
+		return fmt.Errorf("metric.%w", err)
+	}
+	if err := config.SaveDB.check(); err != nil {
+		return fmt.Errorf("save_db.%w", err)
+	}
+	if err := config.DB.check(); err != nil {
+		return fmt.Errorf("db_cluster.%w", err)
+	}
+	return nil
+}
+
+func (config *RoomSaveEventConfig) init() error {
+	if err := config.check(); err != nil {
+		return fmt.Errorf("room_save_event.%w", err)
+	}
+	duration, err := time.ParseDuration(config.SaveDB.RawFileAge)
+	if err != nil {
+		return fmt.Errorf("save_db.file_age.%w", err)
+	}
+	config.SaveDB.FileAge = duration
+
+	return nil
+}
+
+type SaveEventServiceSaveDBConfig struct {
+	RetryTimes      int `yaml:"retry_times"`
+	RetryIntervalMS int `yaml:"retry_interval_ms"`
+	TimeoutMS       int `yaml:"timeout_ms"`
+
+	RawFileAge string `yaml:"file_age"`
+	FileAge    time.Duration
+
+	FileDirectory string `yaml:"file_directory"`
+
+	RateLimitPerSecond int `yaml:"rate_limit_per_second"`
+}
+
+func (config SaveEventServiceSaveDBConfig) check() error {
+	if config.RetryTimes <= 0 {
+		return fmt.Errorf("retry_times is %d, it should be greater than 0", config.RetryTimes)
+	}
+	if config.RetryIntervalMS <= 0 {
+		return fmt.Errorf("retry_interval_ms is %d, it should be greater than 0", config.RetryIntervalMS)
+	}
+	if config.TimeoutMS <= 0 {
+		return fmt.Errorf("timeout_ms is %d, it should be greater than 0", config.TimeoutMS)
+	}
+	if config.RawFileAge == "" {
+		return errors.New("file_age should not be empty")
+	}
+	if config.FileDirectory == "" {
+		return errors.New("file_directory should not be empty")
+	}
+	if config.RateLimitPerSecond <= 0 {
+		return fmt.Errorf("rate_limit_per_second is %d, it should be greater than 0", config.RateLimitPerSecond)
 	}
 	return nil
 }

@@ -109,17 +109,27 @@ collect_event:
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
 
-  save_db:
-    retry_times: 3
-    retry_interval_ms: 20
-    timeout_ms: 2000
-    file_age: "5m"
-    rate_limit_per_second: 100
-
   save_file:
     max_event_count: 1000
     max_file_age: "10m"
     file_directory: "/data/room"
+
+save_event:
+  metric:
+    prefix: "bytepower_room.save_event"
+    host: "127.0.0.1:8125"
+
+  log:
+    console:
+      level: debug
+
+  save_db:
+    retry_times: 3
+    retry_interval_ms: 20
+    timeout_ms: 2000
+    file_age: "20m"
+    file_directory: "/data/room"
+    rate_limit_per_second: 100
 
   db_cluster:
     sharding_count: 5
