@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand"
 	"os"
 	"reflect"
 	"runtime/debug"
@@ -718,4 +719,23 @@ func MergeStringSlicesToStringSet(slices ...[]string) *StringSet {
 		set.AddItems(slice...)
 	}
 	return set
+}
+
+func RetryBackoff(retry uint, minBackoff, maxBackoff time.Duration) time.Duration {
+	if minBackoff == 0 {
+		return 0
+	}
+
+	d := minBackoff << retry
+	if d < minBackoff {
+		return maxBackoff
+	}
+
+	d = minBackoff + time.Duration(rand.Int63n(int64(d)))
+
+	if d > maxBackoff || d < minBackoff {
+		d = maxBackoff
+	}
+
+	return d
 }
