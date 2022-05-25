@@ -26,23 +26,23 @@ func main() {
 	if configPath == nil {
 		panic("config not found")
 	}
-	if err := base.InitCollectEvent(*configPath); err != nil {
+	if err := base.InitSaveEvent(*configPath); err != nil {
 		panic(err)
 	}
-	dep := base.GetCollectEventDependency()
+	dep := base.GetSaveEventDependency()
 	if err := dep.Check(); err != nil {
 		panic(err)
 	}
 
-	config := base.GetCollectEventConfig()
-	serviceName := "collect_event_service"
-	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric)
+	config := base.GetSaveEventConfig()
+	serviceName := "save_event_service"
+	saveEventService, err := service.NewSaveEventService(config, dep.Logger, dep.Metric, dep.DB)
 	if err != nil {
 		panic(err)
 	}
-	dep.Logger.Info("init_collect_event_service", log.String("config", fmt.Sprintf("%+v", *collectEventService.Config())))
+	dep.Logger.Info("init_save_event_service", log.String("config", fmt.Sprintf("%+v", *saveEventService.Config())))
 
-	collectEventService.Run()
+	saveEventService.Run()
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -53,6 +53,6 @@ func main() {
 		fmt.Sprintf("signal received, closing %s ...", serviceName),
 		log.String("signal", sig.String()))
 
-	collectEventService.Stop()
+	saveEventService.Stop()
 	dep.Logger.Info(fmt.Sprintf("close %s success", serviceName))
 }
