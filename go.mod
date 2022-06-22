@@ -4,25 +4,32 @@ go 1.14
 
 require (
 	github.com/byte-power/gorich v1.0.5
-	github.com/go-pg/pg/v10 v10.7.3
-	github.com/go-redis/redis/v8 v8.4.3
+	github.com/go-pg/pg/extra/pgotel/v10 v10.10.6
+	github.com/go-pg/pg/v10 v10.10.6
+	github.com/go-redis/redis/extra/redisotel/v8 v8.11.5
+	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gogf/greuse v1.1.0
 	github.com/json-iterator/go v1.1.10
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.6.1
+	github.com/stretchr/testify v1.7.1
 	github.com/tidwall/redcon v1.4.4
+	go.opentelemetry.io/otel v1.7.0
+	go.opentelemetry.io/otel/exporters/jaeger v1.7.0
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.7.0
+	go.opentelemetry.io/otel/sdk v1.7.0
+	go.opentelemetry.io/otel/trace v1.7.0
 	go.uber.org/ratelimit v0.2.0
 	go.uber.org/zap v1.16.0
-	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4 // indirect
-	golang.org/x/tools v0.0.0-20201022035929-9cf592e881e9 // indirect
 	gopkg.in/alexcesaro/statsd.v2 v2.0.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-	gopkg.in/yaml.v2 v2.3.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
-replace github.com/go-redis/redis/v8 v8.4.3 => github.com/byte-power/redis/v8 v8.4.3
+replace github.com/go-redis/redis/v8 v8.11.5 => ../redis
+
+replace github.com/go-redis/redis/extra/redisotel/v8 v8.11.5 => ../redis/extra/redisotel
 
 replace github.com/vmihailenco/bufpool v0.1.11 => github.com/byte-power/bufpool v0.1.13
 

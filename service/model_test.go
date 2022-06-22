@@ -42,7 +42,7 @@ func TestLoadDataByID(t *testing.T) {
 
 	// load not existed row
 	hashTag := "hash_tag_not_exist"
-	model, err := loadDataByID(db, hashTag)
+	model, err := loadDataByID(context.TODO(), db, hashTag)
 	assert.Nil(t, model)
 	assert.Nil(t, err)
 
@@ -52,7 +52,7 @@ func TestLoadDataByID(t *testing.T) {
 	value := make(map[string]RedisValue)
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
-	model, err = loadDataByID(db, hashTag)
+	model, err = loadDataByID(context.TODO(), db, hashTag)
 	assert.Nil(t, err)
 	assert.Equal(t, hashTag, model.HashTag)
 	assert.Equal(t, 0, len(model.Value))
@@ -66,7 +66,7 @@ func TestLoadDataByID(t *testing.T) {
 	value = make(map[string]RedisValue)
 	testInsertDataToDB(db, hashTag, value, currentTime, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
-	model, err = loadDataByID(db, hashTag)
+	model, err = loadDataByID(context.TODO(), db, hashTag)
 	assert.Nil(t, err)
 	assert.Nil(t, model)
 
@@ -77,7 +77,7 @@ func TestLoadDataByID(t *testing.T) {
 	value = map[string]RedisValue{k: v}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
-	model, err = loadDataByID(db, hashTag)
+	model, err = loadDataByID(context.TODO(), db, hashTag)
 	assert.Nil(t, err)
 	assert.Equal(t, hashTag, model.HashTag)
 	assert.Equal(t, 1, len(model.Value))
@@ -97,7 +97,7 @@ func TestLoadDataByID(t *testing.T) {
 	value = map[string]RedisValue{k1: v1, k2: v2}
 	testInsertDataToDB(db, hashTag, value, time.Time{}, currentTime, currentTime, 0)
 	defer testCleanDataInDB(db, hashTag)
-	model, err = loadDataByID(db, hashTag)
+	model, err = loadDataByID(context.TODO(), db, hashTag)
 	assert.Nil(t, err)
 	assert.Equal(t, hashTag, model.HashTag)
 	assert.Equal(t, 2, len(model.Value))

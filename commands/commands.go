@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytepower_room/base"
+	"bytepower_room/utility"
 	"context"
 	"errors"
 	"fmt"
@@ -306,6 +307,9 @@ func (c CommandBatch) AddCommand(index int, cmd Commander) {
 }
 
 func (c CommandBatch) Execute(ctx context.Context, redisCluster *redis.ClusterClient) map[int]RESPData {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	indexes := c.getSortedIndexes()
 	result := make(map[int]RESPData, len(c.cmds))
 	pipeline := redisCluster.Pipeline()

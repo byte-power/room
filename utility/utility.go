@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -718,4 +719,13 @@ func MergeStringSlicesToStringSet(slices ...[]string) *StringSet {
 		set.AddItems(slice...)
 	}
 	return set
+}
+
+func FuncName() string {
+	pc, _, _, _ := runtime.Caller(1)
+	fn := runtime.FuncForPC(pc).Name()
+	if ind := strings.LastIndexByte(fn, '/'); ind != -1 {
+		fn = fn[ind+1:]
+	}
+	return fn
 }
