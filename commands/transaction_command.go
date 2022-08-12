@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/tidwall/redcon"
 )
 
 type TransactionCloseReason string
@@ -35,6 +36,7 @@ const (
 
 type Transaction struct {
 	tx          *redis.Tx
+	conn        redcon.Conn
 	watchedKeys []string
 	keys        []string
 	status      TransactionStatus
@@ -42,8 +44,8 @@ type Transaction struct {
 	dep         base.Dependency
 }
 
-func NewTransaction(dep base.Dependency) *Transaction {
-	return &Transaction{status: TransactionStatusInited, dep: dep}
+func NewTransaction(dep base.Dependency, conn redcon.Conn) *Transaction {
+	return &Transaction{status: TransactionStatusInited, dep: dep, conn: conn}
 }
 
 var errTxKeysNotInSameSlot = errors.New("ERR keys in transaction should be in the same slot")
@@ -63,10 +65,12 @@ func (transaction *Transaction) multi() RESPData {
 		return RESPData{DataType: ErrorRespType, Value: errors.New("ERR MULTI calls can not be nested")}
 	}
 	transaction.status = TransactionStatusStarted
+	//TODO: set conn in tx
 	return RESPData{DataType: SimpleStringRespType, Value: "OK"}
 }
 
 func (transaction *Transaction) reset(reason TransactionCloseReason, status TransactionStatus) error {
+	//TODO: set conn not in tx in defer
 	if transaction.tx != nil {
 		if err := transaction.tx.Close(contextTODO); err != nil {
 			recordTransactionCloseError(transaction.dep.Logger, transaction.dep.Metric, err, reason)
@@ -113,6 +117,7 @@ func (transaction *Transaction) watch(keys ...string) RESPData {
 			"execute transaction command: %s %s",
 			"watch", strings.Join(keys, " "),
 		))
+	// TODO: set conn in tx
 	if _, err := transaction.tx.Watch(contextTODO, keys...).Result(); err != nil {
 		return ConvertErrorToRESPData(err)
 	}

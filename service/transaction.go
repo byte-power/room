@@ -25,6 +25,7 @@ func (manager *TransactionManager) addTransaction(conn redcon.Conn, tx *commands
 	conn.SetTxStatus(true)
 	manager.mutex.Unlock()
 	if oldTx != nil {
+		//TODO: this will never happen
 		oldTx.Close(commands.TransactionCloseReasonReset)
 	}
 }

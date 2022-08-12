@@ -350,7 +350,7 @@ func getTransactionIfNeeded(dep base.Dependency, conn redcon.Conn, command comma
 	transaction := transactionManager.getTransaction(conn)
 	if transaction == nil {
 		if isTransactionNeeded(command) {
-			transaction = commands.NewTransaction(dep)
+			transaction = commands.NewTransaction(dep, conn)
 			transactionManager.addTransaction(conn, transaction)
 			metric.MetricIncrease("transaction.new")
 			logger.Debug(
