@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	redisotel "github.com/go-redis/redis/extra/redisotel/v8"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -96,9 +97,15 @@ func NewRedisClusterFromConfig(config RedisClusterConfig, logger *log.Logger, me
 	if err != nil {
 		return nil, err
 	}
+	opt.NewClient = func(opt *redis.Options) *redis.Client {
+		node := redis.NewClient(opt)
+		node.AddHook(redisotel.NewTracingHook())
+		return node
+	}
 	client := redis.NewClusterClient(opt)
 	redisHook := newRedisRecordHook(metric, logger)
 	client.AddHook(redisHook)
+	client.AddHook(redisotel.NewTracingHook())
 	return client, nil
 }
 

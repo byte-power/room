@@ -2,6 +2,7 @@ package base
 
 import (
 	"bytepower_room/base/log"
+	"bytepower_room/base/opentelemetry"
 	"context"
 	"errors"
 	"fmt"
@@ -70,11 +71,17 @@ func InitRoomServer(configPath string) error {
 		return fmt.Errorf("init_redis.%w", err)
 	}
 
+	otelClient, err := NewOtelClientWithConfig(context.Background(), serverConfig.Otel)
+	if err != nil {
+		return fmt.Errorf("init_opentelemetry.%w", err)
+	}
+
 	serverDependency = Dependency{
 		Redis:  redisCluster,
 		DB:     dbCluster,
 		Logger: logger,
 		Metric: metric,
+		Otel:   otelClient,
 	}
 
 	hashTagEventService, err = NewHashTagEventService(&serverConfig.HashTagEventService, logger, metric)
@@ -193,6 +200,7 @@ func StartServices() {
 
 func StopServices() {
 	hashTagEventService.Stop()
+	serverDependency.Otel.Shutdown(context.TODO())
 }
 
 const (
@@ -257,6 +265,7 @@ type Dependency struct {
 	DB     *DBCluster
 	Logger *log.Logger
 	Metric *MetricClient
+	Otel   *opentelemetry.Otel
 }
 
 var (

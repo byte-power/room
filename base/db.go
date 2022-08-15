@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-pg/pg/extra/pgotel/v10"
 	"github.com/go-pg/pg/v10"
 	"github.com/go-pg/pg/v10/orm"
 )
@@ -102,6 +103,7 @@ func NewDBClusterFromConfig(config DBClusterConfig, logger *log.Logger, metric *
 	}
 	queryHook := dbLogger{logger: logger, metricClient: metric}
 	dbCluster.AddQueryHook(queryHook)
+	dbCluster.AddQueryHook(pgotel.NewTracingHook())
 	return dbCluster, nil
 }
 

@@ -70,6 +70,7 @@ type RoomServerConfig struct {
 	IsDebug             bool                      `yaml:"is_debug"`
 	Log                 map[string]interface{}    `yaml:"log"`
 	Metric              MetricConfig              `yaml:"metric"`
+	Otel                OtelConfig                `yaml:"otel"`
 	LoadKey             LoadKeyConfig             `yaml:"load_key"`
 	HashTagEventService HashTagEventServiceConfig `yaml:"hash_tag_event_service"`
 	RedisCluster        RedisClusterConfig        `yaml:"redis_cluster"`
@@ -86,6 +87,9 @@ func (config RoomServerConfig) check() error {
 	}
 	if err := config.Metric.check(); err != nil {
 		return fmt.Errorf("metric.%w", err)
+	}
+	if err := config.Otel.check(); err != nil {
+		return fmt.Errorf("otel.%w", err)
 	}
 	if err := config.LoadKey.check(); err != nil {
 		return fmt.Errorf("load_key.%w", err)

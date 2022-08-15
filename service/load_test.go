@@ -93,7 +93,7 @@ func TestLoadKeyNotExist(t *testing.T) {
 	key := "{a}:does_not_exist"
 	defer testEmptyKeysInRedis(key)
 	testCleanLocalloadedCache(hashTag)
-	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(context.TODO(), base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	redisCluster := base.GetServerDependency().Redis
@@ -155,7 +155,7 @@ func TestLoadKeyString(t *testing.T) {
 
 	// load data
 	testCleanLocalloadedCache(hashTag)
-	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(context.TODO(), base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	redisCluster := base.GetServerDependency().Redis
@@ -237,7 +237,7 @@ func TestLoadKeyList(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	testCleanLocalloadedCache(hashTag)
-	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(context.TODO(), base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	redisCluster := base.GetServerDependency().Redis
@@ -318,7 +318,7 @@ func TestLoadKeyHash(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	testCleanLocalloadedCache(hashTag)
-	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(context.TODO(), base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	redisCluster := base.GetServerDependency().Redis
@@ -397,7 +397,7 @@ func TestLoadKeySet(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	testCleanLocalloadedCache(hashTag)
-	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(context.TODO(), base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	redisCluster := base.GetServerDependency().Redis
@@ -487,7 +487,7 @@ func TestLoadKeyZSet(t *testing.T) {
 	testSetMetaKeyCleaned(hashTag)
 
 	testCleanLocalloadedCache(hashTag)
-	err := Load(base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
+	err := Load(context.TODO(), base.GetServerDependency(), hashTag, currentTime, base.HashTagAccessModeRead)
 	assert.Nil(t, err)
 
 	redisCluster := base.GetServerDependency().Redis

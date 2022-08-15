@@ -87,9 +87,12 @@ type loadResult struct {
 }
 
 func loadDataByIDWithContext(ctx context.Context, db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	loadResultCh := make(chan loadResult)
 	go func(ch chan loadResult) {
-		model, err := loadDataByID(db, hashTag)
+		model, err := loadDataByID(ctx, db, hashTag)
 		ch <- loadResult{model: model, err: err}
 	}(loadResultCh)
 	select {
@@ -100,13 +103,13 @@ func loadDataByIDWithContext(ctx context.Context, db *base.DBCluster, hashTag st
 	}
 }
 
-func loadDataByID(db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
+func loadDataByID(ctx context.Context, db *base.DBCluster, hashTag string) (*roomDataModelV2, error) {
 	model := &roomDataModelV2{HashTag: hashTag}
 	query, err := db.Model(model)
 	if err != nil {
 		return nil, err
 	}
-	if err := query.WherePK().Where("deleted_at is NULL").Select(); err != nil {
+	if err := query.Context(ctx).WherePK().Where("deleted_at is NULL").Select(); err != nil {
 		if errors.Is(err, pg.ErrNoRows) {
 			return nil, nil
 		}

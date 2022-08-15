@@ -138,6 +138,9 @@ func (service *RoomService) connAcceptErrorHandler(err error) {
 }
 
 func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Command) {
+	ctxWithTracer, span := base.GetTracer().Start(context.Background(), utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	serveStartTime := time.Now()
 
 	redisCluster := service.dep.Redis
@@ -152,7 +155,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 	metric.MetricGauge("command.batch.total", cmdCount)
 
 	for index, cmd := range cmds {
-		command, err := service.preProcessCommand(cmd, serveStartTime)
+		command, err := service.preProcessCommand(ctxWithTracer, cmd, serveStartTime)
 		if err != nil {
 			metric.MetricIncrease("error.pre_process")
 			service.logWithAddressAndPid(
@@ -177,7 +180,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 		allCommands = append(allCommands, command)
 		transaction := getTransactionIfNeeded(service.dep, conn, command)
 		if transaction != nil && (transaction.IsStarted() || isTransactionCommand(command)) {
-			resultMap := toBeExecutedCommandBatch.Execute(context.TODO(), redisCluster)
+			resultMap := toBeExecutedCommandBatch.Execute(ctxWithTracer, redisCluster)
 			for index, result := range resultMap {
 				results[index] = result
 			}
@@ -193,7 +196,7 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 			toBeExecutedCommandBatch.AddCommand(index, command)
 		}
 	}
-	resultMap := toBeExecutedCommandBatch.Execute(context.TODO(), redisCluster)
+	resultMap := toBeExecutedCommandBatch.Execute(ctxWithTracer, redisCluster)
 	for index, result := range resultMap {
 		results[index] = result
 	}
@@ -204,7 +207,10 @@ func (service *RoomService) connServeHandler(conn redcon.Conn, cmds []redcon.Com
 	service.recordCommands(allCommands, results, serveStartTime)
 }
 
-func (service *RoomService) preProcessCommand(cmd redcon.Command, serveStartTime time.Time) (commands.Commander, error) {
+func (service *RoomService) preProcessCommand(ctx context.Context, cmd redcon.Command, serveStartTime time.Time) (commands.Commander, error) {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	args := make([]string, 0, len(cmd.Args))
 	for _, arg := range cmd.Args {
 		args = append(args, string(arg))
@@ -217,7 +223,7 @@ func (service *RoomService) preProcessCommand(cmd redcon.Command, serveStartTime
 	}
 
 	// Pre Porcess related keys
-	if err = preProcessCommand(service.dep, command, serveStartTime); err != nil {
+	if err = preProcessCommand(ctx, service.dep, command, serveStartTime); err != nil {
 		return nil, err
 	}
 	return command, nil
@@ -270,14 +276,17 @@ func isTransactionCommand(command commands.Commander) bool {
 	return utility.StringSliceContains(transactionCommands, command.Name())
 }
 
-func preProcessCommand(dep base.Dependency, command commands.Commander, accessTime time.Time) error {
+func preProcessCommand(ctx context.Context, dep base.Dependency, command commands.Commander, accessTime time.Time) error {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	logger := dep.Logger
 
 	hashTag, err := commands.CheckAndGetCommandKeysHashTag(command)
 	if err != nil {
 		return err
 	}
-	if err := Load(dep, hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
+	if err := Load(ctx, dep, hashTag, accessTime, commands.GetCommnadKeysAccessMode(command)); err != nil {
 		logger.Error(
 			"load hash_tag error",
 			log.String("command", command.String()),

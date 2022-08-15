@@ -103,7 +103,10 @@ func (tag HashTag) GetLoadStatus() (string, error) {
 	return tag.meta.GetLoadStatus()
 }
 
-func (tag HashTag) NeedToLoad() (bool, error) {
+func (tag HashTag) NeedToLoad(ctx context.Context) (bool, error) {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	status, err := tag.meta.GetLoadStatus()
 	if err != nil {
 		return false, err
@@ -111,19 +114,22 @@ func (tag HashTag) NeedToLoad() (bool, error) {
 	return status != HashTagStatusLoaded, nil
 }
 
-func (tag HashTag) Load(timeout time.Duration) (bool, int, error) {
+func (tag HashTag) Load(ctx context.Context, timeout time.Duration) (bool, int, error) {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	if err := tag.acquireLoadLock(); err != nil {
 		return false, 0, err
 	}
 	defer tag.releaseLoadLock()
-	needToLoad, err := tag.NeedToLoad()
+	needToLoad, err := tag.NeedToLoad(ctx)
 	if err != nil {
 		return false, 0, err
 	}
 	if !needToLoad {
 		return false, 0, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	count, err := tag.loadKeys(ctx)
 	if err != nil {
@@ -133,6 +139,9 @@ func (tag HashTag) Load(timeout time.Duration) (bool, int, error) {
 }
 
 func (tag HashTag) loadKeys(ctx context.Context) (int, error) {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	startTime := time.Now()
 	count := 0
 	model, err := loadDataByIDWithContext(ctx, tag.dep.DB, tag.name)
@@ -258,7 +267,10 @@ func (meta HashTagMetaInfo) GetAccessTime() (time.Time, error) {
 	return time.Unix(seconds, nanoSeconds), nil
 }
 
-func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode base.HashTagAccessMode) error {
+func Load(ctx context.Context, dep base.Dependency, tagName string, accessTime time.Time, accessMode base.HashTagAccessMode) error {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	if tagName == "" {
 		return nil
 	}
@@ -276,7 +288,7 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 	loadRetryInterval := base.GetServerConfig().LoadKey.GetRetryInterval()
 	loadTimeout := base.GetServerConfig().LoadKey.GetLoadTimeout()
 	for i := 0; i < loadRetryTimes; i++ {
-		needToLoad, needToLoadErr := hashTag.NeedToLoad()
+		needToLoad, needToLoadErr := hashTag.NeedToLoad(ctx)
 		if needToLoadErr != nil {
 			recordLoadKeyCheckNeedToLoadError(dep.Logger, dep.Metric, tagName, needToLoadErr)
 			return needToLoadErr
@@ -286,7 +298,7 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 			return hashTag.meta.UpdateAccessTime(accessTime, accessMode)
 		}
 		startTime := time.Now()
-		loaded, count, loadErr := hashTag.Load(loadTimeout)
+		loaded, count, loadErr := hashTag.Load(ctx, loadTimeout)
 		if loadErr != nil {
 			err = loadErr
 			if errors.Is(err, errLoadKeysLockFailed) {
@@ -312,6 +324,9 @@ func Load(dep base.Dependency, tagName string, accessTime time.Time, accessMode 
 }
 
 func loadKeyToRedis(ctx context.Context, client *redis.ClusterClient, key string, value RedisValue) error {
+	ctx, span := base.GetTracer().Start(ctx, utility.FuncName())
+	defer span.End()
+	span.SetAttributes(base.MakeCodeAttributes()...)
 	ttl := value.TTL(time.Now())
 	if ttl == 0 {
 		return nil
