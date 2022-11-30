@@ -1,6 +1,8 @@
 server:
   enable_pprof: true
   is_debug: true
+  graceful_shutdown_wait_duration: "5s"
+  monitor_connection_interval: "1s"
 
   log:
     console:
