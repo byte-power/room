@@ -54,7 +54,7 @@ func main() {
 
 	sig := <-signalCh
 	logger.Info("signal received, closing service...", log.String("signal", sig.String()))
-	roomService.Stop()
+	roomService.Stop(config.GracefulShutdownWaitDuration)
 	logger.Info("room server is stopped, try to stop other related services...")
 	base.StopServices()
 	logger.Info("room server and related service are all closed")

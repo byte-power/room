@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytepower_room/base"
 	"bytepower_room/base/log"
 	"bytepower_room/utility"
@@ -10,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -20,8 +18,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"go.uber.org/ratelimit"
 )
 
 const (
@@ -55,7 +51,6 @@ type CollectEventService struct {
 
 	logger *log.Logger
 	metric *base.MetricClient
-	db     *base.DBCluster
 
 	wg     sync.WaitGroup
 	stopCh chan bool
@@ -70,7 +65,6 @@ type CollectEventService struct {
 func NewCollectEventService(
 	config *base.RoomCollectEventConfig,
 	logger *log.Logger, metric *base.MetricClient,
-	db *base.DBCluster,
 ) (*CollectEventService, error) {
 
 	if logger == nil {
@@ -78,9 +72,6 @@ func NewCollectEventService(
 	}
 	if metric == nil {
 		return nil, errors.New("metric should not be nil")
-	}
-	if db == nil {
-		return nil, errors.New("db should not be nil")
 	}
 	file, err := NewEventFile(
 		logger, metric, config.SaveFile.FileDirectory,
@@ -103,7 +94,6 @@ func NewCollectEventService(
 
 		logger: logger,
 		metric: metric,
-		db:     db,
 
 		wg:     sync.WaitGroup{},
 		stopCh: make(chan bool),
@@ -147,9 +137,6 @@ func (service *CollectEventService) Run() {
 
 	service.wg.Add(1)
 	go service.saveEventsToFile()
-
-	service.wg.Add(1)
-	go service.saveEventsToDB()
 
 	service.wg.Add(1)
 	go service.mointor(service.config.MonitorInterval)
@@ -291,227 +278,6 @@ func (service *CollectEventService) saveEventsToFile() {
 			return
 		}
 	}
-}
-
-func (service *CollectEventService) saveEventsToDB() {
-	jobName := "save events to db"
-	metricMsg := "save_events_to_db"
-
-	defer func() {
-		service.logger.Info(
-			fmt.Sprintf("stop %s", jobName),
-			log.String("time", time.Now().String()),
-		)
-		service.wg.Done()
-	}()
-	service.logger.Info(
-		fmt.Sprintf("start %s", jobName),
-		log.String("time", time.Now().String()),
-	)
-
-	directory := service.config.SaveFile.FileDirectory
-	interval := 5 * time.Second
-	for {
-		files, err := listEventFilesInDirectory(directory)
-		if err != nil {
-			service.recordError(metricMsg, err, map[string]string{"dir": directory})
-			time.Sleep(interval)
-			continue
-		}
-		for _, file := range files {
-			quit := service.saveEventsFromFileToDB(file, time.Now(), metricMsg)
-			if quit {
-				service.logger.Info(fmt.Sprintf("quit signal received, stop %s", jobName))
-				return
-			}
-		}
-		if atomic.LoadInt32(&service.stop) == 1 {
-			service.logger.Info(fmt.Sprintf("service is stopped, stop %s", jobName))
-			return
-		}
-		time.Sleep(interval)
-	}
-}
-
-func (service *CollectEventService) saveEventsFromFileToDB(file os.DirEntry, processStartTime time.Time, metricMsg string) bool {
-	directory := service.config.SaveFile.FileDirectory
-	needProcess, err := isEventFileNeededToProcess(file, service.config.SaveDB.FileAge, processStartTime)
-	if err != nil {
-		service.recordError(
-			fmt.Sprintf("%s.check_need_process", metricMsg),
-			err, map[string]string{"name": file.Name()},
-		)
-		return false
-	}
-	if !needProcess {
-		return false
-	}
-
-	name := file.Name()
-	service.logger.Info(
-		"start to save events from file to database",
-		log.String("name", name),
-		log.String("start_time", processStartTime.String()),
-	)
-	fullName := path.Join(directory, name)
-	count, quit, errs := service._saveEventsFromFileToDB(fullName, metricMsg)
-	if len(errs) != 0 {
-		service.recordError(
-			fmt.Sprintf("%s.error_count", metricMsg),
-			fmt.Errorf("%d errors", len(errs)),
-			map[string]string{
-				"name":  name,
-				"count": fmt.Sprint(count),
-			},
-		)
-	} else {
-		service.logger.Info(
-			"end to save events from file to database",
-			log.String("name", name),
-			log.Int("count", count),
-			log.String("duration", time.Since(processStartTime).String()),
-		)
-		service.recordSuccessWithCount(metricMsg, count)
-		service.recordSuccessWithDuration(metricMsg, time.Since(processStartTime))
-	}
-	if quit {
-		return quit
-	}
-	// rename file if has errors
-	if len(errs) != 0 {
-		backupName := path.Join(directory, fmt.Sprintf("%s.bak", name))
-		if err := os.Rename(fullName, backupName); err != nil {
-			service.recordError(
-				fmt.Sprintf("%s.backup_file", metricMsg),
-				err,
-				map[string]string{"name": fullName, "backup": backupName},
-			)
-		} else {
-			service.logger.Info(
-				"backup file success",
-				log.String("name", fullName),
-				log.String("backup", backupName),
-			)
-		}
-		return quit
-	}
-
-	// remove file if has errors
-	if err := os.Remove(fullName); err != nil {
-		service.recordError(
-			fmt.Sprintf("%s.remove_file", metricMsg),
-			err,
-			map[string]string{"name": fullName},
-		)
-	} else {
-		service.logger.Info(
-			"remove file success",
-			log.String("name", fullName),
-		)
-	}
-	return quit
-}
-
-func isEventFileNeededToProcess(file os.DirEntry, fileAge time.Duration, t time.Time) (bool, error) {
-	info, err := file.Info()
-	if err != nil {
-		return false, err
-	}
-	return info.ModTime().Add(fileAge).Before(t), nil
-}
-
-func (service *CollectEventService) _saveEventsFromFileToDB(name, metricMsg string) (int, bool, []error) {
-	var errors []error
-	var successCount int
-	var quit bool
-	file, err := os.Open(name)
-	if err != nil {
-		errors = append(errors, err)
-		service.recordError(fmt.Sprintf("%s.open_file", metricMsg), err, map[string]string{"name": name})
-		return successCount, quit, errors
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			service.recordError(
-				fmt.Sprintf("%s.close_file", metricMsg),
-				err,
-				map[string]string{"name": name},
-			)
-		}
-	}()
-	scanner := bufio.NewScanner(file)
-	ratelimitBucket := ratelimit.New(service.config.SaveDB.RateLimitPerSecond)
-loop:
-	for scanner.Scan() {
-		var event base.HashTagEvent
-		err := json.Unmarshal(scanner.Bytes(), &event)
-		if err != nil {
-			errors = append(errors, err)
-			service.recordError(
-				fmt.Sprintf("%s.unmarshal_event", metricMsg),
-				err,
-				map[string]string{
-					"name":  name,
-					"event": scanner.Text(),
-				},
-			)
-			continue
-		}
-		select {
-		case <-service.stopCh:
-			quit = true
-			break loop
-		default:
-			ratelimitBucket.Take()
-			if err := service.saveEvent(event); err != nil {
-				errors = append(errors, err)
-				service.recordError(
-					fmt.Sprintf("%s.save_event", metricMsg),
-					err,
-					map[string]string{
-						"name":  name,
-						"event": scanner.Text(),
-					})
-				continue
-			}
-			successCount += 1
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		service.recordError(fmt.Sprintf("%s.scan", metricMsg), err, map[string]string{"name": name})
-		errors = append(errors, err)
-	}
-	return successCount, quit, errors
-}
-
-func (service *CollectEventService) saveEvent(event base.HashTagEvent) error {
-	var err error
-	if err = event.Check(); err != nil {
-		return err
-	}
-	config := service.config.SaveDB
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.TimeoutMS)*time.Millisecond)
-	defer cancel()
-	retryInterval := time.Duration(config.RetryIntervalMS) * time.Millisecond
-	for i := 0; i < config.RetryTimes; i++ {
-		err = upsertHashTagKeysRecordByEvent(ctx, service.db, event, time.Now())
-		if err != nil {
-			if isRetryErrorForUpdateInTx(err) {
-				service.logger.Warn(
-					"save_event_to_db_retry",
-					log.Error(err),
-					log.String("event", event.String()),
-					log.Int("retry_times", i),
-				)
-				service.recordSuccessWithCount("save_event_to_db_retry", 1)
-				time.Sleep(retryInterval)
-				continue
-			}
-			return err
-		}
-		break
-	}
-	return err
 }
 
 func (service *CollectEventService) mointor(interval time.Duration) {
@@ -690,6 +456,10 @@ func (service *CollectEventService) recordGaugeMetric(metricName string, count i
 }
 
 func (service *CollectEventService) recordError(reason string, err error, info map[string]string) {
+	recordError(service.logger, service.metric, reason, err, info)
+}
+
+func recordError(logger *log.Logger, metric *base.MetricClient, reason string, err error, info map[string]string) {
 	logPairs := make([]log.LogPair, 0)
 	for key, value := range info {
 		logPairs = append(logPairs, log.String(key, value))
@@ -697,12 +467,12 @@ func (service *CollectEventService) recordError(reason string, err error, info m
 	if err != nil {
 		logPairs = append(logPairs, log.Error(err))
 	}
-	service.logger.Error(reason, logPairs...)
+	logger.Error(reason, logPairs...)
 
 	errorMetricName := "error"
-	service.metric.MetricIncrease(errorMetricName)
+	metric.MetricIncrease(errorMetricName)
 	specificErrorMetricName := fmt.Sprintf("%s.%s", errorMetricName, reason)
-	service.metric.MetricIncrease(specificErrorMetricName)
+	metric.MetricIncrease(specificErrorMetricName)
 }
 
 func (service *CollectEventService) recordWriteResponseError(err error, body []byte) {
@@ -711,10 +481,14 @@ func (service *CollectEventService) recordWriteResponseError(err error, body []b
 }
 
 func (service *CollectEventService) recordSuccessWithDuration(metricName string, duration time.Duration) {
-	service.metric.MetricIncrease(metricName)
+	recordSuccessWithDuration(service.metric, metricName, duration)
+}
+
+func recordSuccessWithDuration(metric *base.MetricClient, metricName string, duration time.Duration) {
+	metric.MetricIncrease(metricName)
 	if duration > time.Duration(0) {
 		durationMetricName := fmt.Sprintf("%s.duration", metricName)
-		service.metric.MetricTimeDuration(durationMetricName, duration)
+		metric.MetricTimeDuration(durationMetricName, duration)
 	}
 }
 
@@ -801,10 +575,6 @@ func writeSuccessResponse(writer http.ResponseWriter, count int) error {
 	}
 	_, err = writer.Write(bodyInBytes)
 	return err
-}
-
-func SaveEvent(ctx context.Context, db *base.DBCluster, event base.HashTagEvent, saveTime time.Time) error {
-	return upsertHashTagKeysRecordByEvent(ctx, db, event, saveTime)
 }
 
 type EventFile struct {

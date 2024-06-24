@@ -36,7 +36,7 @@ func main() {
 
 	config := base.GetCollectEventConfig()
 	serviceName := "collect_event_service"
-	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric, dep.DB)
+	collectEventService, err := service.NewCollectEventService(config, dep.Logger, dep.Metric)
 	if err != nil {
 		panic(err)
 	}

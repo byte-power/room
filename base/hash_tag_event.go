@@ -171,6 +171,10 @@ type HashTagEventServiceEventReportConfig struct {
 	RequestIdleConnTimeout    time.Duration
 
 	RequestMaxConn int `yaml:"request_max_conn"`
+
+	RequestMaxRetry          int `yaml:"request_max_retry"`
+	RequestMinRetryBackoffMS int `yaml:"request_min_retry_backoff_ms"`
+	RequestMaxRetryBackoffMS int `yaml:"request_max_retry_backoff_ms"`
 }
 
 func (config HashTagEventServiceEventReportConfig) check() error {
@@ -197,6 +201,21 @@ func (config HashTagEventServiceEventReportConfig) check() error {
 	}
 	if config.RequestMaxConn <= 0 {
 		return fmt.Errorf("request_max_conn=%d, it should be greater than 0", config.RequestMaxConn)
+	}
+	if config.RequestMaxRetry <= 0 {
+		return fmt.Errorf("request_max_retry=%d, it should be greater than 0", config.RequestMaxRetry)
+	}
+
+	if v := config.RequestMinRetryBackoffMS; v <= 0 {
+		return fmt.Errorf("request_min_retry_backoff_ms=%d, it should be > 0", v)
+	}
+	if v := config.RequestMaxRetryBackoffMS; v <= 0 {
+		return fmt.Errorf("request_max_retry_backoff_ms=%d, it should be > 0", v)
+	}
+	if config.RequestMinRetryBackoffMS > config.RequestMaxRetryBackoffMS {
+		return fmt.Errorf(
+			"request_min_retry_backoff_ms=%d, request_max_retry_backoff_ms=%d, request_min_retry_backoff_ms shoule be less than or equal to request_max_retry_backoff_ms",
+			config.RequestMinRetryBackoffMS, config.RequestMaxRetryBackoffMS)
 	}
 	return nil
 }
@@ -411,8 +430,27 @@ func (service *HashTagEventService) _reportEvents(events []HashTagEvent) error {
 	if err != nil {
 		return err
 	}
-	requestBody := bytes.NewReader(bs)
-	resp, err := service.client.Post(service.config.EventReport.URL, HTTPContentTypeJSON, requestBody)
+
+	for attempt := 0; attempt < service.config.EventReport.RequestMaxRetry; attempt++ {
+		if attempt > 0 {
+			waitBeforeRetryDuration := utility.RetryBackoff(
+				uint(attempt),
+				time.Duration(service.config.EventReport.RequestMinRetryBackoffMS),
+				time.Duration(service.config.EventReport.RequestMaxRetryBackoffMS))
+
+			time.Sleep(waitBeforeRetryDuration)
+		}
+		err = reportRequest(service.client, service.config.EventReport.URL, bs)
+		if err != nil {
+			continue
+		}
+	}
+	return err
+}
+
+func reportRequest(client *http.Client, url string, body []byte) error {
+	requestBody := bytes.NewReader(body)
+	resp, err := client.Post(url, HTTPContentTypeJSON, requestBody)
 	if err != nil {
 		return err
 	}

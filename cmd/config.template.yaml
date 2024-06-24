@@ -1,6 +1,8 @@
 server:
   enable_pprof: true
   is_debug: true
+  graceful_shutdown_wait_duration: "5s"
+  monitor_connection_interval: "1s"
 
   log:
     console:
@@ -27,6 +29,9 @@ server:
       request_conn_keep_alive_interval: "30s"
       request_idle_conn_timeout: "90s"
       request_max_conn: 100
+      request_max_retry: 5
+      request_min_retry_backoff_ms: 1
+      request_max_retry_backoff_ms: 10
     agg_interval : "1m"
     buffer_limit: 10240000
     monitor_interval: "15s"
@@ -107,17 +112,27 @@ collect_event:
     write_timeout_ms: 1000
     idle_timeout_ms: 1000
 
-  save_db:
-    retry_times: 3
-    retry_interval_ms: 20
-    timeout_ms: 2000
-    file_age: "5m"
-    rate_limit_per_second: 100
-
   save_file:
     max_event_count: 1000
     max_file_age: "10m"
     file_directory: "/data/room"
+
+save_event:
+  metric:
+    prefix: "bytepower_room.save_event"
+    host: "127.0.0.1:8125"
+
+  log:
+    console:
+      level: debug
+
+  save_db:
+    retry_times: 3
+    retry_interval_ms: 20
+    timeout_ms: 2000
+    file_age: "20m"
+    file_directory: "/data/room"
+    rate_limit_per_second: 100
 
   db_cluster:
     sharding_count: 5

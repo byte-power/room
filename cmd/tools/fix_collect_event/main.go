@@ -42,7 +42,6 @@ func main() {
 	if err = base.InitCollectEvent(*configPath); err != nil {
 		panic(err)
 	}
-	db := base.GetCollectEventDependency().DB
 
 	successCount := 0
 	failedCount := 0
@@ -52,7 +51,7 @@ func main() {
 			"start_save_event:%s, keys=%v, at_is_zero=%t, wt_is_zero=%t\n",
 			event.String(), event.Keys, event.AccessTime.IsZero(), event.WriteTime.IsZero())
 		if !*dryRun {
-			err = service.SaveEvent(context.TODO(), db, event, time.Now())
+			err = service.SaveEvent(context.TODO(), event, time.Now())
 			if err != nil {
 				failedCount += 1
 				logger.Printf("save_event_error:%s, event:%s\n", err.Error(), event.String())

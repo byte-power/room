@@ -16,6 +16,7 @@ import (
 var serverDependency Dependency
 var taskDependency Dependency
 var collectEventDependency CollectEventDependency
+var saveEventDependency SaveEventDependency
 
 var hashTagEventService *HashTagEventService
 var hashTagLoadedCache *cache.Cache
@@ -23,6 +24,7 @@ var hashTagLoadedCache *cache.Cache
 var serverConfig *RoomServerConfig
 var taskConfig *RoomTaskConfig
 var collectEventConfig *RoomCollectEventConfig
+var saveEventConfig *RoomSaveEventConfig
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -38,6 +40,9 @@ func initService(
 	metric, err := InitMetric(metricConfig)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("init_metric.%w", err)
+	}
+	if dbClusterConfig.IsEmpty() {
+		return logger, metric, nil, nil
 	}
 	databaseCluster, err := NewDBClusterFromConfig(dbClusterConfig, logger, metric)
 	if err != nil {
@@ -147,13 +152,12 @@ func InitCollectEvent(configPath string) error {
 
 	logger, metric, dbCluster, err := initService(
 		"room.collect_event", collectEventConfig.Log,
-		collectEventConfig.Metric, collectEventConfig.DB)
+		collectEventConfig.Metric, DBClusterConfig{})
 	if err != nil {
 		return err
 	}
 
 	collectEventDependency = CollectEventDependency{
-		DB:     dbCluster,
 		Logger: logger,
 		Metric: metric,
 	}
@@ -161,6 +165,39 @@ func InitCollectEvent(configPath string) error {
 	logger.Info(
 		"init room collect event service",
 		log.String("config", fmt.Sprintf("%+v", collectEventConfig)),
+		log.String("database", dbCluster.String()),
+	)
+
+	return nil
+}
+
+func InitSaveEvent(configPath string) error {
+	config, err := newConfigFromFile(configPath)
+	if err != nil {
+		return err
+	}
+
+	saveEventConfig = &config.SaveEvent
+	if err = saveEventConfig.init(); err != nil {
+		return err
+	}
+
+	logger, metric, dbCluster, err := initService(
+		"room.save_event", saveEventConfig.Log,
+		saveEventConfig.Metric, saveEventConfig.DB)
+	if err != nil {
+		return err
+	}
+
+	saveEventDependency = SaveEventDependency{
+		DB:     dbCluster,
+		Logger: logger,
+		Metric: metric,
+	}
+
+	logger.Info(
+		"init room save event service",
+		log.String("config", fmt.Sprintf("%+v", saveEventConfig)),
 		log.String("database", dbCluster.String()),
 	)
 
@@ -185,6 +222,10 @@ func GetTaskConfig() *RoomTaskConfig {
 
 func GetCollectEventConfig() *RoomCollectEventConfig {
 	return collectEventConfig
+}
+
+func GetSaveEventConfig() *RoomSaveEventConfig {
+	return saveEventConfig
 }
 
 func StartServices() {
@@ -291,12 +332,31 @@ func GetTaskDependency() Dependency {
 }
 
 type CollectEventDependency struct {
-	DB     *DBCluster
 	Logger *log.Logger
 	Metric *MetricClient
 }
 
 func (dep CollectEventDependency) Check() error {
+	if dep.Logger == nil {
+		return ErrDepLoggerNull
+	}
+	if dep.Metric == nil {
+		return ErrDepMetricNull
+	}
+	return nil
+}
+
+func GetCollectEventDependency() CollectEventDependency {
+	return collectEventDependency
+}
+
+type SaveEventDependency struct {
+	DB     *DBCluster
+	Logger *log.Logger
+	Metric *MetricClient
+}
+
+func (dep SaveEventDependency) Check() error {
 	if dep.DB == nil {
 		return ErrDepDBNull
 	}
@@ -309,6 +369,6 @@ func (dep CollectEventDependency) Check() error {
 	return nil
 }
 
-func GetCollectEventDependency() CollectEventDependency {
-	return collectEventDependency
+func GetSaveEventDependency() SaveEventDependency {
+	return saveEventDependency
 }

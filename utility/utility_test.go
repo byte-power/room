@@ -1,7 +1,9 @@
 package utility
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -166,4 +168,26 @@ func TestMergeStringSliceAndRemoveDuplicateItems(t *testing.T) {
 	result = MergeStringSliceAndRemoveDuplicateItems(slice)
 	assert.Equal(t, len(uniqueItems), len(result))
 	assert.ElementsMatch(t, result, uniqueItems)
+}
+
+func TestRetryBackOff(t *testing.T) {
+	min := 2 * time.Second
+	max := 20 * time.Second
+	testCases := []struct {
+		retry    int
+		expected func(t time.Duration) bool
+	}{
+		{-1, func(t time.Duration) bool { return t == max }},
+		{0, func(t time.Duration) bool { return min <= t && t < min*2 }},
+		{1, func(t time.Duration) bool { return min <= t && t < min*3 }},
+		{2, func(t time.Duration) bool { return min <= t && t < min*5 }},
+		{3, func(t time.Duration) bool { return min <= t && t < min*9 }},
+		{4, func(t time.Duration) bool { return min <= t && t <= max }},
+		{5, func(t time.Duration) bool { return min <= t && t <= max }},
+	}
+	for _, testCase := range testCases {
+		r := RetryBackoff(uint(testCase.retry), min, max)
+		fmt.Printf("RetryBackOff retry=%d, min=%s, max=%s, result=%s\n", testCase.retry, min, max, r)
+		assert.True(t, testCase.expected(r))
+	}
 }

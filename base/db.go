@@ -18,6 +18,10 @@ type DBClusterConfig struct {
 	Shardings     []DBConfig `yaml:"shardings"`
 }
 
+func (config DBClusterConfig) IsEmpty() bool {
+	return config.ShardingCount == 0 && len(config.Shardings) == 0
+}
+
 func (config DBClusterConfig) check() error {
 	if config.ShardingCount <= 0 {
 		return errors.New("sharding_count should be greater than 0")
