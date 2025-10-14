@@ -9,13 +9,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/spf13/pflag"
 )
 
-var key = pflag.StringP("key", "k", "{a}:counter", "tested key")
-var host = pflag.StringP("host", "h", "localhost", "room server host")
-var port = pflag.StringP("port", "p", "6379", "room server port")
+var (
+	key  = pflag.StringP("key", "k", "{a}:counter", "tested key")
+	host = pflag.StringP("host", "h", "localhost", "room server host")
+	port = pflag.StringP("port", "p", "6379", "room server port")
+)
 
 func main() {
 	pflag.Parse()

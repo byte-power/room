@@ -1,28 +1,35 @@
 package base
 
 import (
-	"bytepower_room/base/log"
 	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"bytepower_room/base/log"
+
 	jsoniter "github.com/json-iterator/go"
 	"github.com/patrickmn/go-cache"
+	"github.com/redis/go-redis/v9"
 )
 
-var serverDependency Dependency
-var taskDependency Dependency
-var collectEventDependency CollectEventDependency
+var (
+	serverDependency       Dependency
+	taskDependency         Dependency
+	collectEventDependency CollectEventDependency
+)
 
-var hashTagEventService *HashTagEventService
-var hashTagLoadedCache *cache.Cache
+var (
+	hashTagEventService *HashTagEventService
+	hashTagLoadedCache  *cache.Cache
+)
 
-var serverConfig *RoomServerConfig
-var taskConfig *RoomTaskConfig
-var collectEventConfig *RoomCollectEventConfig
+var (
+	serverConfig       *RoomServerConfig
+	taskConfig         *RoomTaskConfig
+	collectEventConfig *RoomCollectEventConfig
+)
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
@@ -30,7 +37,6 @@ func initService(
 	loggerName string, logConfig map[string]interface{},
 	metricConfig MetricConfig, dbClusterConfig DBClusterConfig,
 ) (*log.Logger, *MetricClient, *DBCluster, error) {
-
 	logger, err := parseLogger(loggerName, logConfig)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("init_logger.%w", err)
@@ -195,12 +201,16 @@ func StopServices() {
 	hashTagEventService.Stop()
 }
 
+type redisCtxKey string
+
 const (
-	redisCommandStartTimeContextKey  = "command_start_time"
-	redisPipelineStartTimeContextKey = "pipeline_start_time"
-	redisCommandDurationMetricKey    = "redis.command.duration"
-	redisPipelineDurationMetricKey   = "redis.pipeline.duration"
+	redisCommandStartTimeContextKey  = redisCtxKey("command_start_time")
+	redisPipelineStartTimeContextKey = redisCtxKey("pipeline_start_time")
+	redisCommandDurationMetricKey    = redisCtxKey("redis.command.duration")
+	redisPipelineDurationMetricKey   = redisCtxKey("redis.pipeline.duration")
 )
+
+var _ redis.Hook = (*redisRecordHook)(nil)
 
 type redisRecordHook struct {
 	metricClient *MetricClient
@@ -211,6 +221,10 @@ func newRedisRecordHook(metricClient *MetricClient, logger *log.Logger) redisRec
 	return redisRecordHook{metricClient: metricClient, logger: logger}
 }
 
+func (hook redisRecordHook) DialHook(dialHook redis.DialHook) redis.DialHook {
+	return dialHook
+}
+
 func (hook redisRecordHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
 	return context.WithValue(ctx, redisCommandStartTimeContextKey, time.Now()), nil
 }
@@ -219,13 +233,30 @@ func (hook redisRecordHook) AfterProcess(ctx context.Context, cmd redis.Cmder) e
 	if startTime, ok := ctx.Value(redisCommandStartTimeContextKey).(time.Time); ok {
 		duration := time.Since(startTime)
 		hook.logger.Debug(
-			redisCommandDurationMetricKey,
+			string(redisCommandDurationMetricKey),
 			log.String("command", cmd.String()),
 			log.String("duration", duration.String()),
 		)
-		hook.metricClient.MetricTimeDuration(redisCommandDurationMetricKey, duration)
+		hook.metricClient.MetricTimeDuration(string(redisCommandDurationMetricKey), duration)
 	}
 	return nil
+}
+
+func (hook redisRecordHook) ProcessHook(processHook redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		ctx = context.WithValue(ctx, redisCommandStartTimeContextKey, time.Now())
+		err := processHook(ctx, cmd)
+		if startTime, ok := ctx.Value(redisCommandStartTimeContextKey).(time.Time); ok {
+			duration := time.Since(startTime)
+			hook.logger.Debug(
+				string(redisCommandDurationMetricKey),
+				log.String("command", cmd.String()),
+				log.String("duration", duration.String()),
+			)
+			hook.metricClient.MetricTimeDuration(string(redisCommandDurationMetricKey), duration)
+		}
+		return err
+	}
 }
 
 func (hook redisRecordHook) BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmder) (context.Context, error) {
@@ -234,6 +265,7 @@ func (hook redisRecordHook) BeforeProcessPipeline(ctx context.Context, cmds []re
 
 func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []redis.Cmder) error {
 	if startTime, ok := ctx.Value(redisPipelineStartTimeContextKey).(time.Time); ok {
+		duration := time.Since(startTime)
 		var sb strings.Builder
 		sb.WriteString("[")
 		for _, cmd := range cmds {
@@ -241,15 +273,38 @@ func (hook redisRecordHook) AfterProcessPipeline(ctx context.Context, cmds []red
 			sb.WriteString(" ")
 		}
 		sb.WriteString("]")
-		duration := time.Since(startTime)
 		hook.logger.Debug(
-			redisPipelineDurationMetricKey,
+			string(redisPipelineDurationMetricKey),
 			log.String("commands", sb.String()),
 			log.String("duration", duration.String()),
 		)
-		hook.metricClient.MetricTimeDuration(redisPipelineDurationMetricKey, duration)
+		hook.metricClient.MetricTimeDuration(string(redisPipelineDurationMetricKey), duration)
 	}
 	return nil
+}
+
+func (hook redisRecordHook) ProcessPipelineHook(processPipelineHook redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		ctx = context.WithValue(ctx, redisPipelineStartTimeContextKey, time.Now())
+		err := processPipelineHook(ctx, cmds)
+		if startTime, ok := ctx.Value(redisPipelineStartTimeContextKey).(time.Time); ok {
+			duration := time.Since(startTime)
+			var sb strings.Builder
+			sb.WriteString("[")
+			for _, cmd := range cmds {
+				sb.WriteString(cmd.String())
+				sb.WriteString(" ")
+			}
+			sb.WriteString("]")
+			hook.logger.Debug(
+				string(redisPipelineDurationMetricKey),
+				log.String("commands", sb.String()),
+				log.String("duration", duration.String()),
+			)
+			hook.metricClient.MetricTimeDuration(string(redisPipelineDurationMetricKey), duration)
+		}
+		return err
+	}
 }
 
 type Dependency struct {

@@ -1,11 +1,12 @@
 package base
 
 import (
-	"bytepower_room/base/log"
 	"fmt"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"bytepower_room/base/log"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type RedisClusterConfig struct {
@@ -115,12 +116,14 @@ func initRedisOption(config RedisClusterConfig) (*redis.ClusterOptions, error) {
 		PoolTimeout:  time.Duration(config.Connection.PoolTimeoutMS) * time.Millisecond,
 		PoolSize:     config.Connection.PoolSize,
 		MaxRetries:   config.Connection.MaxRetries,
-		MaxConnAge:   time.Duration(config.Connection.MaxConnAgeSeconds) * time.Second,
+		// https://github.com/redis/go-redis/blob/3ad9f9cb2334227d5e59f5b7fc8e1612396756d2/RELEASE-NOTES.md?plain=1#L519
+		ConnMaxLifetime: time.Duration(config.Connection.MaxConnAgeSeconds) * time.Second,
 	}
+	// https://github.com/redis/go-redis/blob/3ad9f9cb2334227d5e59f5b7fc8e1612396756d2/RELEASE-NOTES.md?plain=1#L520C40-L520C55
 	if config.Connection.IdleTimeoutSecond == -1 {
-		opt.IdleTimeout = -1
+		opt.ConnMaxIdleTime = -1
 	} else {
-		opt.IdleTimeout = time.Duration(config.Connection.IdleTimeoutSecond) * time.Second
+		opt.ConnMaxIdleTime = time.Duration(config.Connection.IdleTimeoutSecond) * time.Second
 	}
 	if config.Connection.MinRetryBackoffMS == -1 {
 		opt.MinRetryBackoff = -1
@@ -132,10 +135,12 @@ func initRedisOption(config RedisClusterConfig) (*redis.ClusterOptions, error) {
 	} else {
 		opt.MaxRetryBackoff = time.Duration(config.Connection.MaxRetryBackoffMS) * time.Millisecond
 	}
-	if config.Connection.IdleCheckFrequencySeconds == -1 {
-		opt.IdleCheckFrequency = -1
-	} else {
-		opt.IdleCheckFrequency = time.Duration(config.Connection.IdleCheckFrequencySeconds) * time.Second
-	}
+	// IdleCheckFrequency is not supported in redis cluster
+	// https://github.com/redis/go-redis/discussions/2635
+	// if config.Connection.IdleCheckFrequencySeconds == -1 {
+	// 	opt.IdleCheckFrequency = -1
+	// } else {
+	// 	opt.IdleCheckFrequency = time.Duration(config.Connection.IdleCheckFrequencySeconds) * time.Second
+	// }
 	return opt, nil
 }

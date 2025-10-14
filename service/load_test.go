@@ -5,17 +5,16 @@ import (
 	"bytepower_room/commands"
 	"bytepower_room/utility"
 	"context"
-	"math"
-	"strconv"
-
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 

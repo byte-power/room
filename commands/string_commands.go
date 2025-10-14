@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 type keyExistMode string
@@ -352,7 +352,6 @@ func (command *IncrByFloatCommand) WriteKeys() []string {
 
 func (command *IncrByFloatCommand) Cmd() redis.Cmder {
 	return redis.NewStringCmd(contextTODO, command.name, command.key, command.increment)
-
 }
 
 type MGetCommand struct {

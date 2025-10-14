@@ -5,11 +5,11 @@ go 1.14
 require (
 	github.com/byte-power/gorich v1.0.5
 	github.com/go-pg/pg/v10 v10.7.3
-	github.com/go-redis/redis/v8 v8.4.3
 	github.com/gogf/greuse v1.1.0
 	github.com/json-iterator/go v1.1.10
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/redis/go-redis/v9 v9.14.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.6.1
 	github.com/tidwall/redcon v1.4.4
@@ -22,7 +22,7 @@ require (
 	gopkg.in/yaml.v2 v2.3.0
 )
 
-replace github.com/go-redis/redis/v8 v8.4.3 => github.com/byte-power/redis/v8 v8.4.3
+replace github.com/redis/go-redis/v9 v9.14.0 => github.com/byte-power/redis/v9 v9.14.1-0.20251014040014-53114204a5bc
 
 replace github.com/vmihailenco/bufpool v0.1.11 => github.com/byte-power/bufpool v0.1.13
 

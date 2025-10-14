@@ -1,15 +1,16 @@
 package service
 
 import (
-	"bytepower_room/base"
-	"bytepower_room/utility"
 	"context"
 	"math"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"bytepower_room/base"
+	"bytepower_room/utility"
+
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,13 +36,13 @@ func testGenerateSetValueForRedis(count int) []interface{} {
 	return testGenerateListValueForRedis(count)
 }
 
-func testGenerateZSetValueForRedis(count int) ([]*redis.Z, map[string]float64) {
-	zset := make([]*redis.Z, count)
+func testGenerateZSetValueForRedis(count int) ([]redis.Z, map[string]float64) {
+	zset := make([]redis.Z, count)
 	m := make(map[string]float64)
 	for i := 0; i < count; i++ {
 		member := utility.GenerateUUID(10)
 		score := testGenerateRandFloat(0, 100)
-		z := &redis.Z{Member: member, Score: score}
+		z := redis.Z{Member: member, Score: score}
 		zset[i] = z
 		m[member] = score
 	}
@@ -211,7 +212,7 @@ func TestSerializeNonStringValue(t *testing.T) {
 
 func TestGetValueFromRedis(t *testing.T) {
 	redisCluster := base.GetTaskDependency().Redis
-	//get not exist key
+	// get not exist key
 	key := "{a}not_exist"
 	value, err := getValueFromRedis(redisCluster, key)
 	assert.Nil(t, err)
@@ -303,7 +304,7 @@ func TestGetValueFromRedis(t *testing.T) {
 	}
 	defer redisCluster.Del(context.TODO(), key)
 	for _, z := range zsetValue {
-		redisCluster.ZAdd(context.TODO(), key, &z)
+		redisCluster.ZAdd(context.TODO(), key, z)
 	}
 	redisCluster.Expire(context.TODO(), key, 10*time.Second)
 	value, err = getValueFromRedis(redisCluster, key)

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 var contextTODO = context.TODO()
@@ -102,7 +102,7 @@ var supportedCommands = map[string]NewCommandFunc{
 	"hstrlen":      NewHStrlenCommand,
 	"hvals":        NewHValsCommand,
 
-	//zset commands
+	// zset commands
 	"zadd":             NewZAddCommand,
 	"zcard":            NewZCardCommand,
 	"zcount":           NewZCountCommand,

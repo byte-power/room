@@ -1,19 +1,22 @@
 package service
 
 import (
-	"bytepower_room/base"
-	"bytepower_room/utility"
 	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"bytepower_room/base"
+	"bytepower_room/utility"
+
+	"github.com/redis/go-redis/v9"
 )
 
-var errDataFormatError = errors.New("data format is invalid")
-var errLoadKeysLockFailed = errors.New("do not get load lock")
+var (
+	errDataFormatError    = errors.New("data format is invalid")
+	errLoadKeysLockFailed = errors.New("do not get load lock")
+)
 
 var (
 	ErrEmptyHashTag      = errors.New("hash tag is empty")
@@ -412,7 +415,7 @@ func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 		if len(slice)%2 != 0 {
 			return errDataFormatError
 		}
-		var zsetValue []*redis.Z
+		var zsetValue []redis.Z
 		for index := 0; index < len(slice)-1; index += 2 {
 			member := slice[index]
 			scoreStr, ok := slice[index+1].(string)
@@ -423,7 +426,7 @@ func loadZSetToRedis(ctx context.Context, client *redis.ClusterClient, key strin
 			if err != nil {
 				return errDataFormatError
 			}
-			item := &redis.Z{Member: member, Score: score}
+			item := redis.Z{Member: member, Score: score}
 			zsetValue = append(zsetValue, item)
 		}
 		pipeline.ZAdd(ctx, key, zsetValue...)

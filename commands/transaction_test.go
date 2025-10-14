@@ -4,7 +4,7 @@ import (
 	"bytepower_room/base"
 	"testing"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -111,7 +111,8 @@ func TestNestedMulti(t *testing.T) {
 		t,
 		RESPData{
 			DataType: ArrayRespType,
-			Value:    []RESPData{{DataType: SimpleStringRespType, Value: "OK"}}},
+			Value:    []RESPData{{DataType: SimpleStringRespType, Value: "OK"}},
+		},
 		result)
 	testEmptyKeysInRedis(key)
 }
@@ -264,7 +265,8 @@ func TestConcurrentTransactionSuccess(t *testing.T) {
 				{DataType: BulkStringRespType, Value: "10"},
 				{DataType: SimpleStringRespType, Value: "OK"},
 				{DataType: BulkStringRespType, Value: "100"},
-			}},
+			},
+		},
 		result1,
 	)
 	assert.Equal(
@@ -276,7 +278,8 @@ func TestConcurrentTransactionSuccess(t *testing.T) {
 				{DataType: BulkStringRespType, Value: "x"},
 				{DataType: SimpleStringRespType, Value: "OK"},
 				{DataType: BulkStringRespType, Value: "y"},
-			}},
+			},
+		},
 		result2,
 	)
 	assert.True(t, tx1.IsClosed())
@@ -372,7 +375,6 @@ func TestTransactionFailSameClient(t *testing.T) {
 
 	testCloseTransaction(t, transaction)
 	testEmptyKeysInRedis("{a}1")
-
 }
 
 // test commands:
@@ -402,7 +404,6 @@ func TestDiscard(t *testing.T) {
 	command, _ = NewGetCommand([]string{"get", "{a}1"})
 	result = ExecuteCommand(dep.Redis, command)
 	assert.Equal(t, RESPData{DataType: NilRespType, Value: nil}, result)
-
 }
 
 // test commands:

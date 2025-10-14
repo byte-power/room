@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/ratelimit"
 )
 
@@ -368,8 +368,8 @@ const (
 func recordHashTagKeysSizeInfo(
 	logger *log.Logger, metric *base.MetricClient,
 	hashTagSizeInfo hashTagKeysSizeInfo,
-	config base.SyncKeyTaskConfig) {
-
+	config base.SyncKeyTaskConfig,
+) {
 	metric.MetricGauge(metricHashTagBytes, hashTagSizeInfo.memoryBytes)
 	metric.MetricGauge(metricHashTagKeys, len(hashTagSizeInfo.keysSizeInfo))
 	logSubject := "hash_tag_info"

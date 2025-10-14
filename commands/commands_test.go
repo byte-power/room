@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytepower_room/base"
 	"context"
 	"log"
 	"os"
@@ -9,7 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-redis/redis/v8"
+	"bytepower_room/base"
+
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -41,6 +42,7 @@ func TestCommands(t *testing.T) {
 		}
 	}
 }
+
 func TestExecuteCommands(t *testing.T) {
 	dep := base.GetServerDependency()
 	for _, testCase := range testExecuteCommandCases {
@@ -2037,7 +2039,8 @@ var testExecuteCommandCases = []testExecuteCommandCase{
 				}, {
 					DataType: BulkStringRespType,
 					Value:    "d",
-				}},
+				},
+			},
 		},
 		compareFn: testCompareEqual,
 		emptyKeys: []string{"{a}list1"},
@@ -2056,7 +2059,8 @@ var testExecuteCommandCases = []testExecuteCommandCase{
 				}, {
 					DataType: BulkStringRespType,
 					Value:    "c",
-				}},
+				},
+			},
 		},
 		compareFn: testCompareEqual,
 		emptyKeys: []string{"{a}list1"},
@@ -2203,7 +2207,8 @@ var testExecuteCommandCases = []testExecuteCommandCase{
 				}, {
 					DataType: BulkStringRespType,
 					Value:    "d",
-				}},
+				},
+			},
 		},
 		compareFn: testCompareSameElement,
 		emptyKeys: []string{"{a}set1"},
@@ -2228,7 +2233,8 @@ var testExecuteCommandCases = []testExecuteCommandCase{
 				}, {
 					DataType: BulkStringRespType,
 					Value:    "d",
-				}},
+				},
+			},
 		},
 		compareFn: testCompareSameElement,
 		emptyKeys: []string{"{a}set1"},
@@ -2346,7 +2352,8 @@ var testExecuteCommandCases = []testExecuteCommandCase{
 				}, {
 					DataType: BulkStringRespType,
 					Value:    "d",
-				}},
+				},
+			},
 		},
 		compareFn: testCompareSameElementAndOrder,
 		emptyKeys: []string{"{a}hash1"},
@@ -2394,13 +2401,14 @@ var testExecuteCommandCases = []testExecuteCommandCase{
 		args:        []string{"hkeys", "{a}hash1"},
 		respData: RESPData{
 			DataType: ArrayRespType,
-			Value: []RESPData{{
-				DataType: BulkStringRespType,
-				Value:    "a",
-			}, {
-				DataType: BulkStringRespType,
-				Value:    "b",
-			},
+			Value: []RESPData{
+				{
+					DataType: BulkStringRespType,
+					Value:    "a",
+				}, {
+					DataType: BulkStringRespType,
+					Value:    "b",
+				},
 			},
 		},
 		compareFn: testCompareSameElement,
@@ -3229,10 +3237,10 @@ func testNewZSetKey(input interface{}) {
 	slice := input.([]interface{})
 	key := slice[0].(string)
 	values := slice[1:]
-	zSlice := make([]*redis.Z, len(values)/2)
+	zSlice := make([]redis.Z, len(values)/2)
 	for i := 0; i < len(values)-1; i += 2 {
 		score, _ := strconv.ParseFloat(values[i+1].(string), 64)
-		z := &redis.Z{
+		z := redis.Z{
 			Member: values[i],
 			Score:  score,
 		}
@@ -3286,7 +3294,6 @@ func TestCommandKeysHashTag(t *testing.T) {
 			assert.Equal(t, testCase.err, err)
 		}
 	}
-
 }
 
 type testCommandHashTagCase struct {

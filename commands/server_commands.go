@@ -3,7 +3,7 @@ package commands
 import (
 	"bytepower_room/utility"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 type CommandCommand struct {
